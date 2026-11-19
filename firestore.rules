@@ -1,0 +1,269 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+               (request.auth.token.email == 'mdmasudranabd80814@gmail.com' && request.auth.token.email_verified == true) ||
+               request.auth.uid == 'system_admin' ||
+               exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+             );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validation Helpers ---
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'name', 'phone', 'points', 'role', 'createdAt']) &&
+             data.keys().hasOnly(['id', 'name', 'phone', 'email', 'password', 'points', 'role', 'avatar', 'createdAt', 'totalWithdrawn', 'reelsWatchedCount', 'referralCode', 'referredBy', 'referralBonusClaimed', 'isVerified', 'lastActive', 'paymentMethod', 'paymentAccountNumber', 'levelName', 'multiplier', 'dailyClaimedDate', 'lastPage', 'totalSessions', 'followersCount', 'followingCount', 'followers', 'following', 'completedTaskIds', 'dailyReelClaimDate', 'dailyReelClaimsCount', 'dailyReelPointsEarned', 'loginOfferClaimed', 'loginOfferCampaignId']) &&
+             (data.id == request.auth.uid || isAdmin()) &&
+             data.name is string && data.name.size() <= 100 &&
+             data.phone is string && data.phone.size() <= 20 &&
+             data.points is number && data.points >= 0 &&
+             data.role in ['user', 'admin'] &&
+             data.createdAt is string && data.createdAt.size() <= 64 &&
+             (!('completedTaskIds' in data) || (data.completedTaskIds is list && data.completedTaskIds.size() <= 500)) &&
+             (!('dailyReelClaimDate' in data) || (data.dailyReelClaimDate is string && data.dailyReelClaimDate.size() <= 20)) &&
+             (!('dailyReelClaimsCount' in data) || (data.dailyReelClaimsCount is number && data.dailyReelClaimsCount >= 0)) &&
+             (!('dailyReelPointsEarned' in data) || (data.dailyReelPointsEarned is number && data.dailyReelPointsEarned >= 0)) &&
+             (!('loginOfferClaimed' in data) || data.loginOfferClaimed is bool) &&
+             (!('loginOfferCampaignId' in data) || (data.loginOfferCampaignId is string && data.loginOfferCampaignId.size() <= 100));
+    }
+
+    function isValidReel(data) {
+      return data.keys().hasAll(['title', 'creatorName', 'category', 'thumbnailUrl', 'createdAt', 'pointsReward']) &&
+             data.keys().hasOnly(['id', 'userId', 'title', 'creatorName', 'creatorHandle', 'creatorAvatar', 'isVerified', 'category', 'thumbnailUrl', 'videoUrl', 'likesCount', 'commentsCount', 'sharesCount', 'pointsReward', 'createdAt', 'viewsCount', 'audioTrack', 'caption', 'hashtags', 'timeAgo', 'isEarningEnabled', 'isSpecialOffer', 'specialOfferBadge', 'customWatchSeconds']) &&
+             (data.userId == request.auth.uid || data.userId == 'system_admin' || data.userId == 'usr_bd_01' || isAdmin()) &&
+             data.title is string && data.title.size() <= 200 &&
+             data.category in ['সকল', 'ট্রেন্ডিং', 'কমেডি', 'গেমিং', 'রান্না', 'শিক্ষা'] &&
+             data.pointsReward is number &&
+             data.createdAt is string &&
+             (data.hashtags == null || data.hashtags is list);
+    }
+
+    function isValidComment(data) {
+      return data.keys().hasAll(['reelId', 'userId', 'userName', 'text', 'createdAt']) &&
+             data.keys().hasOnly(['id', 'reelId', 'userId', 'userName', 'userAvatar', 'text', 'createdAt', 'likes', 'timeAgo']) &&
+             data.userId == request.auth.uid &&
+             data.text is string && data.text.size() <= 500;
+    }
+
+    function isValidWithdrawal(data) {
+      return data.keys().hasAll(['userId', 'amountBDT', 'status', 'createdAt']) &&
+             data.keys().hasOnly(['userId', 'userName', 'userPhone', 'accountNumber', 'accountType', 'method', 'pointsDeducted', 'amountBDT', 'status', 'createdAt', 'transactionId', 'rejectionReason']) &&
+             data.userId == request.auth.uid &&
+             data.amountBDT is number && data.amountBDT > 0 &&
+             data.status == 'pending' &&
+             data.createdAt is string;
+    }
+
+    function isValidDeposit(data) {
+      return data.keys().hasAll(['userId', 'amountBDT', 'status', 'createdAt']) &&
+             data.keys().hasOnly(['userId', 'userName', 'userPhone', 'method', 'amountBDT', 'pointsToAdd', 'transactionId', 'senderNumber', 'status', 'createdAt']) &&
+             data.userId == request.auth.uid &&
+             data.amountBDT is number && data.amountBDT > 0 &&
+             data.status == 'pending' &&
+             data.createdAt is string;
+    }
+
+    // --- Match Blocks ---
+
+    match /users/{userId} {
+      allow get, list: if isSignedIn() || isAdmin();
+      allow create: if (isOwner(userId) && isValidId(userId) && isValidUser(incoming()) && incoming().role == 'user') || isAdmin();
+      allow update: if (isOwner(userId) && isValidId(userId) && isValidUser(incoming()) && incoming().role == existing().role && (!('totalWithdrawn' in existing()) || incoming().totalWithdrawn == existing().totalWithdrawn)) ||
+                     (isSignedIn() && isValidId(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['followersCount', 'followers', 'followingCount', 'following'])) ||
+                     (isSignedIn() && isValidId(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['points']) && incoming().points is number && incoming().points > existing().points && incoming().points <= existing().points + 1000) ||
+                     isAdmin();
+      allow delete: if isAdmin();
+
+      match /notifications/{notificationId} {
+        allow get, list: if isOwner(userId) || isAdmin();
+        allow write: if isSignedIn() || isAdmin();
+      }
+    }
+
+    match /reels/{reelId} {
+      allow get: if true;
+      allow list: if true;
+      allow create: if (isSignedIn() && isValidReel(incoming())) || isAdmin();
+      allow update: if (isSignedIn() && 
+                        (existing().userId == request.auth.uid || existing().userId == 'usr_bd_01' || existing().userId == 'system_admin' || isAdmin()) &&
+                        incoming().title is string && incoming().title.size() <= 200 &&
+                        incoming().category in ['সকল', 'ট্রেন্ডিং', 'কমেডি', 'গেমিং', 'রান্না', 'শিক্ষা'] &&
+                        incoming().diff(existing()).affectedKeys().hasOnly(['id', 'title', 'userId', 'creatorName', 'creatorHandle', 'creatorAvatar', 'isVerified', 'caption', 'category', 'thumbnailUrl', 'videoUrl', 'audioTrack', 'hashtags', 'likesCount', 'commentsCount', 'sharesCount', 'viewsCount', 'pointsReward', 'createdAt', 'timeAgo', 'isEarningEnabled', 'isSpecialOffer', 'specialOfferBadge', 'customWatchSeconds'])) ||
+                       isAdmin();
+      allow delete: if (isSignedIn() && (existing().userId == request.auth.uid || existing().userId == 'usr_bd_01' || existing().userId == 'system_admin' || isAdmin())) || isAdmin();
+
+      match /comments/{commentId} {
+        allow get, list: if true;
+        allow create: if isSignedIn() && isValidComment(incoming()) && exists(/databases/$(database)/documents/reels/$(reelId));
+        allow delete: if isOwner(existing().userId) || isAdmin();
+        allow update: if isAdmin();
+      }
+    }
+
+    match /settings/{settingId} {
+      allow get, list: if true;
+      allow write: if isAdmin();
+    }
+
+    match /withdrawals/{requestId} {
+      allow get: if isOwner(resource.data.userId) || isAdmin();
+      allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && isValidWithdrawal(incoming()) && isValidId(requestId);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /deposits/{requestId} {
+      allow get: if isOwner(resource.data.userId) || isAdmin();
+      allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && isValidDeposit(incoming()) && isValidId(requestId);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /live_streams/{liveId} {
+      allow get: if true;
+      allow list: if true;
+      allow create: if isSignedIn() &&
+                       isValidId(liveId) &&
+                       incoming().keys().hasAll(['id', 'hostId', 'hostName', 'title', 'mode', 'status', 'createdAt']) &&
+                       incoming().keys().hasOnly(['id', 'hostId', 'hostName', 'hostAvatar', 'title', 'mode', 'category', 'pinnedNotice', 'isMicMuted', 'isCameraOn', 'chatEnabled', 'allowSpeakerRequests', 'viewersCount', 'likesCount', 'giftsTotalPoints', 'adminGiftPoints', 'coHosts', 'status', 'cancelledByAdmin', 'cancelReason', 'createdAt', 'endedAt']) &&
+                       (incoming().hostId == request.auth.uid || isAdmin()) &&
+                       incoming().mode in ['audio', 'video'] &&
+                       incoming().status == 'active' &&
+                       incoming().title is string && incoming().title.size() <= 140;
+      allow update: if isAdmin() ||
+                       (isSignedIn() && existing().hostId == request.auth.uid &&
+                        incoming().hostId == existing().hostId &&
+                        incoming().keys().hasOnly(['id', 'hostId', 'hostName', 'hostAvatar', 'title', 'mode', 'category', 'pinnedNotice', 'isMicMuted', 'isCameraOn', 'chatEnabled', 'allowSpeakerRequests', 'viewersCount', 'likesCount', 'giftsTotalPoints', 'adminGiftPoints', 'coHosts', 'status', 'cancelledByAdmin', 'cancelReason', 'createdAt', 'endedAt']) &&
+                        incoming().mode in ['audio', 'video'] &&
+                        incoming().status in ['active', 'ended']) ||
+                       (isSignedIn() &&
+                        incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'viewersCount', 'giftsTotalPoints', 'adminGiftPoints']) &&
+                        (!('likesCount' in incoming()) || (incoming().likesCount is number && incoming().likesCount >= 0)) &&
+                        (!('viewersCount' in incoming()) || (incoming().viewersCount is number && incoming().viewersCount >= 0)) &&
+                        (!('giftsTotalPoints' in incoming()) || (incoming().giftsTotalPoints is number && incoming().giftsTotalPoints >= 0)) &&
+                        (!('adminGiftPoints' in incoming()) || (incoming().adminGiftPoints is number && incoming().adminGiftPoints >= 0)));
+      allow delete: if isAdmin() || (isSignedIn() && existing().hostId == request.auth.uid);
+
+      match /chat/{messageId} {
+        allow get, list: if true;
+        allow create: if isSignedIn() &&
+                         incoming().keys().hasAll(['userId', 'userName', 'text', 'createdAt']) &&
+                         incoming().keys().hasOnly(['id', 'userId', 'userName', 'userAvatar', 'text', 'type', 'giftId', 'giftIcon', 'giftName', 'giftPoints', 'createdAt']) &&
+                         (incoming().userId == request.auth.uid || isAdmin()) &&
+                         incoming().text is string && incoming().text.size() <= 400;
+        allow delete: if isAdmin() ||
+                         (isSignedIn() && (
+                           existing().userId == request.auth.uid ||
+                           get(/databases/$(database)/documents/live_streams/$(liveId)).data.hostId == request.auth.uid
+                         ));
+      }
+
+      match /requests/{requestId} {
+        allow get, list: if true;
+        allow create: if isSignedIn() &&
+                         incoming().keys().hasAll(['userId', 'userName', 'status', 'createdAt']) &&
+                         incoming().keys().hasOnly(['id', 'userId', 'userName', 'userAvatar', 'status', 'createdAt']) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().status == 'pending';
+        allow update: if isAdmin() ||
+                         (isSignedIn() && (
+                           existing().userId == request.auth.uid ||
+                           get(/databases/$(database)/documents/live_streams/$(liveId)).data.hostId == request.auth.uid
+                         ));
+        allow delete: if isAdmin() ||
+                         (isSignedIn() && (
+                           existing().userId == request.auth.uid ||
+                           get(/databases/$(database)/documents/live_streams/$(liveId)).data.hostId == request.auth.uid
+                         ));
+      }
+
+      match /viewers/{viewerId} {
+        allow get, list: if true;
+        allow create, update: if isSignedIn() && (
+                                viewerId == request.auth.uid ||
+                                get(/databases/$(database)/documents/live_streams/$(liveId)).data.hostId == request.auth.uid ||
+                                isAdmin()
+                              );
+        allow delete: if isSignedIn() && (
+                        viewerId == request.auth.uid ||
+                        get(/databases/$(database)/documents/live_streams/$(liveId)).data.hostId == request.auth.uid ||
+                        isAdmin()
+                      );
+      }
+
+      match /rtc/{peerId} {
+        allow get, list: if isSignedIn() || isAdmin();
+        allow create, update: if isValidId(peerId) &&
+                                incoming().keys().hasAll(['id', 'type', 'updatedAt']) &&
+                                incoming().keys().hasOnly(['id', 'type', 'viewerId', 'viewerName', 'hostId', 'status', 'offer', 'answer', 'hostCandidates', 'viewerCandidates', 'frameDataUrl', 'audioLevel', 'isCameraOn', 'isMicMuted', 'updatedAt']) &&
+                                incoming().type in ['peer', 'preview'] &&
+                                (!('frameDataUrl' in incoming()) || incoming().frameDataUrl == null || (incoming().frameDataUrl is string && incoming().frameDataUrl.size() <= 160000)) &&
+                                (
+                                  isAdmin() ||
+                                  (isSignedIn() && (
+                                    (peerId == request.auth.uid && incoming().type == 'peer') ||
+                                    get(/databases/$(database)/documents/live_streams/$(liveId)).data.hostId == request.auth.uid
+                                  ))
+                                );
+        allow delete: if isAdmin() || (
+                        isSignedIn() && (
+                          peerId == request.auth.uid ||
+                          get(/databases/$(database)/documents/live_streams/$(liveId)).data.hostId == request.auth.uid
+                        )
+                      );
+      }
+    }
+
+    match /chats/{sessionId} {
+      allow get, list: if isSignedIn() || isAdmin();
+      allow create, update: if isSignedIn() || isAdmin();
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow get, list: if isSignedIn() || isAdmin();
+        allow create: if isSignedIn() || isAdmin();
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    match /tasks/{taskId} {
+      allow get, list: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if false; 
+    }
+  }
+}

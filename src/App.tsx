@@ -1,0 +1,2851 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
+import {
+  INITIAL_USER,
+  INITIAL_USERS_LIST,
+  INITIAL_REELS,
+  INITIAL_WITHDRAWALS,
+  INITIAL_COMMENTS,
+  INITIAL_TASKS,
+} from './data/initialData';
+import { User, Reel, WithdrawalRequest, Comment, TaskItem, DepositRequest, Notification, LiveStream, LiveMode, ChatSession, ChatMessage, EarningSettings, DEFAULT_EARNING_SETTINGS } from './types';
+import { Header } from './components/Header';
+import { DailyBonusCard } from './components/DailyBonusCard';
+import { ReelFeedCard } from './components/ReelFeedCard';
+import { BottomNav, TabType } from './components/BottomNav';
+import { ChevronRight, Sparkles, AlertCircle, Radio, Mic, Video, Loader2 } from 'lucide-react';
+import type { StartLivePayload } from './components/GoLiveSetupModal';
+import { GiftItem } from './types';
+import { playCoinSound, playSuccessChime, playPopSound } from './utils/audio';
+import { toBengaliNumber } from './utils/bengali';
+import { getUserLevel, getNextLevel, getProgressToNextLevel } from './utils/levels';
+import { calculateGiftSplit } from './utils/gifts';
+import confetti from 'canvas-confetti';
+
+// Lazy Loaded Components
+const FullScreenReelModal = lazy(() => import('./components/FullScreenReelModal').then(m => ({ default: m.FullScreenReelModal })));
+const WalletView = lazy(() => import('./components/WalletView').then(m => ({ default: m.WalletView })));
+const EarnView = lazy(() => import('./components/EarnView').then(m => ({ default: m.EarnView })));
+const ProfileView = lazy(() => import('./components/ProfileView').then(m => ({ default: m.ProfileView })));
+const AdminPanel = lazy(() => import('./components/AdminPanel').then(m => ({ default: m.AdminPanel })));
+const CommentsModal = lazy(() => import('./components/CommentsModal').then(m => ({ default: m.CommentsModal })));
+const NotificationModal = lazy(() => import('./components/NotificationModal').then(m => ({ default: m.NotificationModal })));
+const AdminLoginModal = lazy(() => import('./components/AdminLoginModal').then(m => ({ default: m.AdminLoginModal })));
+const GiftSheet = lazy(() => import('./components/GiftSheet').then(m => ({ default: m.GiftSheet })));
+const DepositSheet = lazy(() => import('./components/DepositSheet').then(m => ({ default: m.DepositSheet })));
+const LiveStreamSheet = lazy(() => import('./components/LiveStreamSheet').then(m => ({ default: m.LiveStreamSheet })));
+const GoLiveSetupModal = lazy(() => import('./components/GoLiveSetupModal').then(m => ({ default: m.GoLiveSetupModal })));
+const PlusSheet = lazy(() => import('./components/PlusSheet').then(m => ({ default: m.PlusSheet })));
+const ShareSheet = lazy(() => import('./components/ShareSheet').then(m => ({ default: m.ShareSheet })));
+const EditReelModal = lazy(() => import('./components/EditReelModal').then(m => ({ default: m.EditReelModal })));
+const ChatModal = lazy(() => import('./components/ChatModal').then(m => ({ default: m.ChatModal })));
+const UserProfileModal = lazy(() => import('./components/UserProfileModal').then(m => ({ default: m.UserProfileModal })));
+const FollowListModal = lazy(() => import('./components/FollowListModal').then(m => ({ default: m.FollowListModal })));
+const UserPickerModal = lazy(() => import('./components/UserPickerModal').then(m => ({ default: m.UserPickerModal })));
+const ChatListModal = lazy(() => import('./components/ChatListModal').then(m => ({ default: m.ChatListModal })));
+import { AuthPage } from './components/AuthPage';
+import { GuestBanner } from './components/GuestBanner';
+import { AuthPromptModal } from './components/AuthPromptModal';
+import { GuestEarnView } from './components/GuestEarnView';
+import { GuestWalletView } from './components/GuestWalletView';
+import { GuestProfileView } from './components/GuestProfileView';
+import { useFirebase } from './hooks/useFirebase';
+import { where, orderBy, limit, increment, arrayUnion, arrayRemove, QueryConstraint } from 'firebase/firestore';
+import { seedInitialData } from './firebase';
+import { normalizeVideoUrl } from './utils/video';
+import { downloadReelVideo } from './utils/videoDownload';
+
+const LoadingSpinner = () => (
+  <div className="flex-1 flex items-center justify-center p-12">
+    <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
+  </div>
+);
+
+const CATEGORIES: ('সকল' | 'ট্রেন্ডিং' | 'কমেডি' | 'গেমিং' | 'রান্না' | 'শিক্ষা')[] = [
+  'সকল',
+  'ট্রেন্ডিং',
+  'কমেডি',
+  'গেমিং',
+  'রান্না',
+  'শিক্ষা',
+];
+
+export default function App() {
+  const { 
+    user: firebaseUser, 
+    loading: authLoading, 
+    loginWithGoogle, 
+    logout: firebaseLogout,
+    getDocument,
+    getCollection,
+    setDocument,
+    updateDocument,
+    deleteDocument,
+    addDocument,
+    onSnapshot: firebaseOnSnapshot
+  } = useFirebase();
+
+  // Persistent State with Firebase & LocalStorage fallback for non-auth
+  const [users, setUsers] = useState<User[]>(INITIAL_USERS_LIST);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<User>(INITIAL_USER);
+  const [isAdminSession, setIsAdminSession] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem('rt_admin_session') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const isAdminSessionRef = useRef<boolean>(isAdminSession);
+  isAdminSessionRef.current = isAdminSession;
+  const [pointRate, setPointRate] = useState<number>(() => {
+    try {
+      const val = localStorage.getItem('rt_point_rate');
+      return val ? Number(val) : 10;
+    } catch {
+      return 10;
+    }
+  });
+  const [minWithdrawal, setMinWithdrawal] = useState<number>(() => {
+    try {
+      const val = localStorage.getItem('rt_min_withdrawal');
+      return val ? Number(val) : 100;
+    } catch {
+      return 100;
+    }
+  });
+  const [adminPaymentNumbers, setAdminPaymentNumbers] = useState<{ bKash: string; Nagad: string; Rocket: string }>(() => {
+    try {
+      const val = localStorage.getItem('rt_payment_numbers');
+      return val ? JSON.parse(val) : { bKash: '01700000000', Nagad: '01800000000', Rocket: '01900000000' };
+    } catch {
+      return { bKash: '01700000000', Nagad: '01800000000', Rocket: '01900000000' };
+    }
+  });
+  const [announcement, setAnnouncement] = useState<string>(() => {
+    try {
+      const val = localStorage.getItem('rt_announcement');
+      return val || '📢 আজকের স্পেশাল অফার! প্রতিটি রিল দেখলে ইনস্ট্যান্ট ১০ পয়েন্ট। বন্ধুদের ইনভাইট করে ৫০ টাকা বোনাস বুঝে নিন!';
+    } catch {
+      return '📢 আজকের স্পেশাল অফার! প্রতিটি রিল দেখলে ইনস্ট্যান্ট ১০ পয়েন্ট। বন্ধুদের ইনভাইট করে ৫০ টাকা বোনাস বুঝে নিন!';
+    }
+  });
+
+  const [deletedReelIds, setDeletedReelIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('rt_deleted_reels') || '[]');
+    } catch {
+      return [];
+    }
+  });
+  const [editedReelsMap, setEditedReelsMap] = useState<Record<string, Partial<Reel>>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('rt_edited_reels') || '{}');
+    } catch {
+      return {};
+    }
+  });
+  const [reels, setReels] = useState<Reel[]>(() => {
+    try {
+      const deleted = JSON.parse(localStorage.getItem('rt_deleted_reels') || '[]');
+      return INITIAL_REELS.filter(r => !deleted.includes(r.id));
+    } catch {
+      return INITIAL_REELS;
+    }
+  });
+  const [editingReel, setEditingReel] = useState<Reel | null>(null);
+  const [likedReelIds, setLikedReelIds] = useState<string[]>(['reel_app_01']);
+  const [watchedReelIds, setWatchedReelIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('rt_watched_reels') || '[]');
+    } catch {
+      return [];
+    }
+  });
+  const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>(INITIAL_WITHDRAWALS);
+  const [comments, setComments] = useState<Comment[]>(INITIAL_COMMENTS);
+  const [tasks, setTasks] = useState<TaskItem[]>(INITIAL_TASKS);
+  const [depositRequests, setDepositRequests] = useState<DepositRequest[]>([]);
+  const [personalNotifications, setPersonalNotifications] = useState<Notification[]>([]);
+  const [activeLiveStreams, setActiveLiveStreams] = useState<LiveStream[]>([]);
+
+  // Spin Wheel & Scratch Card Admin Control State
+  const [spinMaxPrize, setSpinMaxPrize] = useState<number>(() => {
+    try {
+      const val = localStorage.getItem('rt_spin_max');
+      return val ? Number(val) : 100;
+    } catch {
+      return 100;
+    }
+  });
+  const [scratchPrize, setScratchPrize] = useState<number>(() => {
+    try {
+      const val = localStorage.getItem('rt_scratch_prize');
+      return val ? Number(val) : 35;
+    } catch {
+      return 35;
+    }
+  });
+
+  // Admin Customization of Point Earning & Special Offers
+  const [earningSettings, setEarningSettings] = useState<EarningSettings>(() => {
+    try {
+      const saved = localStorage.getItem('rt_earning_settings');
+      return saved ? { ...DEFAULT_EARNING_SETTINGS, ...JSON.parse(saved) } : DEFAULT_EARNING_SETTINGS;
+    } catch {
+      return DEFAULT_EARNING_SETTINGS;
+    }
+  });
+
+  // Send Notification Helper
+  const sendNotification = async (userId: string, title: string, message: string, type: Notification['type']) => {
+    try {
+      await addDocument(`users/${userId}/notifications`, {
+        userId,
+        title,
+        message,
+        type,
+        createdAt: new Date().toISOString(),
+        read: false
+      });
+    } catch (err) {
+      console.warn('Failed to send notification:', err);
+    }
+  };
+
+  const currentUserRef = useRef<User>(currentUser);
+  currentUserRef.current = currentUser;
+
+  // Auth Sync: New users start with 0 points unless Admin has an active Login Offer
+  useEffect(() => {
+    if (firebaseUser) {
+      setIsAuthenticated(true);
+      const syncProfile = async () => {
+        try {
+          const [profile, remoteSettings] = await Promise.all([
+            getDocument('users', firebaseUser.uid) as Promise<User | null>,
+            getDocument('settings', 'earning').catch(() => null) as Promise<Partial<EarningSettings> | null>,
+          ]);
+
+          const liveSettings: EarningSettings = {
+            ...DEFAULT_EARNING_SETTINGS,
+            ...earningSettings,
+            ...(remoteSettings || {}),
+          };
+
+          const isOfferActive = Boolean(
+            liveSettings.isLoginOfferEnabled &&
+            Number(liveSettings.loginOfferPoints) > 0 &&
+            liveSettings.isMasterEarningEnabled !== false
+          );
+          const offerPoints = isOfferActive
+            ? Math.max(0, Math.round(Number(liveSettings.loginOfferPoints)))
+            : 0;
+          const activeCampaignId = isOfferActive
+            ? (liveSettings.loginOfferCampaignId || `offer_${offerPoints}`)
+            : '';
+
+          if (profile) {
+            const isOwnerEmail = firebaseUser.email === 'mdmasudranabd80814@gmail.com';
+            const resolvedRole: User['role'] =
+              profile.role === 'admin' || isAdminSessionRef.current || isOwnerEmail
+                ? (profile.role === 'admin' || isAdminSessionRef.current ? 'admin' : profile.role)
+                : profile.role;
+
+            if (isOwnerEmail && profile.role !== 'admin' && isAdminSessionRef.current) {
+              updateDocument('users', profile.id, { role: 'admin' }).catch(() => {});
+            }
+
+            // Check if Admin enabled a new login offer campaign that this user hasn't claimed yet
+            if (
+              isOfferActive &&
+              offerPoints > 0 &&
+              activeCampaignId &&
+              profile.loginOfferCampaignId !== activeCampaignId
+            ) {
+              const updatedUser: User = {
+                ...profile,
+                role: resolvedRole,
+                points: (profile.points || 0) + offerPoints,
+                loginOfferClaimed: true,
+                loginOfferCampaignId: activeCampaignId,
+              };
+              setCurrentUser(updatedUser);
+              await updateDocument('users', profile.id, {
+                points: increment(offerPoints),
+                loginOfferClaimed: true,
+                loginOfferCampaignId: activeCampaignId,
+              });
+              if (!isMuted) playSuccessChime();
+              showToast(
+                lang === 'bn'
+                  ? `🎁 এডমিন লগইন অফার! +${toBengaliNumber(offerPoints, lang)} পয়েন্ট আপনার অ্যাকাউন্টে যোগ হয়েছে!`
+                  : `🎁 Admin Login Offer! +${offerPoints} points credited!`
+              );
+            } else {
+              setCurrentUser({ ...profile, role: resolvedRole });
+            }
+          } else {
+            let pendingReg: Partial<User> = {};
+            try {
+              const raw = localStorage.getItem('rt_pending_reg');
+              if (raw) {
+                pendingReg = JSON.parse(raw);
+                localStorage.removeItem('rt_pending_reg');
+              }
+            } catch {}
+
+            const newUser: User = {
+              ...INITIAL_USER,
+              id: firebaseUser.uid,
+              name: (pendingReg.name || firebaseUser.displayName || 'User').slice(0, 100),
+              phone: (pendingReg.phone || '').slice(0, 20),
+              email: firebaseUser.email || '',
+              avatar: firebaseUser.photoURL || INITIAL_USER.avatar,
+              paymentMethod: pendingReg.paymentMethod || 'bKash',
+              paymentAccountNumber: pendingReg.paymentAccountNumber || '',
+              points: offerPoints, // ০ পয়েন্ট ডিফল্ট; শুধুমাত্র এডমিন অফার দিলে অফারের পয়েন্ট যোগ হবে
+              role: 'user',
+              createdAt: new Date().toISOString(),
+              referralCode: `REEL${Math.floor(1000 + Math.random() * 9000)}`,
+              isVerified: true,
+              totalWithdrawn: 0,
+              reelsWatchedCount: 0,
+              followersCount: 0,
+              followingCount: 0,
+              followers: [],
+              following: [],
+              completedTaskIds: [],
+              loginOfferClaimed: offerPoints > 0,
+              loginOfferCampaignId: activeCampaignId,
+            };
+
+            setCurrentUser(newUser);
+            await setDocument('users', firebaseUser.uid, newUser);
+
+            if (offerPoints > 0) {
+              if (!isMuted) playSuccessChime();
+              showToast(
+                lang === 'bn'
+                  ? `🎉 অ্যাকাউন্ট তৈরি হয়েছে! লগইন অফার +${toBengaliNumber(offerPoints, lang)} পয়েন্ট যোগ হয়েছে!`
+                  : `🎉 Account created! Login offer +${offerPoints} points added!`
+              );
+            } else {
+              showToast(
+                lang === 'bn'
+                  ? '✅ অ্যাকাউন্ট তৈরি হয়েছে (০ পয়েন্ট)! রিল দেখে ও টাস্ক করে আর্ন শুরু করুন।'
+                  : '✅ Account created with 0 points! Start earning now.'
+              );
+            }
+          }
+        } catch (err) {
+          console.error('Auth sync error:', err);
+        }
+      };
+      syncProfile();
+    } else {
+      setIsAuthenticated(false);
+      setCurrentUser(INITIAL_USER);
+    }
+  }, [firebaseUser]);
+
+  // Firestore Listeners
+  useEffect(() => {
+    // Reels are public
+    const unsubReels = firebaseOnSnapshot('reels', (data) => {
+      const deleted: string[] = (() => {
+        try {
+          return JSON.parse(localStorage.getItem('rt_deleted_reels') || '[]');
+        } catch {
+          return [];
+        }
+      })();
+      const edited: Record<string, Partial<Reel>> = (() => {
+        try {
+          return JSON.parse(localStorage.getItem('rt_edited_reels') || '{}');
+        } catch {
+          return {};
+        }
+      })();
+
+      if (data && data.length > 0) {
+        // Filter out old sample nature/recipe reels so app-related reels always take precedence
+        const currentData = (data as Reel[]).filter((r) => r.id !== 'reel_01' && r.id !== 'reel_02');
+        if (currentData.length > 0) {
+          const loadedReels = currentData
+            // If it's in Firestore, it should usually be visible, unless locally hidden
+            .filter((r) => !deleted.includes(r.id))
+            .map((r, idx) => {
+              const patched = edited[r.id] ? { ...r, ...edited[r.id] } : r;
+              return {
+                ...patched,
+                videoUrl: normalizeVideoUrl(patched.videoUrl, idx) ?? patched.videoUrl,
+              };
+            });
+          setReels(loadedReels);
+          return;
+        }
+      }
+
+      // Fallback if Firestore is empty but we have local initial data
+      const initial = INITIAL_REELS
+        .filter((r) => !deleted.includes(r.id))
+        .map((r) => (edited[r.id] ? { ...r, ...edited[r.id] } : r));
+      setReels(initial);
+    }, [orderBy('createdAt', 'desc')]);
+
+    // Administrative listeners (strictly require signed-in Admin Google account)
+    let unsubUsers = () => {};
+    let unsubAdminWithdrawals = () => {};
+    let unsubAdminDeposits = () => {};
+
+    const isFirestoreAdmin = Boolean(
+      firebaseUser &&
+        (firebaseUser.email?.toLowerCase() === 'mdmasudranabd80814@gmail.com' ||
+          firebaseUser.uid === 'system_admin')
+    );
+
+    if (isAuthenticated && currentUser.role === 'admin' && isFirestoreAdmin) {
+      unsubUsers = firebaseOnSnapshot('users', (data) => {
+        setUsers(data as User[]);
+      });
+
+      unsubAdminWithdrawals = firebaseOnSnapshot('withdrawals', (data) => {
+        setWithdrawals(data as WithdrawalRequest[]);
+      }, [orderBy('createdAt', 'desc')]);
+
+      unsubAdminDeposits = firebaseOnSnapshot('deposits', (data) => {
+        setDepositRequests(data as DepositRequest[]);
+      }, [orderBy('createdAt', 'desc')]);
+    }
+
+    // User-specific listeners (Regular users only see their own)
+    let unsubUserWithdrawals = () => {};
+    let unsubUserDeposits = () => {};
+
+    if (isAuthenticated && firebaseUser && !isFirestoreAdmin && currentUser.id !== INITIAL_USER.id) {
+      unsubUserWithdrawals = firebaseOnSnapshot('withdrawals', (data) => {
+        setWithdrawals(data as WithdrawalRequest[]);
+      }, [where('userId', '==', currentUser.id), orderBy('createdAt', 'desc')]);
+
+      unsubUserDeposits = firebaseOnSnapshot('deposits', (data) => {
+        setDepositRequests(data as DepositRequest[]);
+      }, [where('userId', '==', currentUser.id), orderBy('createdAt', 'desc')]);
+    }
+
+    return () => {
+      unsubReels();
+      unsubUsers();
+      unsubAdminWithdrawals();
+      unsubAdminDeposits();
+      unsubUserWithdrawals();
+      unsubUserDeposits();
+    };
+  }, [isAuthenticated, currentUser.role, currentUser.id, firebaseUser?.email, firebaseUser?.uid]);
+
+  const [activeTab, setActiveTab] = useState<TabType>(() => {
+    return (localStorage.getItem('rt_active_tab') as TabType) || 'home';
+  });
+
+  // Sync specific user data if authenticated (preserve admin session role)
+  useEffect(() => {
+    if (isAuthenticated && firebaseUser && currentUser.id !== INITIAL_USER.id) {
+      const unsubUser = firebaseOnSnapshot('users', (data) => {
+        const me = data.find(u => u.id === currentUser.id) as User | undefined;
+        if (me) {
+          const keepAdmin = isAdminSessionRef.current || me.role === 'admin';
+          setCurrentUser(keepAdmin ? { ...me, role: 'admin' } : me);
+        }
+      }, [where('id', '==', currentUser.id)]);
+      return unsubUser;
+    }
+  }, [isAuthenticated, currentUser.id, firebaseUser?.uid]);
+
+  // Sync personal notifications
+  useEffect(() => {
+    if (isAuthenticated && firebaseUser && currentUser.id !== INITIAL_USER.id) {
+      const unsub = firebaseOnSnapshot(`users/${currentUser.id}/notifications`, (data) => {
+        setPersonalNotifications(data as Notification[]);
+      }, [orderBy('createdAt', 'desc')]);
+      return unsub;
+    }
+  }, [isAuthenticated, currentUser.id, firebaseUser?.uid]);
+
+  // Sync active live streams (avoid composite index requirement by filtering client-side)
+  useEffect(() => {
+    const unsub = firebaseOnSnapshot('live_streams', (data) => {
+      setActiveLiveStreams((data as LiveStream[]).filter(s => s.status === 'active'));
+    }, [orderBy('createdAt', 'desc'), limit(40)]);
+    return unsub;
+  }, []);
+
+  // Sync tasks from Firestore
+  useEffect(() => {
+    const unsubTasks = firebaseOnSnapshot('tasks', (data) => {
+      if (data && data.length > 0) {
+        setTasks(data as TaskItem[]);
+      } else {
+        setTasks(INITIAL_TASKS);
+      }
+    });
+    return unsubTasks;
+  }, []);
+
+  // Sync Earning Settings from Firestore
+  useEffect(() => {
+    const unsubSettings = firebaseOnSnapshot('settings', (data) => {
+      if (data && data.length > 0) {
+        const earningDoc = (data as any[]).find((d) => d.id === 'earning');
+        if (earningDoc) {
+          setEarningSettings((prev) => ({ ...prev, ...earningDoc }));
+          try {
+            localStorage.setItem('rt_earning_settings', JSON.stringify(earningDoc));
+          } catch (e) {}
+        }
+      }
+    });
+    return unsubSettings;
+  }, []);
+
+  // Ensure Admin UID is recorded in settings/earning for cross-user gift commission payouts
+  useEffect(() => {
+    if (
+      isAuthenticated &&
+      currentUser.role === 'admin' &&
+      currentUser.id !== INITIAL_USER.id &&
+      earningSettings.adminCommissionReceiverId !== currentUser.id
+    ) {
+      setDocument('settings', 'earning', {
+        ...earningSettings,
+        id: 'earning',
+        adminCommissionReceiverId: currentUser.id,
+        updatedAt: new Date().toISOString(),
+      }).catch(() => {});
+    }
+  }, [isAuthenticated, currentUser.role, currentUser.id, earningSettings.adminCommissionReceiverId]);
+
+  useEffect(() => {
+    localStorage.setItem('rt_active_tab', activeTab);
+  }, [activeTab]);
+
+  const showToast = (msg: string) => {
+    setNotificationToast(msg);
+    setTimeout(() => setNotificationToast(null), 3000);
+  };
+
+  // UI Navigation & View State
+  const [selectedCategory, setSelectedCategory] = useState<
+    'সকল' | 'ট্রেন্ডিং' | 'কমেডি' | 'গেমিং' | 'রান্না' | 'শিক্ষা'
+  >('সকল');
+  const [sortBy, setSortBy] = useState<'newest' | 'most_watched' | 'popular'>('newest');
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+
+  const levelProgress = getProgressToNextLevel(currentUser.reelsWatchedCount);
+
+  const [lang, setLang] = useState<'bn' | 'en'>(() => {
+    return (localStorage.getItem('rt_lang') as 'bn' | 'en') || 'bn';
+  });
+
+  const toggleLang = () => {
+    setLang((prev) => {
+      const next = prev === 'bn' ? 'en' : 'bn';
+      localStorage.setItem('rt_lang', next);
+      return next;
+    });
+  };
+
+  // Modal Dialogs & Sheets
+  const [fullScreenReelId, setFullScreenReelId] = useState<string | null>(null);
+  const [activeCommentReel, setActiveCommentReel] = useState<Reel | null>(null);
+  const [showNotifications, setShowNotifications] = useState<boolean>(false);
+  const [showAdminAuthModal, setShowAdminAuthModal] = useState<boolean>(false);
+  const [showCreateReelModal, setShowCreateReelModal] = useState<boolean>(false);
+  const [showGiftSheet, setShowGiftSheet] = useState<boolean>(false);
+  const [giftTarget, setGiftTarget] = useState<{ userId?: string; liveId?: string; creatorName?: string } | null>(null);
+  const [showDepositSheet, setShowDepositSheet] = useState<boolean>(false);
+  const [showLiveSheet, setShowLiveSheet] = useState<boolean>(false);
+  const [showGoLiveSetupModal, setShowGoLiveSetupModal] = useState<boolean>(false);
+  const [goLiveInitialMode, setGoLiveInitialMode] = useState<LiveMode>('audio');
+  const [showPlusSheet, setShowPlusSheet] = useState<boolean>(false);
+  const [showShareSheet, setShowShareSheet] = useState<boolean>(false);
+  const [sharingReel, setSharingReel] = useState<Reel | null>(null);
+  const [sharingLiveStream, setSharingLiveStream] = useState<LiveStream | null>(null);
+  const [notificationToast, setNotificationToast] = useState<string | null>(null);
+
+  // Messenger & Profile Modals
+  const [isChatModalOpen, setIsChatModalOpen] = useState(false);
+  const [isChatListModalOpen, setIsChatListModalOpen] = useState(false);
+  const [activeChatSession, setActiveChatSession] = useState<ChatSession | null>(null);
+  const [activeChatOtherUser, setActiveChatOtherUser] = useState<User | null>(null);
+  const [isUserProfileModalOpen, setIsUserProfileModalOpen] = useState(false);
+  const [selectedUserProfileUser, setSelectedUserProfileUser] = useState<User | null>(null);
+  const [followListModal, setFollowListModal] = useState<{ user: User; tab: 'followers' | 'following' } | null>(null);
+
+  // Sharing in Chat
+  const [isUserPickerOpen, setIsUserPickerOpen] = useState(false);
+  const [sharingReelInChat, setSharingReelInChat] = useState<Reel | null>(null);
+
+  // Guest & Auth Modal State (Homepage is public for all!)
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  const [authModalView, setAuthModalView] = useState<'login' | 'register'>('login');
+  const [authModalReason, setAuthModalReason] = useState<string>('');
+  const [showAuthPrompt, setShowAuthPrompt] = useState<boolean>(false);
+  const [authPromptMessage, setAuthPromptMessage] = useState<string>('');
+
+  const triggerAuthFlow = (view: 'login' | 'register' = 'login', reason?: string) => {
+    if (view === 'login') {
+      loginWithGoogle();
+      return;
+    }
+    setAuthModalView(view);
+    setAuthModalReason(
+      reason ||
+        (lang === 'bn'
+          ? 'টাকা আর্ন করতে চাইলে লগইন বা রেজিস্ট্রেশন করুন!'
+          : 'Login or register to start earning money!')
+    );
+    setShowAuthModal(true);
+  };
+
+  const triggerAuthPrompt = (message?: string) => {
+    setAuthPromptMessage(
+      message ||
+        (lang === 'bn'
+          ? 'টাকা আর্ন করতে চাইলে লগইন বা রেজিস্ট্রেশন করুন! প্রতিটি রিল দেখার পয়েন্ট আপনার ব্যালেন্সে যোগ হবে।'
+          : 'Login or register to start earning money!')
+    );
+    setShowAuthPrompt(true);
+  };
+
+  const handleLogin = (phone: string, pass: string): boolean => {
+    // Legacy support or phone login logic if needed
+    loginWithGoogle();
+    return true;
+  };
+
+  const handleRegister = async (userData: Partial<User>) => {
+    try {
+      localStorage.setItem('rt_pending_reg', JSON.stringify({
+        name: userData.name || '',
+        phone: userData.phone || '',
+        paymentMethod: userData.paymentMethod || 'bKash',
+        paymentAccountNumber: userData.paymentAccountNumber || '',
+      }));
+    } catch {}
+    setShowAuthModal(false);
+    await loginWithGoogle();
+  };
+
+  const handleAdminLoginFlow = (pass: string): boolean => {
+    if (pass === 'admin123') {
+      setIsAdminSession(true);
+      isAdminSessionRef.current = true;
+      try {
+        sessionStorage.setItem('rt_admin_session', '1');
+      } catch {}
+      setCurrentUser(prev => ({ ...prev, role: 'admin' }));
+      if (isAuthenticated && currentUser.id !== INITIAL_USER.id) {
+        updateDocument('users', currentUser.id, { role: 'admin' }).catch(() => {});
+      }
+      setActiveTab('admin');
+      showToast(lang === 'bn' ? '⚡ এডমিন প্যানেলে স্বাগতম!' : '⚡ Welcome to Admin Panel!');
+      return true;
+    }
+    return false;
+  };
+
+  // Tracking Effect
+  useEffect(() => {
+    if (currentUser.role === 'admin' && activeTab === 'admin') return;
+
+    const updateTracking = () => {
+      if (!isAuthenticated || currentUser.role === 'admin') return;
+      
+      const now = new Date().toISOString();
+      const pageInfo = fullScreenReelId ? `Reel: ${fullScreenReelId}` : `Tab: ${activeTab}`;
+      
+      if (currentUser.id !== INITIAL_USER.id) {
+        updateDocument('users', currentUser.id, {
+          lastActive: now,
+          lastPage: pageInfo,
+          totalSessions: (currentUser.totalSessions || 0) + (currentUser.lastActive ? 0 : 1)
+        });
+      }
+    };
+
+    updateTracking();
+    const interval = setInterval(updateTracking, 30000); // Update every 30s
+    return () => clearInterval(interval);
+  }, [activeTab, fullScreenReelId, currentUser.role, isAuthenticated, currentUser.id]);
+
+  // Totally Private Admin Gateway (No visible UI links anywhere in user panel):
+  // 1. Tapping the logo 5 times in the header
+  // 2. Secret URL hashtag `#admin` or query `?admin=1`
+  // 3. Secret keyboard shortcut: Ctrl+Shift+A
+  useEffect(() => {
+    const checkSecretRoute = () => {
+      if (
+        window.location.search.includes('admin') ||
+        window.location.hash.toLowerCase().includes('admin')
+      ) {
+        setShowAdminAuthModal(true);
+      }
+    };
+
+    checkSecretRoute();
+    window.addEventListener('hashchange', checkSecretRoute);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        setShowAdminAuthModal(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('hashchange', checkSecretRoute);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  // Fast & Atomic Optimistic Point Mutation Helper (0ms UI response + Firestore increment)
+  const applyFastUserMutation = (pointDelta: number, extraFields: Record<string, any> = {}) => {
+    const activeUser = currentUserRef.current;
+    if (!isAuthenticated || activeUser.id === INITIAL_USER.id) return;
+
+    const currentPts = activeUser.points || 0;
+    const safeDelta = pointDelta < 0 ? -Math.min(currentPts, Math.abs(pointDelta)) : pointDelta;
+
+    // 1. Instant 0ms optimistic state update
+    setCurrentUser((prev) => ({
+      ...prev,
+      ...extraFields,
+      points: Math.max(0, (prev.points || 0) + safeDelta),
+    }));
+    setUsers((prev) =>
+      prev.map((u) =>
+        u.id === activeUser.id
+          ? { ...u, ...extraFields, points: Math.max(0, (u.points || 0) + safeDelta) }
+          : u
+      )
+    );
+
+    // 2. Atomic Firestore update in background
+    const firestorePayload: Record<string, any> = { ...extraFields };
+    if (safeDelta !== 0) {
+      firestorePayload.points = increment(safeDelta);
+    }
+    if (Object.keys(firestorePayload).length > 0) {
+      updateDocument('users', activeUser.id, firestorePayload).catch((err) => {
+        console.warn('Fast point mutation sync error:', err);
+      });
+    }
+  };
+
+  // User Actions: Fast Points Update
+  const updateUserPoints = (delta: number) => {
+    applyFastUserMutation(delta);
+  };
+
+  // Claim Daily Bonus & Daily Reel Earning Limit Calculations
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const isClaimedToday = isAuthenticated && currentUser.dailyClaimedDate === todayKey;
+
+  const isReelLimitEnabled = earningSettings.isDailyReelLimitEnabled !== false;
+  const dailyClaimsLimit = earningSettings.dailyMaxReelClaims ?? 5;
+  const dailyPointsLimit = earningSettings.dailyMaxReelPoints ?? 100;
+  const isSameReelClaimDay = isAuthenticated && currentUser.dailyReelClaimDate === todayKey;
+  const dailyClaimsUsed = isSameReelClaimDay ? (currentUser.dailyReelClaimsCount || 0) : 0;
+  const dailyPointsUsed = isSameReelClaimDay ? (currentUser.dailyReelPointsEarned || 0) : 0;
+  const isDailyReelLimitReached = Boolean(
+    isAuthenticated &&
+    isReelLimitEnabled &&
+    ((dailyClaimsLimit > 0 && dailyClaimsUsed >= dailyClaimsLimit) ||
+      (dailyPointsLimit > 0 && dailyPointsUsed >= dailyPointsLimit))
+  );
+
+  const handleClaimDailyBonus = (bonusPoints: number) => {
+    if (!earningSettings.isMasterEarningEnabled || !earningSettings.isDailyBonusEnabled) {
+      showToast(lang === 'bn' ? '⚠️ দৈনিক বোনাস আর্নিং বর্তমানে এডমিন দ্বারা বন্ধ রয়েছে।' : '⚠️ Daily bonus is currently disabled.');
+      return;
+    }
+
+    if (!isAuthenticated) {
+      triggerAuthPrompt(
+        lang === 'bn'
+          ? 'দৈনিক বোনাস এবং টাকা আর্ন করতে লগইন বা রেজিস্ট্রেশন করুন!'
+          : 'Login or register to claim your daily bonus!'
+      );
+      return;
+    }
+
+    if (isClaimedToday) return;
+
+    const actualBonus = earningSettings.dailyBonusPoints || bonusPoints;
+    applyFastUserMutation(actualBonus, { dailyClaimedDate: todayKey });
+
+    showToast(`🎉 দৈনিক বোনাস +${toBengaliNumber(actualBonus, lang)} পয়েন্ট আপনার ওয়ালেটে যুক্ত হয়েছে!`);
+  };
+
+  // Like Reel
+  const handleToggleLike = (reelId: string) => {
+    setLikedReelIds((prev) => {
+      const next = prev.includes(reelId)
+        ? prev.filter((id) => id !== reelId)
+        : [...prev, reelId];
+      
+      localStorage.setItem('rt_liked_reels', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  // Claim Reel Reward (Instant 0ms + Atomic Firestore increment + Admin Limit Guard)
+  const handleEarnReelReward = (rewardPoints: number, _reelTitle: string, explicitReelId?: string) => {
+    // 1. Check master toggle & video earning toggle
+    if (!earningSettings.isMasterEarningEnabled || !earningSettings.isVideoWatchEarningEnabled) {
+      showToast(lang === 'bn' ? '📺 বিনোদন মোড: পয়েন্ট আর্নিং সিস্টেম বর্তমানে বন্ধ রয়েছে।' : '📺 Entertainment mode: earning is currently disabled.');
+      return;
+    }
+
+    const targetReelId = explicitReelId || fullScreenReelId || undefined;
+
+    // 2. Check if target reel has earning enabled or matches offer filter
+    const activeReel = targetReelId ? reels.find(r => r.id === targetReelId) : undefined;
+    if (activeReel) {
+      if (activeReel.isEarningEnabled === false) {
+        showToast(lang === 'bn' ? '📺 এই রিলটিতে পয়েন্ট আর্নিং বন্ধ রয়েছে (শুধুমাত্র বিনোদন)।' : '📺 Earning is disabled for this reel.');
+        return;
+      }
+      if (earningSettings.videoEarningScope === 'offer_reels_only' && !activeReel.isSpecialOffer) {
+        showToast(lang === 'bn' ? '📺 শুধুমাত্র স্পেশাল অফার রিলগুলোতে পয়েন্ট প্রযোজ্য।' : '📺 Earning is only available for special offer reels.');
+        return;
+      }
+    }
+
+    if (!isAuthenticated) {
+      triggerAuthPrompt(
+        lang === 'bn'
+          ? 'টাকা ও পয়েন্ট আর্ন করতে লগইন বা রেজিস্ট্রেশন করুন! প্রতিটি রিল দেখার পয়েন্ট আপনার ব্যালেন্সে যোগ হবে।'
+          : 'Login or register to earn points for watching reels!'
+      );
+      return;
+    }
+
+    // 3. Prevent claiming the same reel twice
+    if (targetReelId && watchedReelIds.includes(targetReelId)) {
+      showToast(lang === 'bn' ? 'আপনি ইতিমধ্যে এই রিলের পয়েন্ট সংগ্রহ করেছেন!' : 'You have already collected points for this reel!');
+      return;
+    }
+
+    // 4. Enforce Admin-controlled Daily Reel & Point Limits
+    const activeUser = currentUserRef.current;
+    const sameDay = activeUser.dailyReelClaimDate === todayKey;
+    const usedClaims = sameDay ? (activeUser.dailyReelClaimsCount || 0) : 0;
+    const usedPoints = sameDay ? (activeUser.dailyReelPointsEarned || 0) : 0;
+
+    if (isReelLimitEnabled) {
+      if (dailyClaimsLimit > 0 && usedClaims >= dailyClaimsLimit) {
+        showToast(
+          lang === 'bn'
+            ? `🔒 আজকের রিল আর্নিং লিমিট শেষ (${toBengaliNumber(usedClaims, lang)}/${toBengaliNumber(dailyClaimsLimit, lang)}টি রিল)! আগামীকাল আবার পয়েন্ট পাবেন।`
+            : `🔒 Daily reel limit reached (${usedClaims}/${dailyClaimsLimit} reels)! Try again tomorrow.`
+        );
+        return;
+      }
+      if (dailyPointsLimit > 0 && usedPoints >= dailyPointsLimit) {
+        showToast(
+          lang === 'bn'
+            ? `🔒 আজকের পয়েন্ট আর্নিং লিমিট শেষ (${toBengaliNumber(usedPoints, lang)}/${toBengaliNumber(dailyPointsLimit, lang)} পয়েন্ট)! আগামীকাল আবার পয়েন্ট পাবেন।`
+            : `🔒 Daily point limit reached (${usedPoints}/${dailyPointsLimit} pts)! Try again tomorrow.`
+        );
+        return;
+      }
+    }
+
+    const currentLevel = getUserLevel(activeUser.reelsWatchedCount);
+    const multiplier = earningSettings.isLevelMultiplierEnabled ? currentLevel.multiplier : 1;
+    const rawReward = Math.round(rewardPoints * multiplier);
+    const finalReward =
+      isReelLimitEnabled && dailyPointsLimit > 0
+        ? Math.min(rawReward, Math.max(0, dailyPointsLimit - usedPoints))
+        : rawReward;
+
+    if (finalReward <= 0) {
+      showToast(lang === 'bn' ? '🔒 আজকের পয়েন্ট লিমিট পূর্ণ হয়েছে!' : '🔒 Daily point limit reached!');
+      return;
+    }
+
+    if (!isMuted) playCoinSound();
+
+    const newWatchedCount = activeUser.reelsWatchedCount + 1;
+    const prevLevel = getUserLevel(activeUser.reelsWatchedCount);
+    const nextLevelObj = getUserLevel(newWatchedCount);
+
+    if (nextLevelObj.level > prevLevel.level) {
+      setTimeout(() => {
+        try {
+          confetti({
+            particleCount: 150,
+            spread: 70,
+            origin: { y: 0.6 },
+            colors: ['#ffcc00', '#00c853', '#00e676', '#ffffff']
+          });
+          if (!isMuted) playSuccessChime();
+        } catch (e) {}
+        
+        showToast(
+          lang === 'bn' 
+            ? `🎊 অভিনন্দন! আপনি এখন ${nextLevelObj.nameBn}! বোনাস মাল্টিপ্লায়ার: ${toBengaliNumber(nextLevelObj.multiplier, lang)}x`
+            : `🎊 Congrats! You've reached ${nextLevelObj.nameEn}! Bonus Multiplier: ${nextLevelObj.multiplier}x`
+        );
+      }, 600);
+    }
+
+    if (earningSettings.isReferralEnabled && newWatchedCount === 1 && activeUser.referredBy && !activeUser.referralBonusClaimed) {
+      const findReferrerAndBonus = async () => {
+        try {
+          const referrerCode = activeUser.referredBy;
+          const usersList = await getCollection('users', [where('referralCode', '==', referrerCode)]);
+          if (usersList && usersList.length > 0) {
+            const referrer = usersList[0] as User;
+            const refBonus = earningSettings.referralRewardPoints || 50;
+            setUsers((prev) =>
+              prev.map((u) => (u.id === referrer.id ? { ...u, points: (u.points || 0) + refBonus } : u))
+            );
+            await updateDocument('users', referrer.id, {
+              points: increment(refBonus)
+            });
+            await updateDocument('users', activeUser.id, {
+              referralBonusClaimed: true
+            });
+            showToast(
+              lang === 'bn'
+                ? `🎁 রেফারেল বোনাস (+${toBengaliNumber(refBonus, lang)} পয়েন্ট) সফলভাবে সম্পন্ন হয়েছে!`
+                : `🎁 Referral bonus (+${refBonus} pts) successful!`
+            );
+          }
+        } catch (err) {
+          console.error("Referral bonus error:", err);
+        }
+      };
+      findReferrerAndBonus();
+    }
+
+    const nextClaimsToday = usedClaims + 1;
+    const nextPointsToday = usedPoints + finalReward;
+
+    // Instant 0ms UI update + atomic Firestore increment
+    setCurrentUser((prev) => ({
+      ...prev,
+      points: (prev.points || 0) + finalReward,
+      reelsWatchedCount: (prev.reelsWatchedCount || 0) + 1,
+      levelName: nextLevelObj.nameEn,
+      multiplier: nextLevelObj.multiplier,
+      dailyReelClaimDate: todayKey,
+      dailyReelClaimsCount: nextClaimsToday,
+      dailyReelPointsEarned: nextPointsToday,
+    }));
+    setUsers((prev) =>
+      prev.map((u) =>
+        u.id === activeUser.id
+          ? {
+              ...u,
+              points: (u.points || 0) + finalReward,
+              reelsWatchedCount: (u.reelsWatchedCount || 0) + 1,
+              levelName: nextLevelObj.nameEn,
+              multiplier: nextLevelObj.multiplier,
+              dailyReelClaimDate: todayKey,
+              dailyReelClaimsCount: nextClaimsToday,
+              dailyReelPointsEarned: nextPointsToday,
+            }
+          : u
+      )
+    );
+
+    updateDocument('users', activeUser.id, {
+      points: increment(finalReward),
+      reelsWatchedCount: increment(1),
+      levelName: nextLevelObj.nameEn,
+      multiplier: nextLevelObj.multiplier,
+      dailyReelClaimDate: todayKey,
+      dailyReelClaimsCount: sameDay ? increment(1) : 1,
+      dailyReelPointsEarned: sameDay ? increment(finalReward) : finalReward,
+    }).catch((err) => console.warn('Reel reward sync error:', err));
+
+    if (targetReelId && !watchedReelIds.includes(targetReelId)) {
+      setWatchedReelIds((prev) => {
+        if (prev.includes(targetReelId)) return prev;
+        const nextWatched = [...prev, targetReelId];
+        try {
+          localStorage.setItem('rt_watched_reels', JSON.stringify(nextWatched));
+        } catch {}
+        return nextWatched;
+      });
+    }
+
+    const limitStatusText = isReelLimitEnabled && dailyClaimsLimit > 0
+      ? ` (${toBengaliNumber(nextClaimsToday, lang)}/${toBengaliNumber(dailyClaimsLimit, lang)})`
+      : '';
+
+    showToast(
+      lang === 'bn'
+        ? `💰 রিল দেখে +${toBengaliNumber(finalReward, lang)} পয়েন্ট যোগ হয়েছে!${limitStatusText}`
+        : `💰 Earned +${finalReward} points!${limitStatusText}`
+    );
+  };
+
+  // Direct Claim from Feed (Respects Admin Daily Limit)
+  const handleClaimDirect = (reel: Reel) => {
+    if (!earningSettings.isMasterEarningEnabled || !earningSettings.isVideoWatchEarningEnabled || !earningSettings.allowDirectFeedClaim) {
+      showToast(lang === 'bn' ? '📺 হোম ফিড থেকে ক্লেইম বা আর্নিং বন্ধ রয়েছে।' : '📺 Earning from feed is currently disabled.');
+      return;
+    }
+
+    if (reel.isEarningEnabled === false) {
+      showToast(lang === 'bn' ? '📺 এই রিলটিতে পয়েন্ট আর্নিং বন্ধ রয়েছে।' : '📺 Earning is disabled for this reel.');
+      return;
+    }
+
+    if (earningSettings.videoEarningScope === 'offer_reels_only' && !reel.isSpecialOffer) {
+      showToast(lang === 'bn' ? '📺 শুধুমাত্র স্পেশাল অফার রিলগুলোতে পয়েন্ট প্রযোজ্য।' : '📺 Earning only applies to special offer reels.');
+      return;
+    }
+
+    if (!isAuthenticated) {
+      triggerAuthPrompt(
+        lang === 'bn'
+          ? 'টাকা আর্ন করতে চাইলে লগইন বা রেজিস্ট্রেশন করুন! আপনার অ্যাকাউন্টে পয়েন্ট ও টাকা জমা হবে।'
+          : 'Login or register to earn points and withdraw money!'
+      );
+      return;
+    }
+
+    if (watchedReelIds.includes(reel.id)) {
+      showToast(lang === 'bn' ? 'আপনি ইতিমধ্যে এই রিলের পয়েন্ট সংগ্রহ করেছেন!' : 'Already collected points for this reel!');
+      return;
+    }
+
+    if (isDailyReelLimitReached) {
+      showToast(
+        lang === 'bn'
+          ? `🔒 আজকের রিল আর্নিং লিমিট পূর্ণ হয়েছে (${toBengaliNumber(dailyClaimsUsed, lang)}/${toBengaliNumber(dailyClaimsLimit, lang)} রিল • ${toBengaliNumber(dailyPointsUsed, lang)}/${toBengaliNumber(dailyPointsLimit, lang)} Pts)!`
+          : `🔒 Daily reel limit reached!`
+      );
+      return;
+    }
+
+    try {
+      confetti({
+        particleCount: 30,
+        spread: 50,
+        origin: { y: 0.7 },
+        colors: ['#00c853', '#00e676', '#ffffff'],
+      });
+    } catch {
+      // Ignore
+    }
+
+    const pts = reel.pointsReward || earningSettings.defaultVideoRewardPoints || 10;
+    handleEarnReelReward(pts, reel.title, reel.id);
+  };
+
+  // Add Comment
+  const handleAddComment = async (reelId: string, text: string) => {
+    if (!isAuthenticated) {
+      triggerAuthPrompt(
+        lang === 'bn'
+          ? 'কমেন্ট করতে এবং পয়েন্ট আর্ন করতে অনুগ্রহ করে লগইন বা রেজিস্ট্রেশন করুন!'
+          : 'Login or register to post comments!'
+      );
+      return;
+    }
+    const newComment: Partial<Comment> = {
+      reelId,
+      userId: currentUser.id,
+      userName: currentUser.name,
+      userAvatar: currentUser.avatar,
+      text,
+      createdAt: new Date().toISOString(),
+      likes: 0,
+    };
+
+    await addDocument(`reels/${reelId}/comments`, newComment);
+
+    // Update comment counter on reel
+    const reel = reels.find(r => r.id === reelId);
+    if (reel) {
+      updateDocument('reels', reelId, { commentsCount: reel.commentsCount + 1 });
+    }
+  };
+
+  // Withdrawal Request (Instant 0ms deduction + atomic increment)
+  const handleRequestWithdrawal = async (
+    reqData: Omit<WithdrawalRequest, 'id' | 'createdAt' | 'status'>
+  ) => {
+    const activeUser = currentUserRef.current;
+    if ((activeUser.points || 0) < reqData.pointsDeducted) {
+      showToast(lang === 'bn' ? '⚠️ আপনার অ্যাকাউন্টে পর্যাপ্ত পয়েন্ট নেই!' : '⚠️ Insufficient points!');
+      return;
+    }
+
+    const newReq: Partial<WithdrawalRequest> = {
+      ...reqData,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+
+    // Instant 0ms deduction
+    applyFastUserMutation(-reqData.pointsDeducted);
+    showToast(`💸 ৳${reqData.amountBDT} উত্তোলনের আবেদন পেন্ডিং রয়েছে।`);
+
+    addDocument('withdrawals', newReq).catch((err) => {
+      console.error('Withdrawal request error:', err);
+    });
+  };
+
+  // Deposit Points (Manual Request)
+  const handleSubmitDepositRequest = async (req: Omit<DepositRequest, 'id' | 'createdAt' | 'status' | 'userId' | 'userName' | 'userPhone'>) => {
+    const newReq: Partial<DepositRequest> = {
+      ...req,
+      userId: currentUser.id,
+      userName: currentUser.name,
+      userPhone: currentUser.phone,
+      createdAt: new Date().toISOString(),
+      status: 'pending',
+    };
+
+    await addDocument('deposits', newReq);
+    showToast(
+      lang === 'bn'
+        ? `💎 ডিপোজিট রিকোয়েস্ট জমা হয়েছে। এডমিন যাচাই করে পয়েন্ট যোগ করে দেবে।`
+        : `💎 Deposit request submitted. Admin will credit points after verification.`
+    );
+  };
+
+  const handleApproveDeposit = async (id: string) => {
+    const req = depositRequests.find((d) => d.id === id);
+    if (!req) return;
+
+    // Optimistic 0ms update
+    setDepositRequests((prev) => prev.map((d) => (d.id === id ? { ...d, status: 'approved' } : d)));
+    setUsers((prev) =>
+      prev.map((u) => (u.id === req.userId ? { ...u, points: (u.points || 0) + req.pointsToAdd } : u))
+    );
+    if (currentUserRef.current.id === req.userId) {
+      setCurrentUser((prev) => ({ ...prev, points: (prev.points || 0) + req.pointsToAdd }));
+    }
+
+    if (!isMuted) playSuccessChime();
+    showToast('✅ ডিপোজিট অনুমোদন করা হয়েছে এবং ইউজারকে পয়েন্ট দেওয়া হয়েছে!');
+
+    try {
+      await Promise.all([
+        updateDocument('users', req.userId, { points: increment(req.pointsToAdd) }),
+        updateDocument('deposits', id, { status: 'approved' }),
+      ]);
+      sendNotification(
+        req.userId,
+        '✅ ডিপোজিট সফল',
+        `আপনার ৳${req.amountBDT} ডিপোজিট রিকোয়েস্টটি সফল হয়েছে। +${req.pointsToAdd} পয়েন্ট আপনার ব্যালেন্সে যোগ করা হয়েছে।`,
+        'deposit'
+      );
+    } catch (err) {
+      console.warn('Approve deposit sync warning:', err);
+    }
+  };
+
+  const handleRejectDeposit = async (id: string) => {
+    const req = depositRequests.find((d) => d.id === id);
+    setDepositRequests((prev) => prev.map((d) => (d.id === id ? { ...d, status: 'rejected' } : d)));
+    showToast('❌ ডিপোজিট রিকোয়েস্ট বাতিল করা হয়েছে।');
+    if (req) {
+      sendNotification(
+        req.userId,
+        '❌ ডিপোজিট বাতিল',
+        `দুঃখিত, আপনার ৳${req.amountBDT} ডিপোজিট রিকোয়েস্টটি এডমিন বাতিল করেছে। বিস্তারিত জানতে সাপোর্ট টিমে যোগাযোগ করুন।`,
+        'deposit'
+      );
+    }
+    await updateDocument('deposits', id, { status: 'rejected' });
+  };
+
+  // Send Gift (Instant 0ms deduction + host/creator & admin commission split + Live Stream Celebration)
+  const handleSendGift = async (
+    gift: GiftItem,
+    _creatorShare?: number,
+    _userCashback?: number,
+    explicitTargetUserId?: string,
+    explicitLiveId?: string,
+    _explicitAdminShare?: number
+  ) => {
+    const split = calculateGiftSplit(gift.costPoints, earningSettings);
+    const creatorShare = split.creatorShare;
+    const adminShare = split.adminShare;
+    const userCashback = split.userCashback;
+    const netCost = Math.max(0, gift.costPoints - userCashback);
+
+    if ((currentUserRef.current.points || 0) < gift.costPoints) {
+      showToast(lang === 'bn' ? '⚠️ পর্যাপ্ত পয়েন্ট নেই!' : '⚠️ Insufficient points!');
+      return;
+    }
+
+    const resolvedTargetUserId = explicitTargetUserId ?? giftTarget?.userId;
+    const resolvedLiveId = explicitLiveId ?? giftTarget?.liveId;
+    const adminUid =
+      earningSettings.adminCommissionReceiverId ||
+      users.find((u) => u.role === 'admin')?.id ||
+      '';
+
+    const senderNetDelta =
+      -netCost +
+      (adminShare > 0 && adminUid && adminUid === currentUserRef.current.id ? adminShare : 0);
+
+    applyFastUserMutation(senderNetDelta);
+
+    if (resolvedTargetUserId && resolvedTargetUserId !== currentUserRef.current.id && creatorShare > 0) {
+      setUsers((prev) =>
+        prev.map((u) => (u.id === resolvedTargetUserId ? { ...u, points: (u.points || 0) + creatorShare } : u))
+      );
+      updateDocument('users', resolvedTargetUserId, { points: increment(creatorShare) }).catch((err) =>
+        console.warn('Gift creator credit warning:', err)
+      );
+      sendNotification(
+        resolvedTargetUserId,
+        '🎁 উপহার পেয়েছেন',
+        `অভিনন্দন! ${currentUserRef.current.name} আপনাকে ${gift.icon} ${gift.nameBn} উপহার দিয়েছেন (+${creatorShare} পয়েন্ট যুক্ত হয়েছে)।`,
+        'general'
+      );
+    }
+
+    if (adminShare > 0 && adminUid && adminUid !== currentUserRef.current.id) {
+      setUsers((prev) =>
+        prev.map((u) => (u.id === adminUid ? { ...u, points: (u.points || 0) + adminShare } : u))
+      );
+      updateDocument('users', adminUid, { points: increment(adminShare) }).catch((err) =>
+        console.warn('Gift admin commission credit warning:', err)
+      );
+    }
+
+    if (resolvedLiveId) {
+      updateDocument('live_streams', resolvedLiveId, {
+        giftsTotalPoints: increment(creatorShare),
+        adminGiftPoints: increment(adminShare),
+      }).catch((err) => console.warn('Live gift total update warning:', err));
+
+      addDocument(`live_streams/${resolvedLiveId}/chat`, {
+        userId: currentUserRef.current.id,
+        userName: currentUserRef.current.name,
+        userAvatar: currentUserRef.current.avatar,
+        text:
+          lang === 'bn'
+            ? `পাঠালেন ${gift.nameBn}!`
+            : `sent ${gift.nameEn}!`,
+        type: 'gift',
+        giftId: gift.id,
+        giftIcon: gift.icon,
+        giftName: lang === 'bn' ? gift.nameBn : gift.nameEn,
+        giftPoints: gift.costPoints,
+        createdAt: new Date().toISOString(),
+      }).catch((err) => console.warn('Live gift chat message warning:', err));
+    }
+
+    showToast(
+      lang === 'bn'
+        ? `🎁 ${gift.icon} ${gift.nameBn} উপহার পাঠানো হয়েছে! ক্যাশব্যাক: +${toBengaliNumber(userCashback, lang)} পয়েন্ট`
+        : `🎁 Sent ${gift.icon} ${gift.nameEn}! Cashback: +${userCashback} pts`
+    );
+  };
+
+  const handleOpenUserProfile = async (userId: string) => {
+    const userToView = users.find(u => u.id === userId);
+    if (userToView) {
+      setSelectedUserProfileUser(userToView);
+      setIsUserProfileModalOpen(true);
+    } else {
+      // Fetch from Firestore if not in local list
+      const remoteUser = await getDocument('users', userId) as User | null;
+      if (remoteUser) {
+        setSelectedUserProfileUser(remoteUser);
+        setIsUserProfileModalOpen(true);
+      } else {
+        showToast(lang === 'bn' ? 'ইউজার প্রোফাইল পাওয়া যায়নি।' : 'User profile not found.');
+      }
+    }
+  };
+
+  const handleToggleFollow = async (targetUserId: string, targetName?: string) => {
+    if (!isAuthenticated) {
+      triggerAuthPrompt(
+        lang === 'bn'
+          ? 'ক্রিয়েটরকে ফলো করতে অনুগ্রহ করে লগইন বা রেজিস্ট্রেশন করুন!'
+          : 'Please login or register to follow creators!'
+      );
+      return;
+    }
+
+    const me = currentUserRef.current;
+    if (!targetUserId || targetUserId === me.id) return;
+
+    const myFollowing = me.following || [];
+    const currentlyFollowing = myFollowing.includes(targetUserId);
+    const nextFollowing = currentlyFollowing
+      ? myFollowing.filter((id) => id !== targetUserId)
+      : Array.from(new Set([...myFollowing, targetUserId]));
+    const nextFollowingCount = Math.max(0, (me.followingCount ?? myFollowing.length) + (currentlyFollowing ? -1 : 1));
+
+    // Optimistic update on currentUser
+    setCurrentUser((prev) => ({
+      ...prev,
+      following: nextFollowing,
+      followingCount: nextFollowingCount,
+    }));
+
+    const updateTargetState = (u: User): User => {
+      if (u.id === me.id) {
+        return { ...u, following: nextFollowing, followingCount: nextFollowingCount };
+      }
+      if (u.id === targetUserId) {
+        const existingFollowers = u.followers || [];
+        const nextFollowers = currentlyFollowing
+          ? existingFollowers.filter((id) => id !== me.id)
+          : Array.from(new Set([...existingFollowers, me.id]));
+        const nextFollowersCount = Math.max(0, (u.followersCount ?? existingFollowers.length) + (currentlyFollowing ? -1 : 1));
+        return { ...u, followers: nextFollowers, followersCount: nextFollowersCount };
+      }
+      return u;
+    };
+
+    setUsers((prev) => prev.map(updateTargetState));
+    setSelectedUserProfileUser((prev) => (prev ? updateTargetState(prev) : prev));
+    setFollowListModal((prev) => (prev ? { ...prev, user: updateTargetState(prev.user) } : prev));
+
+    if (!isMuted) playPopSound();
+    showToast(
+      currentlyFollowing
+        ? (lang === 'bn' ? `${targetName || 'ক্রিয়েটর'}-কে আনফলো করেছেন।` : `Unfollowed ${targetName || 'creator'}.`)
+        : (lang === 'bn' ? `✅ ${targetName || 'ক্রিয়েটর'}-কে ফলো করেছেন!` : `✅ Followed ${targetName || 'creator'}!`)
+    );
+
+    // Atomic Firestore persistence
+    try {
+      await updateDocument('users', me.id, {
+        following: currentlyFollowing ? arrayRemove(targetUserId) : arrayUnion(targetUserId),
+        followingCount: currentlyFollowing
+          ? (me.followingCount ?? myFollowing.length) > 0 ? increment(-1) : 0
+          : increment(1),
+      });
+    } catch (err) {
+      console.warn('Follow sync on self warning:', err);
+    }
+
+    try {
+      const targetLocal = users.find((u) => u.id === targetUserId);
+      const targetFollowersCount = targetLocal?.followersCount ?? (targetLocal?.followers?.length || 0);
+      await updateDocument('users', targetUserId, {
+        followers: currentlyFollowing ? arrayRemove(me.id) : arrayUnion(me.id),
+        followersCount: currentlyFollowing
+          ? targetFollowersCount > 0 ? increment(-1) : 0
+          : increment(1),
+      });
+
+      if (!currentlyFollowing) {
+        sendNotification(
+          targetUserId,
+          lang === 'bn' ? '👥 নতুন ফলোয়ার!' : '👥 New Follower!',
+          lang === 'bn'
+            ? `${me.name} আপনাকে ফলো করা শুরু করেছেন।`
+            : `${me.name} started following you.`,
+          'general'
+        );
+      }
+    } catch (err) {
+      console.warn('Follow sync on target warning:', err);
+    }
+  };
+
+  const handleOpenChat = async (otherUser: User) => {
+    if (!isAuthenticated) {
+      triggerAuthPrompt();
+      return;
+    }
+
+    // Generate unique session ID: uid1_uid2 (alphabetically sorted)
+    const sessionId = [currentUser.id, otherUser.id].sort().join('_');
+    
+    // Check if session exists
+    let session = await getDocument('chats', sessionId) as ChatSession | null;
+    
+    if (!session) {
+      // Create new session
+      session = {
+        id: sessionId,
+        participants: [currentUser.id, otherUser.id],
+        updatedAt: new Date().toISOString()
+      };
+      await setDocument('chats', sessionId, session);
+    }
+
+    setActiveChatSession(session);
+    setActiveChatOtherUser(otherUser);
+    setIsChatModalOpen(true);
+    setIsUserProfileModalOpen(false); // Close profile if open
+    setIsChatListModalOpen(false); // Close list if open
+  };
+
+  const handleShareInChat = (reel: Reel) => {
+    setSharingReelInChat(reel);
+    setIsUserPickerOpen(true);
+  };
+
+  const handlePickUserForShare = async (user: User) => {
+    if (!sharingReelInChat) return;
+
+    // Create session
+    const sessionId = [currentUser.id, user.id].sort().join('_');
+    const now = new Date().toISOString();
+    
+    // Add message with reel
+    const newMsg: Partial<ChatMessage> = {
+      sessionId,
+      senderId: currentUser.id,
+      text: lang === 'bn' ? `আপনার সাথে একটি রিল শেয়ার করেছেন: ${sharingReelInChat.title}` : `Shared a reel with you: ${sharingReelInChat.title}`,
+      sharedReelId: sharingReelInChat.id,
+      sharedReelThumbnail: sharingReelInChat.thumbnailUrl,
+      createdAt: now,
+      isHidden: false,
+    };
+
+    try {
+      // Check if session exists or create it
+      const session = await getDocument('chats', sessionId) as ChatSession | null;
+      if (!session) {
+        await setDocument('chats', sessionId, {
+          id: sessionId,
+          participants: [currentUser.id, user.id],
+          updatedAt: now,
+          lastMessage: '🎥 ' + (lang === 'bn' ? 'রিল শেয়ার' : 'Shared a reel'),
+          lastMessageTime: now,
+        });
+      } else {
+        await updateDocument('chats', sessionId, {
+          updatedAt: now,
+          lastMessage: '🎥 ' + (lang === 'bn' ? 'রিল শেয়ার' : 'Shared a reel'),
+          lastMessageTime: now,
+        });
+      }
+
+      await addDocument(`chats/${sessionId}/messages`, newMsg);
+      showToast(lang === 'bn' ? '✅ রিলটি সফলভাবে পাঠানো হয়েছে!' : '✅ Reel shared successfully!');
+      
+      setIsUserPickerOpen(false);
+      setSharingReelInChat(null);
+      
+      // Optionally open the chat
+      handleOpenChat(user);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+
+
+  // Share Reel
+  const handleOpenShare = (reel: Reel) => {
+    setSharingLiveStream(null);
+    setSharingReel(reel);
+    setShowShareSheet(true);
+  };
+
+  // Task Completion (Instant 0ms + atomic increment)
+  const handleCompleteTask = (taskId: string, rewardPoints: number) => {
+    if (!isAuthenticated || currentUserRef.current.id === INITIAL_USER.id) return;
+    const currentCompleted = currentUserRef.current.completedTaskIds || [];
+    if (!currentCompleted.includes(taskId)) {
+      const updatedCompleted = [...currentCompleted, taskId];
+      applyFastUserMutation(rewardPoints, { completedTaskIds: updatedCompleted });
+      showToast(lang === 'bn' ? `🎉 টাস্ক সম্পন্ন হয়েছে! +${toBengaliNumber(rewardPoints, lang)} পয়েন্ট অর্জিত।` : `🎉 Task completed! +${rewardPoints} pts.`);
+    }
+  };
+
+  // Admin Task Management
+  const handleAddTask = async (newTaskData: Omit<TaskItem, 'id' | 'completed'>) => {
+    const newTask: Partial<TaskItem> = {
+      ...newTaskData,
+      completed: false,
+      createdAt: new Date().toISOString()
+    };
+    await addDocument('tasks', newTask);
+    showToast(lang === 'bn' ? '✅ নতুন টাস্ক সফলভাবে যোগ করা হয়েছে!' : '✅ New task added successfully!');
+  };
+
+  const handleEditTask = async (task: TaskItem) => {
+    await updateDocument('tasks', task.id, task);
+    showToast(lang === 'bn' ? '✅ টাস্ক সফলভাবে আপডেট করা হয়েছে!' : '✅ Task updated successfully!');
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    await deleteDocument('tasks', taskId);
+    showToast(lang === 'bn' ? '🗑️ টাস্ক মুছে ফেলা হয়েছে!' : '🗑️ Task deleted!');
+  };
+
+  // Add Points (e.g., from spin wheel or scratch card)
+  const handleAddPointsGeneral = (pts: number, reason: string) => {
+    updateUserPoints(pts);
+    showToast(`🎉 ${reason}: +${pts} পয়েন্ট ওয়ালেটে যুক্ত হয়েছে!`);
+  };
+
+    // Admin Actions
+  const handleApproveWithdrawal = async (id: string) => {
+    const w = withdrawals.find(req => req.id === id);
+    if (!w) return;
+
+    const trxId = `TRX${Math.floor(10000000 + Math.random() * 90000000)}`;
+    setWithdrawals((prev) => prev.map((item) => (item.id === id ? { ...item, status: 'approved', transactionId: trxId } : item)));
+    setUsers((prev) =>
+      prev.map((u) => (u.id === w.userId ? { ...u, totalWithdrawn: (u.totalWithdrawn || 0) + w.amountBDT } : u))
+    );
+    if (currentUserRef.current.id === w.userId) {
+      setCurrentUser((prev) => ({ ...prev, totalWithdrawn: (prev.totalWithdrawn || 0) + w.amountBDT }));
+    }
+
+    if (!isMuted) playSuccessChime();
+    showToast('✅ উইথড্রয়াল অনুমোদন করা হয়েছে এবং টাকা পাঠানো সম্পন্ন!');
+
+    try {
+      await Promise.all([
+        updateDocument('users', w.userId, { totalWithdrawn: increment(w.amountBDT) }),
+        updateDocument('withdrawals', id, { status: 'approved', transactionId: trxId }),
+      ]);
+      sendNotification(
+        w.userId,
+        '💸 উত্তোলন সফল',
+        `আপনার ৳${w.amountBDT} উত্তোলনের আবেদনটি সফলভাবে সম্পন্ন হয়েছে। আপনার পেমেন্ট পাঠিয়ে দেওয়া হয়েছে।`,
+        'withdrawal'
+      );
+    } catch (err) {
+      console.warn('Approve withdrawal sync warning:', err);
+    }
+  };
+
+  const handleRejectWithdrawal = async (id: string) => {
+    const req = withdrawals.find((w) => w.id === id);
+    if (!req) return;
+
+    setWithdrawals((prev) => prev.map((item) => (item.id === id ? { ...item, status: 'rejected' } : item)));
+    setUsers((prev) =>
+      prev.map((u) => (u.id === req.userId ? { ...u, points: (u.points || 0) + req.pointsDeducted } : u))
+    );
+    if (currentUserRef.current.id === req.userId) {
+      setCurrentUser((prev) => ({ ...prev, points: (prev.points || 0) + req.pointsDeducted }));
+    }
+    showToast('❌ রিকোয়েস্ট বাতিল করা হয়েছে এবং পয়েন্ট ইউজারের অ্যাকাউন্টে ফেরত দেওয়া হয়েছে।');
+
+    try {
+      await Promise.all([
+        updateDocument('users', req.userId, { points: increment(req.pointsDeducted) }),
+        updateDocument('withdrawals', id, { status: 'rejected' }),
+      ]);
+      sendNotification(
+        req.userId,
+        '❌ উত্তোলন বাতিল',
+        `আপনার ৳${req.amountBDT} উত্তোলনের আবেদনটি বাতিল করা হয়েছে। আপনার পয়েন্টগুলো অ্যাকাউন্টে ফেরত দেওয়া হয়েছে।`,
+        'withdrawal'
+      );
+    } catch (err) {
+      console.warn('Reject withdrawal sync warning:', err);
+    }
+  };
+
+  const handleGiveUserBonus = async (userId: string, pointsDelta: number) => {
+    const targetUser = users.find((u) => u.id === userId) || (currentUserRef.current.id === userId ? currentUserRef.current : null);
+    const currentPts = targetUser?.points ?? 0;
+    const effectiveDelta = pointsDelta < 0 ? -Math.min(currentPts, Math.abs(pointsDelta)) : pointsDelta;
+
+    if (effectiveDelta === 0) {
+      showToast(pointsDelta < 0 ? '⚠️ এই ইউজারের পয়েন্ট ইতিমধ্যে ০!' : '⚠️ পয়েন্ট ০ দেওয়া যাবে না!');
+      return;
+    }
+
+    // Instant 0ms optimistic UI update
+    setUsers((prev) =>
+      prev.map((u) => (u.id === userId ? { ...u, points: Math.max(0, (u.points || 0) + effectiveDelta) } : u))
+    );
+    if (currentUserRef.current.id === userId) {
+      setCurrentUser((prev) => ({ ...prev, points: Math.max(0, (prev.points || 0) + effectiveDelta) }));
+    }
+
+    if (effectiveDelta > 0 && !isMuted) playSuccessChime();
+    showToast(
+      effectiveDelta > 0
+        ? `🎉 ইউজারকে +${toBengaliNumber(effectiveDelta, lang)} পয়েন্ট দ্রুত যোগ করা হয়েছে!`
+        : `➖ ইউজার থেকে ${toBengaliNumber(Math.abs(effectiveDelta), lang)} পয়েন্ট মাইনাস করা হয়েছে!`
+    );
+
+    try {
+      await updateDocument('users', userId, { points: increment(effectiveDelta) });
+    } catch (err) {
+      console.warn('Admin bonus sync warning:', err);
+    }
+  };
+
+  const handleAddNewReel = async (
+    newReelData: Pick<Reel, 'title' | 'userId' | 'creatorName' | 'creatorHandle' | 'creatorAvatar' | 'category' | 'thumbnailUrl' | 'videoUrl' | 'pointsReward' | 'audioTrack' | 'caption' | 'hashtags' | 'isVerified'>
+  ) => {
+    const newReel: Reel = {
+      ...newReelData,
+      id: `reel_${Date.now()}`,
+      videoUrl: newReelData.videoUrl, // Preserve user's original video
+      userId: newReelData.userId || firebaseUser?.uid || currentUser.id,
+      likesCount: 0,
+      commentsCount: 0,
+      sharesCount: 0,
+      viewsCount: 0,
+      createdAt: new Date().toISOString(),
+      timeAgo: 'এখনো',
+    };
+    // Optimistic addition
+    setReels((prev) => [newReel, ...prev]);
+    showToast(lang === 'bn' ? '🎉 রিলটি সফলভাবে পাবলিশ হয়েছে! আসল ভিডিওটি চলবে।' : '🎉 Reel published successfully!');
+    try {
+      await addDocument('reels', newReel);
+    } catch (err) {
+      console.warn('Firestore add reel note:', err);
+    }
+  };
+
+  const [currentLiveStreamId, setCurrentLiveStreamId] = useState<string | null>(null);
+  const deepLinkedLiveHandledRef = useRef(false);
+
+  useEffect(() => {
+    if (deepLinkedLiveHandledRef.current || activeLiveStreams.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const liveParam = params.get('liveId');
+    if (liveParam && activeLiveStreams.some((s) => s.id === liveParam)) {
+      deepLinkedLiveHandledRef.current = true;
+      setCurrentLiveStreamId(liveParam);
+      setShowLiveSheet(true);
+    }
+  }, [activeLiveStreams]);
+
+  const openPersonalLiveStudio = (mode: LiveMode = 'audio') => {
+    if (!isAuthenticated) {
+      triggerAuthPrompt(
+        lang === 'bn'
+          ? 'পার্সোনাল লাইভ শুরু করতে লগইন বা রেজিস্ট্রেশন করুন!'
+          : 'Login or register to start your personal live!'
+      );
+      return;
+    }
+    const existingMyLive = activeLiveStreams.find((s) => s.hostId === currentUser.id);
+    if (existingMyLive) {
+      setCurrentLiveStreamId(existingMyLive.id);
+      setShowLiveSheet(true);
+      return;
+    }
+    setGoLiveInitialMode(mode);
+    setShowGoLiveSetupModal(true);
+  };
+
+  const handleStartLive = async (payload: StartLivePayload) => {
+    if (!isAuthenticated) return;
+
+    // Close any lingering active stream from the same user cleanly
+    const existingStreams = activeLiveStreams.filter((s) => s.hostId === currentUser.id);
+    for (const prev of existingStreams) {
+      updateDocument('live_streams', prev.id, {
+        status: 'ended',
+        endedAt: new Date().toISOString(),
+      }).catch(() => {});
+    }
+
+    const liveId = `live_${Date.now()}`;
+    const newLive: LiveStream = {
+      id: liveId,
+      hostId: currentUser.id,
+      hostName: currentUser.name,
+      hostAvatar: currentUser.avatar,
+      title:
+        payload.title.trim() ||
+        (payload.mode === 'audio'
+          ? `${currentUser.name}-এর অডিও আড্ডা`
+          : `${currentUser.name}-এর লাইভ ভিডিও`),
+      mode: payload.mode,
+      category: payload.category || 'আড্ডা',
+      pinnedNotice: payload.pinnedNotice || '',
+      isMicMuted: false,
+      isCameraOn: payload.mode === 'video',
+      chatEnabled: payload.chatEnabled,
+      allowSpeakerRequests: payload.allowSpeakerRequests,
+      viewersCount: 1,
+      likesCount: 0,
+      giftsTotalPoints: 0,
+      adminGiftPoints: 0,
+      coHosts: [],
+      status: 'active',
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      await setDocument('live_streams', liveId, newLive);
+      setCurrentLiveStreamId(liveId);
+      setShowLiveSheet(true);
+      showToast(
+        payload.mode === 'audio'
+          ? lang === 'bn'
+            ? '🎙️ আপনার অডিও আড্ডা লাইভ শুরু হয়েছে!'
+            : '🎙️ Your Audio Adda is now LIVE!'
+          : lang === 'bn'
+          ? '📹 আপনার লাইভ ভিডিও শুরু হয়েছে!'
+          : '📹 Your Video Live has started!'
+      );
+    } catch (err) {
+      console.error('Failed to start live:', err);
+      throw err;
+    }
+  };
+
+  const handleEndLive = async (liveId: string, byAdmin = false, reason?: string) => {
+    const isAdminFirebaseAuthed = Boolean(
+      firebaseUser &&
+        (firebaseUser.email?.toLowerCase() === 'mdmasudranabd80814@gmail.com' ||
+          firebaseUser.uid === 'system_admin')
+    );
+    if (!firebaseUser || (byAdmin && !isAdminFirebaseAuthed)) {
+      showToast(
+        lang === 'bn'
+          ? '⚠️ লাইভ ক্যানসেল করতে এডমিন Google অ্যাকাউন্ট (mdmasudranabd80814@gmail.com) দিয়ে লগইন করুন!'
+          : '⚠️ Sign in with Admin Google account first!'
+      );
+      return;
+    }
+    const targetStream = activeLiveStreams.find((s) => s.id === liveId);
+    const cleanReason = (reason || '').trim();
+    const endedPayload: Partial<LiveStream> = {
+      status: 'ended',
+      endedAt: new Date().toISOString(),
+      ...(byAdmin
+        ? {
+            cancelledByAdmin: true,
+            cancelReason: cleanReason || 'এডমিন নীতিমালার কারণে লাইভটি বাতিল করা হয়েছে',
+          }
+        : {}),
+    };
+    try {
+      await updateDocument('live_streams', liveId, endedPayload);
+      setActiveLiveStreams((prev) => prev.filter((s) => s.id !== liveId));
+      if (currentLiveStreamId === liveId) {
+        setCurrentLiveStreamId(null);
+      }
+      if (byAdmin) {
+        await addDocument(`live_streams/${liveId}/chat`, {
+          userId: currentUserRef.current.id || 'admin',
+          userName: currentUserRef.current.name || 'Admin',
+          userAvatar: currentUserRef.current.avatar || '',
+          text: cleanReason
+            ? `🛑 এডমিন লাইভটি ক্যানসেল করেছেন (${cleanReason})`
+            : '🛑 এডমিন এই লাইভ সেশনটি ক্যানসেল করেছেন',
+          type: 'system',
+          createdAt: new Date().toISOString(),
+        }).catch(() => {});
+
+        if (targetStream?.hostId) {
+          sendNotification(
+            targetStream.hostId,
+            '🛑 লাইভ ক্যানসেল করা হয়েছে',
+            cleanReason
+              ? `আপনার "${targetStream.title}" লাইভটি এডমিন ক্যানসেল করেছেন। কারণ: ${cleanReason}`
+              : `আপনার "${targetStream.title}" লাইভটি এডমিন ক্যানসেল করেছেন।`,
+            'general'
+          );
+        }
+        showToast(lang === 'bn' ? '🛑 লাইভ সেশনটি এডমিন দ্বারা ক্যানসেল করা হয়েছে।' : '🛑 Live session cancelled by Admin.');
+      } else {
+        showToast(lang === 'bn' ? '🛑 আপনার লাইভ সেশনটি শেষ হয়েছে।' : '🛑 Live session ended.');
+      }
+    } catch (err) {
+      console.error('Failed to end live:', err);
+      showToast(
+        lang === 'bn'
+          ? '⚠️ লাইভ ক্যানসেল করতে এডমিন Google অ্যাকাউন্ট (mdmasudranabd80814@gmail.com) দিয়ে লগইন থাকা প্রয়োজন!'
+          : '⚠️ Admin Google login required to cancel live!'
+      );
+      throw err;
+    }
+  };
+
+  const handleUpdateReel = async (reelId: string, updatedData: Partial<Reel>) => {
+    // 1. Persist to edited map
+    const newMap = { ...editedReelsMap, [reelId]: { ...(editedReelsMap[reelId] || {}), ...updatedData } };
+    setEditedReelsMap(newMap);
+    try {
+      localStorage.setItem('rt_edited_reels', JSON.stringify(newMap));
+    } catch (e) {
+      console.warn('LocalStorage save failed', e);
+    }
+
+    // 2. Immediately update in memory
+    setReels((prev) =>
+      prev.map((r) => (r.id === reelId ? { ...r, ...updatedData } : r))
+    );
+    playSuccessChime();
+    showToast(lang === 'bn' ? '✅ রিলটি সফলভাবে আপডেট হয়েছে!' : '✅ Reel updated successfully!');
+
+    // 3. Persist to Firestore
+    try {
+      await updateDocument('reels', reelId, updatedData);
+    } catch (err) {
+      console.warn('Firestore update note (may be local demo reel):', err);
+    }
+  };
+
+  const handleDeleteReel = async (reel: Reel, reason?: string) => {
+    // 1. Immediately record in deletedReelIds and localStorage
+    const updatedDeleted = Array.from(new Set([...deletedReelIds, reel.id]));
+    setDeletedReelIds(updatedDeleted);
+    try {
+      localStorage.setItem('rt_deleted_reels', JSON.stringify(updatedDeleted));
+    } catch (e) {
+      console.warn('LocalStorage save failed', e);
+    }
+
+    // 2. Immediately remove from local state
+    setReels((prev) => prev.filter((r) => r.id !== reel.id));
+    if (fullScreenReelId === reel.id) {
+      setFullScreenReelId(null);
+    }
+
+    // 3. User feedback
+    playSuccessChime();
+    showToast(lang === 'bn' ? '🗑️ রিলটি সফলভাবে মুছে ফেলা হয়েছে।' : '🗑️ Reel deleted successfully.');
+
+    // 4. Remote delete from Firestore
+    try {
+      await deleteDocument('reels', reel.id);
+      
+      // 5. Send notification to user
+      if (reel.userId) {
+        sendNotification(
+          reel.userId,
+          '⚠️ ভিডিও অপসারণ করা হয়েছে',
+          `আপনার "${reel.title}" ভিডিওটি অপসারণ করা হয়েছে। ${reason ? `কারণ: ${reason}` : 'এটি আমাদের কমিউনিটি গাইডলাইন লঙ্ঘন করেছে।'}`,
+          'reel_deleted'
+        );
+      }
+    } catch (err) {
+      console.warn('Firestore delete note (may be initial demo reel):', err);
+    }
+  };
+
+  // Switch User Profile (legacy, can be removed or simplified)
+  const handleSwitchUser = (updatedUser: User) => {
+    updateDocument('users', updatedUser.id, updatedUser);
+  };
+
+  const handleUpdateUser = async (updatedUser: User) => {
+    setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+    if (currentUser.id === updatedUser.id) {
+      setCurrentUser(updatedUser);
+    }
+    try {
+      await updateDocument('users', updatedUser.id, updatedUser);
+    } catch (err) {
+      console.warn('Firestore update user note:', err);
+    }
+    showToast(lang === 'bn' ? '✅ ইউজার প্রোফাইল সফলভাবে আপডেট করা হয়েছে!' : '✅ User profile updated!');
+  };
+
+  const handleDeleteUser = async (userId: string, userName: string) => {
+    setUsers((prev) => prev.filter((u) => u.id !== userId));
+    try {
+      await deleteDocument('users', userId);
+    } catch (err) {
+      console.warn('Firestore delete user note:', err);
+    }
+    showToast(lang === 'bn' ? `🗑️ ${userName} কে সফলভাবে রিমুভ করা হয়েছে!` : `🗑️ ${userName} removed!`);
+  };
+
+  const handleUpdatePaymentNumbers = (nums: { bKash: string; Nagad: string; Rocket: string }) => {
+    setAdminPaymentNumbers(nums);
+    try {
+      localStorage.setItem('rt_payment_numbers', JSON.stringify(nums));
+    } catch (e) {
+      console.warn(e);
+    }
+    showToast(lang === 'bn' ? '✅ পেমেন্ট নম্বর সফলভাবে সংরক্ষিত হয়েছে!' : '✅ Payment numbers saved!');
+  };
+
+  const handleUpdateMinWithdrawal = (amt: number) => {
+    setMinWithdrawal(amt);
+    try {
+      localStorage.setItem('rt_min_withdrawal', String(amt));
+    } catch (e) {
+      console.warn(e);
+    }
+    showToast(lang === 'bn' ? `✅ সর্বনিম্ন ক্যাশআউট ৳${amt} নির্ধারণ করা হয়েছে!` : `✅ Min withdrawal set to ৳${amt}!`);
+  };
+
+  const handleUpdateSpinMaxPrize = (val: number) => {
+    setSpinMaxPrize(val);
+    try {
+      localStorage.setItem('rt_spin_max', String(val));
+    } catch (e) {}
+    showToast(lang === 'bn' ? `✅ স্পিন হুইল সর্বোচ্চ পুরস্কার ${toBengaliNumber(val, lang)} পয়েন্ট সেভ করা হয়েছে!` : `✅ Spin wheel max reward set to ${val} pts!`);
+  };
+
+  const handleUpdateScratchPrize = (val: number) => {
+    setScratchPrize(val);
+    try {
+      localStorage.setItem('rt_scratch_prize', String(val));
+    } catch (e) {}
+    showToast(lang === 'bn' ? `✅ স্ক্র্যাচ কার্ড পুরস্কার ${toBengaliNumber(val, lang)} পয়েন্ট সেভ করা হয়েছে!` : `✅ Scratch card prize set to ${val} pts!`);
+  };
+
+  const handleSendDirectNotification = async (targetUserId: string, title: string, message: string) => {
+    // User requested: "এডমিন কোন ইউজারকে মেসেজ দিলে সেটা শুধু মেসেজ অপশনে দেখা যাবে নোটিফিকেশনে না"
+    // Deliver directly to the user's message/chat option (chats collection) ONLY, NOT to notifications collection
+    try {
+      const adminId = currentUser.id || 'admin';
+      const sessionId = [adminId, targetUserId].sort().join('_');
+      const now = new Date().toISOString();
+      const messageText = message.trim();
+
+      // Ensure chat session exists between admin and this user
+      const existingSession = await getDocument('chats', sessionId) as ChatSession | null;
+      if (!existingSession) {
+        await setDocument('chats', sessionId, {
+          id: sessionId,
+          participants: [adminId, targetUserId],
+          updatedAt: now,
+          lastMessage: messageText,
+          lastMessageTime: now,
+        });
+      } else {
+        await updateDocument('chats', sessionId, {
+          updatedAt: now,
+          lastMessage: messageText,
+          lastMessageTime: now,
+        });
+      }
+
+      // Add message into the chat session
+      await addDocument(`chats/${sessionId}/messages`, {
+        sessionId,
+        senderId: adminId,
+        text: messageText,
+        createdAt: now,
+        isHidden: false,
+      });
+
+      showToast(lang === 'bn' ? '✅ মেসেজটি সফলভাবে ইউজারের মেসেজ অপশনে পাঠানো হয়েছে!' : '✅ Message sent to user message inbox!');
+    } catch (err) {
+      console.error('Failed to send admin direct message:', err);
+      showToast(lang === 'bn' ? '❌ মেসেজ পাঠাতে সমস্যা হয়েছে' : '❌ Failed to send message');
+    }
+  };
+
+  const handleBroadcastNotification = async (title: string, message: string) => {
+    // Deliver broadcast directly to users' chat inbox (message option) without adding to notifications
+    try {
+      const adminId = currentUser.id || 'admin';
+      const now = new Date().toISOString();
+      const messageText = title ? `📢 [${title}]\n${message.trim()}` : message.trim();
+
+      for (const u of users) {
+        if (u.id && u.id !== adminId) {
+          const sessionId = [adminId, u.id].sort().join('_');
+          try {
+            const existingSession = await getDocument('chats', sessionId) as ChatSession | null;
+            if (!existingSession) {
+              await setDocument('chats', sessionId, {
+                id: sessionId,
+                participants: [adminId, u.id],
+                updatedAt: now,
+                lastMessage: messageText,
+                lastMessageTime: now,
+              });
+            } else {
+              await updateDocument('chats', sessionId, {
+                updatedAt: now,
+                lastMessage: messageText,
+                lastMessageTime: now,
+              });
+            }
+            await addDocument(`chats/${sessionId}/messages`, {
+              sessionId,
+              senderId: adminId,
+              text: messageText,
+              createdAt: now,
+              isHidden: false,
+            });
+          } catch (e) {
+            console.warn('Failed to send broadcast to user chat:', u.id, e);
+          }
+        }
+      }
+      showToast(lang === 'bn' ? `✅ সকল ${toBengaliNumber(users.length, lang)} জন ইউজারের মেসেজ অপশনে পাঠানো হয়েছে!` : `✅ Sent to message option of all ${users.length} users!`);
+    } catch (err) {
+      console.error('Failed to broadcast message:', err);
+    }
+  };
+
+  const handleUpdateRate = (newRate: number) => {
+    setPointRate(newRate);
+    try {
+      localStorage.setItem('rt_point_rate', String(newRate));
+    } catch (e) {
+      console.warn(e);
+    }
+  };
+
+  const handleUpdateAnnouncement = (text: string) => {
+    setAnnouncement(text);
+    try {
+      localStorage.setItem('rt_announcement', text);
+    } catch (e) {
+      console.warn(e);
+    }
+  };
+
+  const handleUpdateEarningSettings = async (newSettings: EarningSettings) => {
+    const normalizedSettings: EarningSettings = {
+      ...newSettings,
+      adminCommissionReceiverId:
+        newSettings.adminCommissionReceiverId ||
+        earningSettings.adminCommissionReceiverId ||
+        (currentUserRef.current.role === 'admin' && currentUserRef.current.id !== INITIAL_USER.id
+          ? currentUserRef.current.id
+          : ''),
+      loginOfferCampaignId:
+        newSettings.isLoginOfferEnabled && (newSettings.loginOfferPoints || 0) > 0
+          ? newSettings.loginOfferCampaignId || `offer_${Date.now()}`
+          : '',
+    };
+    setEarningSettings(normalizedSettings);
+    try {
+      localStorage.setItem('rt_earning_settings', JSON.stringify(normalizedSettings));
+    } catch (e) {
+      console.warn(e);
+    }
+    if (normalizedSettings.spinMaxPrize) {
+      setSpinMaxPrize(normalizedSettings.spinMaxPrize);
+    }
+    if (normalizedSettings.scratchCardPrize) {
+      setScratchPrize(normalizedSettings.scratchCardPrize);
+    }
+
+    try {
+      await setDocument('settings', 'earning', {
+        ...normalizedSettings,
+        id: 'earning',
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.warn('Firestore setDocument settings/earning warning:', err);
+    }
+    showToast(lang === 'bn' ? '✅ আর্নিং ও অফার সেটিংস সফলভাবে সেভ করা হয়েছে!' : '✅ Earning settings saved successfully!');
+  };
+
+  const handleLogout = () => {
+    if (confirm(lang === 'bn' ? 'আপনি কি লগআউট করতে চান?' : 'Are you sure you want to log out?')) {
+      setIsAdminSession(false);
+      isAdminSessionRef.current = false;
+      try {
+        sessionStorage.removeItem('rt_admin_session');
+      } catch {}
+      firebaseLogout();
+      setActiveTab('home');
+      showToast(
+        lang === 'bn'
+          ? 'লগআউট সম্পন্ন হয়েছে। হোমপেজ সবার জন্য উন্মুক্ত!'
+          : 'Logged out. Homepage is open for everyone!'
+      );
+    }
+  };
+
+  // Filtered and Sorted Reels
+  const filteredReels = (() => {
+    let result = selectedCategory === 'সকল'
+      ? reels
+      : reels.filter((r) => r.category === selectedCategory);
+
+    if (sortBy === 'newest') {
+      result = [...result].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    } else if (sortBy === 'most_watched') {
+      result = [...result].sort((a, b) => (b.viewsCount || 0) - (a.viewsCount || 0));
+    } else if (sortBy === 'popular') {
+      result = [...result].sort((a, b) => b.likesCount - a.likesCount);
+    }
+
+    return result;
+  })();
+
+  const isAdminQuery = window.location.search.includes('admin');
+  const loginMode = isAdminQuery ? 'admin' : 'user';
+
+  return (
+    <div className="min-h-screen bg-[#0a0f0d] text-slate-100 flex flex-col font-sans selection:bg-[#00c853] selection:text-black">
+      {/* Toast Notification */}
+      {notificationToast && (
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 bg-[#122419] border border-emerald-400 text-white px-4 py-2 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3">
+          <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{notificationToast}</span>
+        </div>
+      )}
+
+      {/* Main Container constrained to Mobile/Tablet Frame */}
+      <div className="w-full max-w-md mx-auto min-h-screen bg-[#0a120e] flex flex-col relative shadow-2xl border-x border-emerald-950/40">
+        {/* Header matching Screenshot 1 + BN | EN toggle + Auth Status */}
+        <Header
+          onOpenNotifications={() => setShowNotifications(true)}
+          isAdmin={currentUser.role === 'admin'}
+          onToggleAdmin={() => setActiveTab(activeTab === 'admin' ? 'home' : 'admin')}
+          isMuted={isMuted}
+          onToggleMute={() => setIsMuted(!isMuted)}
+          unreadAnnouncementsCount={1}
+          lang={lang}
+          onToggleLang={toggleLang}
+          onSecretAdminTrigger={() => setShowAdminAuthModal(true)}
+          isAuthenticated={isAuthenticated}
+          onOpenAuth={(view) => triggerAuthFlow(view || 'login')}
+          userPoints={isAuthenticated ? currentUser.points : 0}
+        />
+
+        {/* Global Announcement Marquee Ticker */}
+        {announcement && (
+          <div className="bg-[#121f18] border-b border-emerald-950/60 px-3 py-1.5 flex items-center gap-2 text-[11px] text-emerald-300 overflow-hidden select-none">
+            <span className="shrink-0 px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold text-[10px] z-10 shadow-sm">
+              {lang === 'bn' ? 'নোটিশ' : 'Notice'}
+            </span>
+            <div className="flex-1 overflow-hidden min-w-0 flex items-center">
+              <div className="animate-marquee font-medium text-emerald-300 text-xs">
+                {announcement}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Dynamic Body Content */}
+        <main className="flex-1 p-3.5 space-y-3.5">
+          <Suspense fallback={<LoadingSpinner />}>
+            {activeTab === 'admin' ? (
+              /* ADMIN CONTROL PANEL */
+              <AdminPanel
+                users={users}
+                pointRate={pointRate}
+                onUpdateRate={handleUpdateRate}
+                announcement={announcement}
+                onUpdateAnnouncement={handleUpdateAnnouncement}
+                withdrawals={withdrawals}
+                onApproveWithdrawal={handleApproveWithdrawal}
+                onRejectWithdrawal={handleRejectWithdrawal}
+                depositRequests={depositRequests}
+                onApproveDeposit={handleApproveDeposit}
+                onRejectDeposit={handleRejectDeposit}
+                reels={reels}
+                onAddReel={handleAddNewReel}
+                onEditReel={(r) => setEditingReel(r)}
+                onDeleteReel={handleDeleteReel}
+                onGiveUserBonus={handleGiveUserBonus}
+                onUpdateUser={handleUpdateUser}
+                onDeleteUser={handleDeleteUser}
+                onExitAdmin={() => setActiveTab('home')}
+                currentUserUid={currentUser.id}
+                adminPaymentNumbers={adminPaymentNumbers}
+                onUpdatePaymentNumbers={handleUpdatePaymentNumbers}
+                minWithdrawal={minWithdrawal}
+                onUpdateMinWithdrawal={handleUpdateMinWithdrawal}
+                tasks={tasks}
+                onAddTask={handleAddTask}
+                onEditTask={handleEditTask}
+                onDeleteTask={handleDeleteTask}
+                spinMaxPrize={spinMaxPrize}
+                onUpdateSpinMaxPrize={handleUpdateSpinMaxPrize}
+                scratchCardPrize={scratchPrize}
+                onUpdateScratchPrize={handleUpdateScratchPrize}
+                onSendNotification={handleSendDirectNotification}
+                onBroadcastNotification={handleBroadcastNotification}
+                earningSettings={earningSettings}
+                onUpdateEarningSettings={handleUpdateEarningSettings}
+                onQuickUpdateReel={handleUpdateReel}
+                onInspectLive={(liveId) => {
+                  setCurrentLiveStreamId(liveId);
+                  setShowLiveSheet(true);
+                }}
+                onCancelLive={(liveId, reason) => handleEndLive(liveId, true, reason)}
+              />
+            ) : (
+              /* USER INTERFACE WITH TABS */
+              <>
+                {activeTab === 'home' && (
+                  <div className="space-y-3.5 pb-20">
+                    {/* Active Live Streams Horizontal List (Audio Adda & Video Live) */}
+                    {activeLiveStreams.length > 0 && (
+                      <div className="space-y-2 pb-1">
+                        <div className="flex items-center justify-between px-1">
+                          <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-rose-600 animate-pulse" />
+                            <span>{lang === 'bn' ? 'সরাসরি লাইভ' : 'Active Live'}</span>
+                          </h3>
+                          <button
+                            type="button"
+                            onClick={() => openPersonalLiveStudio('audio')}
+                            className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 cursor-pointer"
+                          >
+                            {lang === 'bn' ? '+ লাইভে যান' : '+ Go Live'}
+                          </button>
+                        </div>
+                        <div className="flex gap-3 overflow-x-auto no-scrollbar py-1">
+                          {activeLiveStreams.map((live) => (
+                            <button
+                              key={live.id}
+                              onClick={() => {
+                                setCurrentLiveStreamId(live.id);
+                                setShowLiveSheet(true);
+                              }}
+                              className="flex flex-col items-center gap-1.5 shrink-0 group transition active:scale-95 cursor-pointer"
+                            >
+                              <div className="relative">
+                                <div className={`w-16 h-16 rounded-2xl p-0.5 overflow-hidden shadow-lg ${
+                                  live.mode === 'audio'
+                                    ? 'bg-gradient-to-tr from-emerald-500 to-cyan-400'
+                                    : 'bg-gradient-to-tr from-rose-600 to-amber-500'
+                                }`}>
+                                  <img
+                                    src={live.hostAvatar}
+                                    alt={live.hostName}
+                                    className="w-full h-full object-cover rounded-[14px] border-2 border-black/20"
+                                  />
+                                </div>
+                                <span className={`absolute -bottom-1 -right-1 text-[9px] font-black text-white px-1.5 py-0.5 rounded-md border border-black flex items-center gap-0.5 ${
+                                  live.mode === 'audio' ? 'bg-emerald-600' : 'bg-rose-600'
+                                }`}>
+                                  {live.mode === 'audio' ? <Mic className="w-2.5 h-2.5" /> : <Video className="w-2.5 h-2.5" />}
+                                  <span>{live.mode === 'audio' ? 'অডিও' : 'LIVE'}</span>
+                                </span>
+                              </div>
+                              <span className="text-[10px] font-bold text-neutral-300 truncate max-w-[68px]">{live.hostName}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Removed GuestBanner as requested */}
+
+                    {/* Daily Bonus Card matching Screenshot 1 - moved to ProfileView */}
+                    {/*
+                    <DailyBonusCard
+                      onClaim={handleClaimDailyBonus}
+                      isClaimedToday={isClaimedToday}
+                      isMuted={isMuted}
+                      isAuthenticated={isAuthenticated}
+                      onRequireAuth={() =>
+                        triggerAuthPrompt(
+                          lang === 'bn'
+                            ? 'দৈনিক বোনাস এবং টাকা আর্ন করতে লগইন বা রেজিস্ট্রেশন করুন!'
+                            : 'Login or register to claim daily bonus!'
+                        )
+                      }
+                    />
+                    {/* Category Pills */}
+                    <div className="flex gap-2 overflow-x-auto no-scrollbar py-1">
+                      {CATEGORIES.map((cat) => (
+                        <button
+                          key={cat}
+                          onClick={() => setSelectedCategory(cat)}
+                          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                            selectedCategory === cat
+                              ? 'bg-[#00c853] text-black shadow-md shadow-emerald-500/25'
+                              : 'bg-[#15231c] text-neutral-300 hover:text-white border border-emerald-950'
+                          }`}
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Section Title Header */}
+                    <div className="flex items-center justify-between pt-1">
+                      <h2 className="text-base font-extrabold text-white tracking-tight flex items-center gap-1.5">
+                        <span>{lang === 'bn' ? 'ReelPay BD' : "ReelPay BD"}</span>
+                      </h2>
+                      <div className="flex items-center gap-3">
+                        <select
+                          value={sortBy}
+                          onChange={(e) => setSortBy(e.target.value as any)}
+                          className="bg-[#15231c] text-[10px] font-bold text-emerald-400 border border-emerald-950/60 rounded-lg px-2 py-1 outline-none cursor-pointer hover:bg-[#1a2b22] transition-colors"
+                        >
+                          <option value="newest">{lang === 'bn' ? 'নতুন' : 'Newest'}</option>
+                          <option value="most_watched">{lang === 'bn' ? 'বেশি দেখা' : 'Most Watched'}</option>
+                          <option value="popular">{lang === 'bn' ? 'জনপ্রিয়' : 'Popular'}</option>
+                        </select>
+                        <button
+                          onClick={() => setSelectedCategory('সকল')}
+                          className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-0.5 cursor-pointer"
+                        >
+                          <span>{lang === 'bn' ? 'আরও দেখুন' : 'See more'}</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Feed List of Reels matching Screenshot 1 + Download + Gift */}
+                    <div className="space-y-1">
+                      {filteredReels.length === 0 ? (
+                        <div className="text-center py-12 text-neutral-400 text-xs">
+                          {lang === 'bn' ? 'এই ক্যাটাগরিতে কোনো রিল পাওয়া যায়নি।' : 'No reels in this category.'}
+                        </div>
+                      ) : (
+                        filteredReels.map((reel) => (
+                          <ReelFeedCard
+                            key={reel.id}
+                            reel={reel}
+                            isLiked={likedReelIds.includes(reel.id)}
+                            hasWatched={watchedReelIds.includes(reel.id)}
+                            onLikeToggle={handleToggleLike}
+                            onOpenReel={(r) => setFullScreenReelId(r.id)}
+                            onOpenComments={(r) => setActiveCommentReel(r)}
+                            onClaimDirect={handleClaimDirect}
+                            onOpenGift={() => {
+                              if (!isAuthenticated) {
+                                triggerAuthPrompt(
+                                  lang === 'bn'
+                                    ? 'উপহার পাঠাতে এবং গিফট বোনাস পেতে লগইন বা রেজিস্ট্রেশন করুন!'
+                                    : 'Login or register to send gifts!'
+                                );
+                                return;
+                              }
+                              setGiftTarget({ userId: reel.userId, creatorName: reel.creatorName });
+                              setShowGiftSheet(true);
+                            }}
+                            onOpenCreatorProfile={(userId) => handleOpenUserProfile(userId)}
+                            onShare={handleOpenShare}
+                            lang={lang}
+                            isMuted={isMuted}
+                            levelProgress={levelProgress}
+                            earningSettings={earningSettings}
+                            isDailyLimitReached={isDailyReelLimitReached}
+                          />
+                        ))
+                      )}
+                    </div>
+
+                    {/* LIVE STREAM HIGHLIGHT CARD matching prompt - moved to ProfileView */}
+                    {/*
+                    <div className="rounded-2xl p-4 bg-gradient-to-r from-rose-950/40 via-[#19221d] to-[#121c17] border-2 border-[#ff2d55] shadow-lg mt-3 text-white">
+                      <span className="bg-[#ff2d55] text-white px-3 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1.5 shadow-sm animate-pulse">
+                        <span className="w-2 h-2 rounded-full bg-white" />
+                        <span>🔴 LIVE • {toBengaliNumber('2.3', lang)} {lang === 'bn' ? 'হাজার দেখছে' : 'k watching'}</span>
+                      </span>
+
+                      <div className="mt-3">
+                        <b className="text-base font-extrabold text-white block">
+                          {lang === 'bn' ? 'আরিয়ান লাইভে আছে 🎤' : 'Aryan is LIVE 🎤'}
+                        </b>
+                        <p className="text-xs text-neutral-400 mt-1">
+                          {lang === 'bn' ? 'লাইভ দেখে ভালো লাগলে গিফট পাঠান!' : 'Watch live stream and send gifts to support!'}
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 mt-3 pt-2 border-t border-neutral-800">
+                        <button
+                          onClick={() => {
+                            if (!isAuthenticated) {
+                              triggerAuthPrompt(
+                                lang === 'bn'
+                                  ? 'লাইভে গিফট পাঠাতে অনুগ্রহ করে লগইন বা রেজিস্ট্রেশন করুন!'
+                                  : 'Login or register to send live gifts!'
+                              );
+                              return;
+                            }
+                            setShowGiftSheet(true);
+                          }}
+                          className="py-2.5 rounded-xl font-bold text-xs bg-[#ff2d55] hover:bg-[#e0264b] text-white transition active:scale-95 flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
+                        >
+                          <span>🎁 {lang === 'bn' ? 'লাইভে গিফট পাঠান' : 'Send Gift'}</span>
+                        </button>
+                        <button
+                          onClick={() => setShowLiveSheet(true)}
+                          className="py-2.5 rounded-xl font-bold text-xs bg-[#00c853] hover:bg-[#00e676] text-black transition active:scale-95 flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
+                        >
+                          <span>👁️ {lang === 'bn' ? 'লাইভ দেখুন' : 'Watch Live'}</span>
+                        </button>
+                      </div>
+                    </div>
+                    */}
+                  </div>
+                )}
+
+                {activeTab === 'earn' && (
+                  isAuthenticated ? (
+                    <EarnView
+                      user={currentUser}
+                      tasks={tasks}
+                      onCompleteTask={handleCompleteTask}
+                      onAddPoints={handleAddPointsGeneral}
+                      isMuted={isMuted}
+                      spinPrizes={[10, 25, 50, 15, spinMaxPrize, 30, 20, Math.round(spinMaxPrize * 0.4)]}
+                      scratchPrize={scratchPrize}
+                      earningSettings={earningSettings}
+                    />
+                  ) : (
+                    <GuestEarnView
+                      onLogin={() => triggerAuthFlow('login')}
+                      onRegister={() => triggerAuthFlow('register')}
+                      lang={lang}
+                      earningSettings={earningSettings}
+                    />
+                  )
+                )}
+
+                {activeTab === 'wallet' && (
+                  isAuthenticated ? (
+                    <WalletView
+                      user={currentUser}
+                      pointRate={pointRate}
+                      withdrawals={withdrawals}
+                      onRequestWithdrawal={handleRequestWithdrawal}
+                      onDepositClick={() => setShowDepositSheet(true)}
+                      isMuted={isMuted}
+                      minWithdrawal={minWithdrawal}
+                    />
+                  ) : (
+                    <GuestWalletView
+                      pointRate={pointRate}
+                      onLogin={() => triggerAuthFlow('login')}
+                      onRegister={() => triggerAuthFlow('register')}
+                      lang={lang}
+                    />
+                  )
+                )}
+
+                {activeTab === 'profile' && (
+                  isAuthenticated ? (
+                    <ProfileView
+                      user={currentUser}
+                      pointRate={pointRate}
+                      onLogout={handleLogout}
+                      onSwitchUser={handleUpdateUser}
+                      onClaimDailyBonus={handleClaimDailyBonus}
+                      isClaimedToday={isClaimedToday}
+                      isMuted={isMuted}
+                      isAuthenticated={isAuthenticated}
+                      onRequireAuth={triggerAuthPrompt}
+                      lang={lang}
+                      setShowGiftSheet={setShowGiftSheet}
+                      setShowLiveSheet={setShowLiveSheet}
+                      onOpenPersonalLive={(mode) => openPersonalLiveStudio(mode || 'audio')}
+                      activeMyLive={activeLiveStreams.find((s) => s.hostId === currentUser.id) || null}
+                      onManageMyLive={(liveId) => {
+                        setCurrentLiveStreamId(liveId);
+                        setShowLiveSheet(true);
+                      }}
+                      onEndMyLive={handleEndLive}
+                      reels={reels}
+                      onOpenReel={(r) => setFullScreenReelId(r.id)}
+                      onEditReel={(r) => setEditingReel(r)}
+                      onDeleteReel={handleDeleteReel}
+                      onOpenChatList={() => setIsChatListModalOpen(true)}
+                      onOpenFollowList={(tab) => setFollowListModal({ user: currentUser, tab })}
+                      onOpenWallet={() => setActiveTab('wallet')}
+                      minWithdrawal={minWithdrawal}
+                      earningSettings={earningSettings}
+                    />
+                  ) : (
+                    <GuestProfileView
+                      onLogin={() => triggerAuthFlow('login')}
+                      onRegister={() => triggerAuthFlow('register')}
+                      lang={lang}
+                    />
+                  )
+                )}
+              </>
+            )}
+          </Suspense>
+        </main>
+
+        {/* Bottom Navigation matching Screenshots 1 & 2 */}
+        <BottomNav
+          activeTab={activeTab}
+          onChangeTab={(t) => setActiveTab(t)}
+          onOpenCreate={() => {
+            if (!isAuthenticated) {
+              triggerAuthPrompt(
+                lang === 'bn'
+                  ? 'নতুন রিল তৈরি বা আপলোড করতে লগইন বা রেজিস্ট্রেশন করুন!'
+                  : 'Login or register to create or upload reels!'
+              );
+              return;
+            }
+            setShowPlusSheet(true);
+          }}
+          lang={lang}
+          isAdmin={currentUser.role === 'admin'}
+        />
+
+        {/* Modals & Sheets wrapped in Suspense */}
+        <Suspense fallback={null}>
+          {/* Full-Screen Immersive Reel Player Modal matching Screenshot 2 */}
+          {fullScreenReelId && (
+            <FullScreenReelModal
+              reels={reels}
+              initialReelId={fullScreenReelId}
+              onClose={() => setFullScreenReelId(null)}
+              isLiked={likedReelIds.includes(fullScreenReelId)}
+              onToggleLike={handleToggleLike}
+              onOpenComments={(r) => setActiveCommentReel(r)}
+              onRewardEarned={handleEarnReelReward}
+              onOpenGiftSheet={() => {
+                if (!isAuthenticated) {
+                  triggerAuthPrompt(
+                    lang === 'bn'
+                      ? 'উপহার পাঠাতে এবং গিফট বোনাস পেতে লগইন বা রেজিস্ট্রেশন করুন!'
+                      : 'Login or register to send gifts!'
+                  );
+                  return;
+                }
+                const targetReel = reels.find((r) => r.id === fullScreenReelId);
+                if (targetReel) {
+                  setGiftTarget({ userId: targetReel.userId, creatorName: targetReel.creatorName });
+                }
+                setShowGiftSheet(true);
+              }}
+              onShare={handleOpenShare}
+              onOpenProfile={handleOpenUserProfile}
+              lang={lang}
+              isMuted={isMuted}
+              onToggleMute={() => setIsMuted(!isMuted)}
+              levelProgress={levelProgress}
+              activeLiveStreams={activeLiveStreams}
+              onOpenLiveSheet={() => {
+                setFullScreenReelId(null);
+                if (activeLiveStreams.length > 0) {
+                  setCurrentLiveStreamId(activeLiveStreams[0].id);
+                  setShowLiveSheet(true);
+                } else {
+                  openPersonalLiveStudio('audio');
+                }
+              }}
+              earningSettings={earningSettings}
+              watchedReelIds={watchedReelIds}
+              isDailyLimitReached={isDailyReelLimitReached}
+              dailyClaimsUsed={dailyClaimsUsed}
+              dailyClaimsLimit={dailyClaimsLimit}
+              dailyPointsUsed={dailyPointsUsed}
+              dailyPointsLimit={dailyPointsLimit}
+              onToggleFollow={handleToggleFollow}
+              followingIds={currentUser.following || []}
+              onOpenChatWithCreator={async (creatorId) => {
+                const known = users.find((u) => u.id === creatorId) || (await getDocument('users', creatorId) as User | null);
+                if (known) {
+                  setFullScreenReelId(null);
+                  handleOpenChat(known);
+                } else {
+                  setFullScreenReelId(null);
+                  handleOpenUserProfile(creatorId);
+                }
+              }}
+            />
+          )}
+
+          {/* Edit Reel Modal */}
+          {editingReel && (
+            <EditReelModal
+              reel={editingReel}
+              isOpen={!!editingReel}
+              onClose={() => setEditingReel(null)}
+              onUpdateReel={handleUpdateReel}
+              lang={lang}
+              isMuted={isMuted}
+            />
+          )}
+
+          {/* Comments Modal Drawer */}
+          {activeCommentReel && (
+            <CommentsModal
+              reel={activeCommentReel}
+              currentUser={currentUser}
+              onClose={() => setActiveCommentReel(null)}
+              onAddComment={handleAddComment}
+              onOpenProfile={(userId) => {
+                setActiveCommentReel(null);
+                handleOpenUserProfile(userId);
+              }}
+            />
+          )}
+
+            {showNotifications && (
+            <NotificationModal
+              announcement={announcement}
+              personalNotifications={personalNotifications}
+              onClose={() => setShowNotifications(false)}
+            />
+          )}
+
+          {/* Admin Login Modal (password: admin123) */}
+          {showAdminAuthModal && (
+            <AdminLoginModal
+              onSuccess={() => {
+                setShowAdminAuthModal(false);
+                handleAdminLoginFlow('admin123');
+              }}
+              onClose={() => setShowAdminAuthModal(false)}
+              isFirebaseSignedIn={Boolean(firebaseUser)}
+              signedInEmail={firebaseUser?.email || ''}
+              onGoogleLogin={loginWithGoogle}
+            />
+          )}
+
+          {/* Create Reel / Plus Sheet */}
+          {showPlusSheet && (
+            <PlusSheet
+              isOpen={showPlusSheet}
+              onClose={() => setShowPlusSheet(false)}
+              currentUser={currentUser}
+              onPublishReel={handleAddNewReel}
+              onOpenLive={() => openPersonalLiveStudio('audio')}
+              lang={lang}
+              isMuted={isMuted}
+            />
+          )}
+
+          {/* Personal Live Studio Setup Modal */}
+          {showGoLiveSetupModal && (
+            <GoLiveSetupModal
+              isOpen={showGoLiveSetupModal}
+              onClose={() => setShowGoLiveSetupModal(false)}
+              currentUser={currentUser}
+              initialMode={goLiveInitialMode}
+              onStartLive={handleStartLive}
+              lang={lang}
+            />
+          )}
+
+          {/* Gift Sheet (🎁 গিফট পাঠান) */}
+          {showGiftSheet && (
+            <GiftSheet
+              isOpen={showGiftSheet}
+              onClose={() => {
+                setShowGiftSheet(false);
+                setGiftTarget(null);
+              }}
+              userPoints={currentUser.points}
+              onSendGift={(gift, creatorShare, userCashback, adminShare) =>
+                handleSendGift(gift, creatorShare, userCashback, undefined, undefined, adminShare)
+              }
+              onOpenDeposit={() => setShowDepositSheet(true)}
+              lang={lang}
+              isMuted={isMuted}
+              recipientName={giftTarget?.creatorName}
+              earningSettings={earningSettings}
+            />
+          )}
+
+          {/* Deposit Sheet (💎 পয়েন্ট জমা করুন) */}
+          {showDepositSheet && (
+            <DepositSheet
+              isOpen={showDepositSheet}
+              onClose={() => setShowDepositSheet(false)}
+              onSubmitRequest={handleSubmitDepositRequest}
+              pointRate={pointRate}
+              lang={lang}
+              isMuted={isMuted}
+              adminPaymentNumbers={adminPaymentNumbers}
+            />
+          )}
+
+          {/* Personal Live Stream Room (Audio Adda & Video Live) */}
+          {showLiveSheet && (
+            <LiveStreamSheet
+              isOpen={showLiveSheet}
+              onClose={() => setShowLiveSheet(false)}
+              onOpenGift={(stream) => {
+                if (!isAuthenticated) {
+                  triggerAuthPrompt(
+                    lang === 'bn'
+                      ? 'লাইভে গিফট পাঠাতে লগইন বা রেজিস্ট্রেশন করুন!'
+                      : 'Login or register to send live gifts!'
+                  );
+                  return;
+                }
+                setGiftTarget({
+                  userId: stream.hostId,
+                  liveId: stream.id,
+                  creatorName: stream.hostName,
+                });
+                setShowGiftSheet(true);
+              }}
+              onQuickGift={(gift, stream) => {
+                const split = calculateGiftSplit(gift.costPoints, earningSettings);
+                handleSendGift(gift, split.creatorShare, split.userCashback, stream.hostId, stream.id, split.adminShare);
+              }}
+              lang={lang}
+              isMuted={isMuted}
+              liveStreamId={currentLiveStreamId}
+              currentUser={currentUser}
+              isAuthenticated={isAuthenticated}
+              onRequireAuth={triggerAuthPrompt}
+              onEndLive={handleEndLive}
+              onOpenProfile={handleOpenUserProfile}
+              onToggleFollow={handleToggleFollow}
+              isAdminOverride={
+                activeTab === 'admin' ||
+                isAdminSession ||
+                currentUser.role === 'admin' ||
+                firebaseUser?.email === 'mdmasudranabd80814@gmail.com'
+              }
+              isFollowingHost={Boolean(
+                (() => {
+                  const activeLive = activeLiveStreams.find((s) => s.id === currentLiveStreamId);
+                  return activeLive && (currentUser.following || []).includes(activeLive.hostId);
+                })()
+              )}
+              onShare={(stream) => {
+                setSharingReel(null);
+                setSharingLiveStream(stream);
+                setShowShareSheet(true);
+              }}
+            />
+          )}
+
+          {/* Share Sheet */}
+          <ShareSheet
+            isOpen={showShareSheet}
+            onClose={() => {
+              setShowShareSheet(false);
+              setSharingReel(null);
+              setSharingLiveStream(null);
+            }}
+            reel={sharingReel}
+            liveStream={sharingLiveStream}
+            lang={lang}
+            onSendInChat={handleShareInChat}
+            onDownloadReel={(r) => downloadReelVideo(r, lang)}
+          />
+
+          {/* Auth Page Modal Overlay */}
+          {showAuthModal && (
+            <div className="fixed inset-0 z-50 overflow-y-auto bg-black/95 flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-200">
+              <div className="w-full max-w-sm relative">
+                <AuthPage
+                  onLogin={handleLogin}
+                  onRegister={handleRegister}
+                  onAdminLogin={handleAdminLoginFlow}
+                  mode={loginMode}
+                  onClose={() => setShowAuthModal(false)}
+                  initialView={authModalView}
+                  reasonMessage={authModalReason}
+                  lang={lang}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Quick Auth Prompt Modal for Earning Actions */}
+          <AuthPromptModal
+            isOpen={showAuthPrompt}
+            onClose={() => setShowAuthPrompt(false)}
+            onOpenLogin={() => triggerAuthFlow('login')}
+            onOpenRegister={() => triggerAuthFlow('register')}
+            message={authPromptMessage}
+            lang={lang}
+            earningSettings={earningSettings}
+          />
+
+          {/* User Profile Modal */}
+          {isUserProfileModalOpen && selectedUserProfileUser && (
+            <UserProfileModal
+              user={selectedUserProfileUser}
+              currentUser={currentUser}
+              onClose={() => setIsUserProfileModalOpen(false)}
+              onOpenChat={handleOpenChat}
+              onOpenChatList={() => setIsChatListModalOpen(true)}
+              onToggleFollow={handleToggleFollow}
+              isFollowing={(currentUser.following || []).includes(selectedUserProfileUser.id)}
+              onOpenFollowList={(tab) => setFollowListModal({ user: selectedUserProfileUser, tab })}
+              lang={lang}
+              allReels={reels}
+              onOpenReel={(r) => {
+                setFullScreenReelId(r.id);
+                setIsUserProfileModalOpen(false);
+              }}
+            />
+          )}
+
+          {/* Followers / Following / Discover Creators Modal */}
+          {followListModal && (
+            <FollowListModal
+              isOpen={!!followListModal}
+              onClose={() => setFollowListModal(null)}
+              targetUser={followListModal.user}
+              currentUser={currentUser}
+              initialTab={followListModal.tab}
+              knownUsers={users}
+              isAuthenticated={isAuthenticated}
+              onToggleFollow={handleToggleFollow}
+              onOpenProfile={(uid) => {
+                setFollowListModal(null);
+                if (uid !== currentUser.id) {
+                  handleOpenUserProfile(uid);
+                } else {
+                  setActiveTab('profile');
+                }
+              }}
+              onOpenChat={(target) => {
+                setFollowListModal(null);
+                handleOpenChat(target);
+              }}
+              lang={lang}
+            />
+          )}
+
+          {/* Messenger Chat List Modal */}
+          {isChatListModalOpen && (
+            <ChatListModal
+              isOpen={isChatListModalOpen}
+              onClose={() => setIsChatListModalOpen(false)}
+              currentUser={currentUser}
+              users={users}
+              onOpenChat={handleOpenChat}
+              onOpenUserPicker={() => {
+                setIsChatListModalOpen(false);
+                setIsUserPickerOpen(true);
+              }}
+              lang={lang}
+            />
+          )}
+
+          {/* Messenger / Chat Modal */}
+          {isChatModalOpen && activeChatSession && activeChatOtherUser && (
+            <ChatModal
+              isOpen={isChatModalOpen}
+              onClose={() => setIsChatModalOpen(false)}
+              session={activeChatSession}
+              currentUser={currentUser}
+              otherUser={activeChatOtherUser}
+              lang={lang}
+              allReels={reels}
+            />
+          )}
+
+          {/* User Picker for Sharing */}
+          {isUserPickerOpen && (
+            <UserPickerModal
+              isOpen={isUserPickerOpen}
+              onClose={() => setIsUserPickerOpen(false)}
+              users={users}
+              currentUser={currentUser}
+              onPickUser={handlePickUserForShare}
+              lang={lang}
+            />
+          )}
+        </Suspense>
+      </div>
+    </div>
+  );
+}

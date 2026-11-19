@@ -1,0 +1,752 @@
+import React, { useState } from 'react';
+import { DailyBonusCard } from './DailyBonusCard';
+import {
+  User as UserIcon,
+  Phone,
+  ShieldCheck,
+  Award,
+  Video,
+  LogOut,
+  Coins,
+  ArrowRight,
+  HelpCircle,
+  FileText,
+  Edit3,
+  Trash2,
+  MessageCircle,
+  Users,
+  UserPlus,
+  Mic,
+  Radio,
+  SlidersHorizontal,
+  Power,
+  Check,
+  Camera,
+  ChevronRight,
+} from 'lucide-react';
+import { User, Reel, EarningSettings, LiveStream, LiveMode } from '../types';
+import { toBengaliNumber, formatTaka } from '../utils/bengali';
+import { getUserLevel, getNextLevel, getProgressToNextLevel } from '../utils/levels';
+import { ProfileInfoModal, ProfileInfoModalMode } from './ProfileInfoModal';
+
+interface ProfileViewProps {
+  user: User;
+  pointRate: number;
+  onLogout: () => void;
+  onSwitchUser: (updatedUser: User) => void;
+  onClaimDailyBonus: (bonusPoints: number) => void;
+  isClaimedToday: boolean;
+  isMuted: boolean;
+  isAuthenticated: boolean;
+  onRequireAuth: (msg?: string) => void;
+  lang: 'bn' | 'en';
+  setShowGiftSheet: (show: boolean) => void;
+  setShowLiveSheet: (show: boolean) => void;
+  onOpenPersonalLive?: (mode?: LiveMode) => void;
+  activeMyLive?: LiveStream | null;
+  onManageMyLive?: (liveId: string) => void;
+  onEndMyLive?: (liveId: string) => void;
+  reels: Reel[];
+  onOpenReel: (reel: Reel) => void;
+  onEditReel?: (reel: Reel) => void;
+  onDeleteReel?: (reel: Reel) => void;
+  onOpenChatList?: () => void;
+  onOpenFollowList?: (tab: 'followers' | 'following') => void;
+  onOpenWallet?: () => void;
+  minWithdrawal?: number;
+  earningSettings?: EarningSettings;
+}
+
+export const ProfileView: React.FC<ProfileViewProps> = ({
+  user,
+  pointRate,
+  onLogout,
+  onSwitchUser,
+  onClaimDailyBonus,
+  isClaimedToday,
+  isMuted,
+  isAuthenticated,
+  onRequireAuth,
+  lang,
+  setShowGiftSheet,
+  setShowLiveSheet,
+  onOpenPersonalLive,
+  activeMyLive,
+  onManageMyLive,
+  onEndMyLive,
+  reels,
+  onOpenReel,
+  onEditReel,
+  onDeleteReel,
+  onOpenChatList,
+  onOpenFollowList,
+  onOpenWallet,
+  minWithdrawal = 100,
+  earningSettings,
+}) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [infoModalMode, setInfoModalMode] = useState<ProfileInfoModalMode | null>(null);
+  const [reelToDelete, setReelToDelete] = useState<Reel | null>(null);
+  const [copiedRef, setCopiedRef] = useState(false);
+  const [referralNote, setReferralNote] = useState<string | null>(null);
+  const [referredByInput, setReferredByInput] = useState('');
+  const [nameInput, setNameInput] = useState(user.name);
+  const [phoneInput, setPhoneInput] = useState(user.phone);
+  const [emailInput, setEmailInput] = useState(user.email || '');
+  const [avatarInput, setAvatarInput] = useState(user.avatar || '');
+  const [methodInput, setMethodInput] = useState<'bKash' | 'Nagad' | 'Rocket'>(user.paymentMethod || 'bKash');
+  const [accNumInput, setAccNumInput] = useState(user.paymentAccountNumber || '');
+
+  React.useEffect(() => {
+    setNameInput(user.name);
+    setPhoneInput(user.phone);
+    setEmailInput(user.email || '');
+    setAvatarInput(user.avatar || '');
+    setMethodInput(user.paymentMethod || 'bKash');
+    setAccNumInput(user.paymentAccountNumber || '');
+  }, [user.id, user.name, user.phone, user.email, user.avatar, user.paymentMethod, user.paymentAccountNumber]);
+
+  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxSide = 240;
+        const ratio = Math.min(maxSide / img.width, maxSide / img.height, 1);
+        canvas.width = Math.round(img.width * ratio);
+        canvas.height = Math.round(img.height * ratio);
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          setAvatarInput(canvas.toDataURL('image/jpeg', 0.8));
+        }
+      };
+      if (typeof reader.result === 'string') {
+        img.src = reader.result;
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (nameInput.trim()) {
+      onSwitchUser({
+        ...user,
+        name: nameInput.trim().slice(0, 100),
+        phone: phoneInput.trim().slice(0, 20),
+        email: emailInput.trim(),
+        avatar: avatarInput.trim() || user.avatar,
+        paymentMethod: methodInput,
+        paymentAccountNumber: accNumInput.trim(),
+      });
+      setIsEditing(false);
+    }
+  };
+
+  const currentLevel = getUserLevel(user.reelsWatchedCount);
+  const nextLevel = getNextLevel(user.reelsWatchedCount);
+  const progress = getProgressToNextLevel(user.reelsWatchedCount);
+
+  // Show user's created reels: strictly show only this specific user's uploaded reels
+  const userReels = reels.filter((r) => {
+    if (r.userId === user.id) return true;
+    if (r.creatorName && user.name && r.creatorName.trim().toLowerCase() === user.name.trim().toLowerCase() && user.name !== 'নতুন ইউজার') return true;
+    return false;
+  });
+
+  const handleLaunchPersonalLive = (mode: LiveMode) => {
+    if (onOpenPersonalLive) {
+      onOpenPersonalLive(mode);
+    } else {
+      setShowLiveSheet(true);
+    }
+  };
+
+  return (
+    <div className="space-y-4 pb-20 text-white">
+      <DailyBonusCard
+          onClaim={onClaimDailyBonus}
+          isClaimedToday={isClaimedToday}
+          isMuted={isMuted}
+          isAuthenticated={isAuthenticated}
+          onRequireAuth={onRequireAuth}
+          bonusPoints={earningSettings?.dailyBonusPoints}
+          isEnabled={earningSettings ? (earningSettings.isMasterEarningEnabled && earningSettings.isDailyBonusEnabled) : true}
+      />
+
+      {/* Personal Live Studio Card (User's Personal Live Launcher & Controls) */}
+      <div className="rounded-2xl bg-gradient-to-br from-[#17261d] via-[#111d16] to-[#211218] p-4 border border-emerald-900/60 shadow-xl">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-rose-600/20 border border-rose-500/40 text-rose-400 flex items-center justify-center shrink-0">
+              <Radio className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-sm font-extrabold text-white truncate">
+                {lang === 'bn' ? 'আমার পার্সোনাল লাইভ স্টুডিও' : 'My Personal Live Studio'}
+              </h3>
+              <p className="text-[11px] text-neutral-400 truncate">
+                {lang === 'bn'
+                  ? 'অডিও আড্ডা বা লাইভ ভিডিও চালু করুন ও গিফট পান'
+                  : 'Start Audio Adda or Live Video & receive gifts'}
+              </p>
+            </div>
+          </div>
+          {activeMyLive && (
+            <span className="shrink-0 text-[11px] font-bold text-rose-400 flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+              <span>LIVE</span>
+            </span>
+          )}
+        </div>
+
+        {activeMyLive ? (
+          <div className="p-3 rounded-xl bg-black/40 border border-rose-500/30 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-white truncate">{activeMyLive.title}</p>
+                <p className="text-[11px] text-neutral-400">
+                  {activeMyLive.mode === 'video'
+                    ? lang === 'bn'
+                      ? '📹 লাইভ ভিডিও'
+                      : '📹 Video Live'
+                    : lang === 'bn'
+                    ? '🎙️ অডিও আড্ডা'
+                    : '🎙️ Audio Adda'}{' '}
+                  · {toBengaliNumber(activeMyLive.viewersCount || 0, lang)}{' '}
+                  {lang === 'bn' ? 'দেখছে' : 'watching'} ·{' '}
+                  {toBengaliNumber(activeMyLive.likesCount || 0, lang)} ❤️ ·{' '}
+                  {toBengaliNumber(activeMyLive.giftsTotalPoints || 0, lang)} 🎁
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  onManageMyLive ? onManageMyLive(activeMyLive.id) : setShowLiveSheet(true)
+                }
+                className="flex-1 min-h-[44px] rounded-xl bg-[#00c853] hover:bg-[#00e676] text-black text-xs font-extrabold flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-[0.98]"
+              >
+                <SlidersHorizontal className="w-4 h-4" />
+                <span>{lang === 'bn' ? 'লাইভ পরিচালনা করুন' : 'Manage Live'}</span>
+              </button>
+              {onEndMyLive && (
+                <button
+                  type="button"
+                  onClick={() => onEndMyLive(activeMyLive.id)}
+                  className="min-h-[44px] px-3.5 rounded-xl bg-rose-950/70 hover:bg-rose-900 border border-rose-600/40 text-rose-300 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Power className="w-4 h-4" />
+                  <span>{lang === 'bn' ? 'বন্ধ' : 'End'}</span>
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              onClick={() => handleLaunchPersonalLive('audio')}
+              className="min-h-[48px] px-3 py-2.5 rounded-xl bg-[#0e1a13] hover:bg-[#16291e] border border-emerald-500/40 text-emerald-300 font-bold text-xs flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer"
+            >
+              <Mic className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{lang === 'bn' ? 'অডিও আড্ডা' : 'Audio Adda'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleLaunchPersonalLive('video')}
+              className="min-h-[48px] px-3 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:brightness-110 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-rose-600/20 transition active:scale-[0.98] cursor-pointer"
+            >
+              <Video className="w-4 h-4 shrink-0" />
+              <span>{lang === 'bn' ? 'লাইভ ভিডিও' : 'Live Video'}</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Profile Card */}
+      <div className="rounded-2xl bg-gradient-to-br from-[#122419] to-[#0c1811] p-5 border border-emerald-900/60 shadow-xl">
+        <div className="flex items-center gap-3.5">
+          <div className="relative">
+            <img
+              src={user.avatar}
+              alt={user.name}
+              className="w-16 h-16 rounded-2xl object-cover border-2 border-emerald-400 shadow-lg"
+            />
+            <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-500 text-black rounded-full flex items-center justify-center text-[10px] font-black">
+              ✓
+            </span>
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-bold truncate">{user.name}</h2>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold bg-opacity-20 flex items-center gap-1 ${
+                currentLevel.level >= 4 ? 'bg-amber-500 text-amber-300 border border-amber-500/30' : 'bg-emerald-500 text-emerald-300 border border-emerald-500/30'
+              }`}>
+                <span className="text-xs">{currentLevel.badge}</span>
+                <span>{currentLevel.nameBn}</span>
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 text-xs text-neutral-400 mt-1">
+              <Phone className="w-3 h-3 text-emerald-400" />
+              <span>{user.phone}</span>
+            </div>
+
+            <p className="text-[11px] text-neutral-500 mt-0.5">
+              যুক্ত হয়েছেন: {user.createdAt}
+            </p>
+          </div>
+
+          {/* Quick Direct Message / Inbox Button in Header Card */}
+          <button
+            onClick={onOpenChatList}
+            className="min-h-[44px] px-3 py-2 rounded-xl bg-[#00c853] hover:bg-[#00e676] text-black font-extrabold text-xs transition flex items-center gap-1.5 shadow-md active:scale-95 cursor-pointer shrink-0"
+            title={lang === 'bn' ? 'মেসেজ ইনবক্স খুলুন' : 'Open Message Inbox'}
+          >
+            <MessageCircle className="w-4 h-4 fill-current" />
+            <span>{lang === 'bn' ? 'মেসেজ' : 'Message'}</span>
+          </button>
+        </div>
+
+        {/* Level Progress Bar (Clickable to view all levels) */}
+        <button
+          type="button"
+          onClick={() => setInfoModalMode('levels')}
+          className="w-full text-left mt-4 p-3 rounded-xl bg-black/30 hover:bg-black/45 border border-emerald-950/50 hover:border-emerald-700/60 transition cursor-pointer"
+        >
+          <div className="flex justify-between items-center mb-1.5">
+            <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1">
+              <span>{lang === 'bn' ? 'লেভেল প্রগ্রেস' : 'Level Progress'}</span>
+              <ChevronRight className="w-3 h-3" />
+            </span>
+            <span className="text-[10px] text-neutral-400">
+              {toBengaliNumber(user.reelsWatchedCount)} / {nextLevel ? toBengaliNumber(nextLevel.minWatched) : 'MAX'} {lang === 'bn' ? 'রিল' : 'reels'}
+            </span>
+          </div>
+          <div className="h-2 w-full bg-emerald-950 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-gradient-to-r from-emerald-500 to-green-400 rounded-full transition-all duration-1000"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          {nextLevel && (
+            <p className="text-[9px] text-neutral-400 mt-1.5">
+              পরবর্তী লেভেল: <span className="text-emerald-400 font-bold">{nextLevel.nameBn}</span> হতে আরও <span className="text-white">{toBengaliNumber(nextLevel.minWatched - user.reelsWatchedCount)}টি</span> রিল দেখুন (ট্যাপ করে সব লেভেল দেখুন)।
+            </p>
+          )}
+        </button>
+
+        {/* Referral Section */}
+        <div className="mt-4 p-3 rounded-xl bg-emerald-950/30 border border-emerald-900/40 space-y-3">
+          <div>
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">রেফার কোড (আমার)</span>
+              <button 
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(user.referralCode);
+                  setCopiedRef(true);
+                  setTimeout(() => setCopiedRef(false), 1800);
+                }}
+                className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-md hover:bg-emerald-500/30 transition inline-flex items-center gap-1 cursor-pointer"
+              >
+                {copiedRef && <Check className="w-3 h-3" />}
+                <span>{copiedRef ? (lang === 'bn' ? 'কপি হয়েছে' : 'Copied') : (lang === 'bn' ? 'কপি করুন' : 'Copy')}</span>
+              </button>
+            </div>
+            <div className="flex items-center justify-between bg-black/40 rounded-lg px-3 py-2 border border-emerald-900/50">
+              <span className="text-sm font-mono font-bold tracking-widest text-emerald-300">{user.referralCode}</span>
+              <div className="flex items-center gap-1 text-[9px] text-neutral-400">
+                <HelpCircle className="w-3 h-3" />
+                <span>{toBengaliNumber(earningSettings?.referralRewardPoints ?? 50)} পয়েন্ট বোনাস</span>
+              </div>
+            </div>
+          </div>
+
+          {!user.referredBy ? (
+            <div className="pt-1">
+              <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-1 block">বন্ধুর রেফার কোড দিন</span>
+              <div className="flex gap-2">
+                <input 
+                  type="text"
+                  value={referredByInput}
+                  onChange={(e) => setReferredByInput(e.target.value)}
+                  placeholder="যেমন: REEL1234"
+                  className="flex-1 bg-black/40 border border-emerald-900/50 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-emerald-500"
+                />
+                <button 
+                  type="button"
+                  onClick={() => {
+                    const val = referredByInput.trim();
+                    if (val && val !== user.referralCode) {
+                      onSwitchUser({ ...user, referredBy: val });
+                      setReferredByInput('');
+                      setReferralNote(lang === 'bn' ? 'রেফার কোড সফলভাবে যুক্ত হয়েছে!' : 'Referral code added!');
+                    } else {
+                      setReferralNote(lang === 'bn' ? 'সঠিক রেফার কোড দিন!' : 'Enter a valid referral code!');
+                    }
+                  }}
+                  className="bg-emerald-500 hover:bg-emerald-400 text-black px-4 py-1.5 rounded-lg text-xs font-bold transition active:scale-95 cursor-pointer"
+                >
+                  {lang === 'bn' ? 'সাবমিট' : 'Submit'}
+                </button>
+              </div>
+              {referralNote && <p className="text-[11px] text-emerald-300 mt-1">{referralNote}</p>}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-[10px] text-emerald-400/80 bg-emerald-500/5 p-2 rounded-lg border border-emerald-500/10">
+              <Award className="w-3 h-3" />
+              <span>আপনি রেফার কোড <b>{user.referredBy}</b> ব্যবহার করেছেন।</span>
+            </div>
+          )}
+        </div>
+
+        {/* Interactive Stats Grid: Followers, Following, Points, Withdrawn */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4 pt-4 border-t border-emerald-950/80 text-center">
+          <button
+            type="button"
+            onClick={() => onOpenFollowList?.('followers')}
+            className="p-2.5 rounded-xl bg-black/40 hover:bg-[#15281e] border border-emerald-950 hover:border-emerald-600/50 transition cursor-pointer active:scale-95"
+          >
+            <div className="flex items-center justify-center text-emerald-400 mb-1">
+              <Users className="w-4 h-4" />
+            </div>
+            <span className="text-base font-extrabold text-white block">
+              {toBengaliNumber(user.followersCount || 0)}
+            </span>
+            <p className="text-[10px] text-neutral-300 font-semibold">ফলোয়ার ↗</p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onOpenFollowList?.('following')}
+            className="p-2.5 rounded-xl bg-black/40 hover:bg-[#15281e] border border-emerald-950 hover:border-cyan-600/50 transition cursor-pointer active:scale-95"
+          >
+            <div className="flex items-center justify-center text-cyan-400 mb-1">
+              <UserPlus className="w-4 h-4" />
+            </div>
+            <span className="text-base font-extrabold text-white block">
+              {toBengaliNumber(user.followingCount || 0)}
+            </span>
+            <p className="text-[10px] text-neutral-300 font-semibold">ফলোয়িং ↗</p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onOpenWallet?.()}
+            className="p-2.5 rounded-xl bg-black/40 hover:bg-[#15281e] border border-emerald-950 hover:border-amber-600/50 transition cursor-pointer active:scale-95"
+          >
+            <div className="flex items-center justify-center text-amber-400 mb-1">
+              <Coins className="w-4 h-4" />
+            </div>
+            <span className="text-base font-extrabold text-white block">
+              {toBengaliNumber(user.points)}
+            </span>
+            <p className="text-[10px] text-neutral-300 font-semibold">মোট পয়েন্ট ↗</p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onOpenWallet?.()}
+            className="p-2.5 rounded-xl bg-black/40 hover:bg-[#15281e] border border-emerald-950 hover:border-green-600/50 transition cursor-pointer active:scale-95"
+          >
+            <div className="flex items-center justify-center text-green-400 mb-1">
+              <ShieldCheck className="w-4 h-4" />
+            </div>
+            <span className="text-base font-extrabold text-white block">
+              {formatTaka(user.totalWithdrawn)}
+            </span>
+            <p className="text-[10px] text-neutral-300 font-semibold">উত্তোলিত টাকা ↗</p>
+          </button>
+        </div>
+      </div>
+
+      {/* Profile Edit Section */}
+      <div>
+        {isEditing ? (
+          <form
+            onSubmit={handleSaveProfile}
+            className="rounded-2xl bg-[#141f19] border border-emerald-950 p-4 space-y-3"
+          >
+            <h3 className="text-sm font-bold text-emerald-400">প্রোফাইল তথ্য আপডেট</h3>
+            <div className="flex items-center gap-3 pb-2 border-b border-emerald-950">
+              <img
+                src={avatarInput || user.avatar}
+                alt={nameInput}
+                className="w-14 h-14 rounded-2xl object-cover border-2 border-emerald-500/60 shrink-0"
+              />
+              <div className="flex-1 space-y-1.5">
+                <label className="min-h-[36px] px-3 py-1.5 rounded-xl bg-[#0d1611] border border-emerald-800/60 text-xs font-bold text-emerald-300 inline-flex items-center gap-1.5 cursor-pointer hover:bg-[#16251d]">
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>{lang === 'bn' ? 'প্রোফাইল ছবি পরিবর্তন' : 'Change Photo'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleAvatarFileChange}
+                  />
+                </label>
+                <p className="text-[10px] text-neutral-400">
+                  {lang === 'bn' ? 'গ্যালারি থেকে নতুন ছবি বেছে নিন' : 'Pick a new photo from gallery'}
+                </p>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-neutral-400 block mb-1">আপনার নাম:</label>
+              <input
+                type="text"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-sm text-white"
+                required
+              />
+            </div>
+            <div>
+              <label className="text-xs text-neutral-400 block mb-1">মোবাইল নম্বর:</label>
+              <input
+                type="text"
+                value={phoneInput}
+                onChange={(e) => setPhoneInput(e.target.value)}
+                className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-sm text-white"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-neutral-400 block mb-1">ইমেইল:</label>
+              <input
+                type="email"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-sm text-white"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-neutral-400 block mb-1">পেমেন্ট মেথড:</label>
+              <select
+                value={methodInput}
+                onChange={(e) => setMethodInput(e.target.value as any)}
+                className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-sm text-white"
+              >
+                <option value="bKash">বিকাশ (bKash)</option>
+                <option value="Nagad">নগদ (Nagad)</option>
+                <option value="Rocket">রকেট (Rocket)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-neutral-400 block mb-1">পেমেন্ট অ্যাকাউন্ট নম্বর:</label>
+              <input
+                type="text"
+                value={accNumInput}
+                onChange={(e) => setAccNumInput(e.target.value)}
+                className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-sm text-white"
+              />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                type="submit"
+                className="flex-1 min-h-[42px] py-2 rounded-xl bg-[#00c853] hover:bg-[#00e676] text-black text-xs font-bold transition cursor-pointer"
+              >
+                সংরক্ষণ করুন
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsEditing(false)}
+                className="min-h-[42px] px-4 py-2 rounded-xl bg-neutral-800 text-neutral-300 text-xs font-bold cursor-pointer"
+              >
+                বাতিল
+              </button>
+            </div>
+          </form>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setIsEditing(true)}
+            className="w-full min-h-[44px] py-2.5 rounded-xl bg-[#141f19] hover:bg-[#1a2821] border border-emerald-950 text-xs font-bold text-neutral-300 transition flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <UserIcon className="w-3.5 h-3.5 text-emerald-400" />
+            <span>প্রোফাইল পরিবর্তন করুন</span>
+          </button>
+        )}
+      </div>
+
+      {/* Help & Support Links (Fully Functional) */}
+      <div className="rounded-2xl bg-[#141f19] border border-emerald-950 p-2 space-y-1">
+        <button
+          type="button"
+          onClick={() => setInfoModalMode('faq')}
+          className="w-full min-h-[46px] px-3 py-2 rounded-xl flex items-center justify-between text-xs text-neutral-200 hover:bg-white/5 transition cursor-pointer"
+        >
+          <div className="flex items-center gap-2.5">
+            <HelpCircle className="w-4 h-4 text-emerald-400" />
+            <span className="font-semibold">সচরাচর জিজ্ঞাসা (FAQ)</span>
+          </div>
+          <ArrowRight className="w-3.5 h-3.5 text-neutral-500" />
+        </button>
+        <button
+          type="button"
+          onClick={() => setInfoModalMode('terms')}
+          className="w-full min-h-[46px] px-3 py-2 rounded-xl border-t border-emerald-950/60 flex items-center justify-between text-xs text-neutral-200 hover:bg-white/5 transition cursor-pointer"
+        >
+          <div className="flex items-center gap-2.5">
+            <FileText className="w-4 h-4 text-emerald-400" />
+            <span className="font-semibold">শর্তাবলী ও নিয়মাবলী</span>
+          </div>
+          <ArrowRight className="w-3.5 h-3.5 text-neutral-500" />
+        </button>
+      </div>
+
+      {/* My Reels Grid (TikTok Style) */}
+      <div className="pt-2">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="p-2 rounded-xl bg-emerald-950 text-emerald-400">
+            <Video className="w-4 h-4" />
+          </div>
+          <h3 className="font-bold text-sm">আমার প্রকাশিত রিলস ({toBengaliNumber(userReels.length)})</h3>
+        </div>
+
+        {userReels.length === 0 ? (
+          <div className="bg-[#141f19] rounded-2xl p-8 border border-emerald-950 text-center">
+            <Video className="w-8 h-8 text-neutral-600 mx-auto mb-2 opacity-50" />
+            <p className="text-xs text-neutral-500">
+              {lang === 'bn' ? 'আপনি এখনো কোনো রিল পাবলিশ করেননি।' : 'You have not published any reels yet.'}
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+            {userReels.map((reel) => (
+              <div 
+                key={reel.id} 
+                className="relative aspect-[3/4] bg-[#0d1611] rounded-2xl overflow-hidden border border-emerald-950/60 shadow-md group"
+              >
+                {/* Clickable Image to view */}
+                <div 
+                  onClick={() => onOpenReel(reel)}
+                  className="absolute inset-0 cursor-pointer"
+                >
+                  <img 
+                    src={reel.thumbnailUrl} 
+                    alt={reel.title}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-black/30 pointer-events-none" />
+                </div>
+
+                {/* Top Action Buttons: Edit ✏️ & Delete 🗑️ */}
+                <div className="absolute top-2 right-2 flex items-center gap-1.5 z-20">
+                  {onEditReel && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEditReel(reel);
+                      }}
+                      className="w-7 h-7 rounded-full bg-black/75 hover:bg-emerald-500 hover:text-black text-emerald-400 backdrop-blur-md flex items-center justify-center transition shadow-lg cursor-pointer"
+                      title={lang === 'bn' ? 'রিল এডিট করুন' : 'Edit Reel'}
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  {onDeleteReel && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setReelToDelete(reel);
+                      }}
+                      className="w-7 h-7 rounded-full bg-black/75 hover:bg-rose-500 hover:text-white text-rose-400 backdrop-blur-md flex items-center justify-center transition shadow-lg cursor-pointer"
+                      title={lang === 'bn' ? 'রিল মুছুন' : 'Delete Reel'}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Bottom title & views */}
+                <div 
+                  onClick={() => onOpenReel(reel)}
+                  className="absolute bottom-2 left-2 right-2 z-10 pointer-events-none cursor-pointer"
+                >
+                  <p className="text-xs font-bold text-white truncate drop-shadow-sm mb-0.5">
+                    {reel.title}
+                  </p>
+                  <div className="flex items-center justify-between text-[10px] text-emerald-400">
+                    <span className="flex items-center gap-1">
+                      <Video className="w-3 h-3" />
+                      <span>{toBengaliNumber(reel.viewsCount || 0, lang)}</span>
+                    </span>
+                    <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-black/60 text-emerald-300 border border-emerald-500/20">
+                      {reel.category}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Logout button */}
+      <button
+        onClick={onLogout}
+        className="w-full py-3 rounded-xl bg-rose-950/50 hover:bg-rose-900/60 border border-rose-900/60 text-rose-300 text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer"
+      >
+        <LogOut className="w-4 h-4" />
+        <span>লগআউট করুন</span>
+      </button>
+
+      {/* In-app Delete Confirmation Modal (no browser popups) */}
+      {reelToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#121c17] border border-rose-900/60 rounded-2xl p-5 max-w-xs w-full text-center shadow-2xl space-y-4 animate-scaleUp">
+            <div className="w-12 h-12 rounded-full bg-rose-950/80 border border-rose-600/40 text-rose-400 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h4 className="font-bold text-white text-base mb-1">
+                {lang === 'bn' ? 'রিল মুছে ফেলতে চান?' : 'Delete this reel?'}
+              </h4>
+              <p className="text-xs text-neutral-300 line-clamp-2 px-1">
+                &ldquo;{reelToDelete.title}&rdquo; {lang === 'bn' ? 'মুছে ফেলা হবে। এটি হোম ও প্রোফাইল থেকে অপসারিত হবে।' : 'will be deleted.'}
+              </p>
+            </div>
+            <div className="flex gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setReelToDelete(null)}
+                className="flex-1 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold transition cursor-pointer"
+              >
+                {lang === 'bn' ? 'বাতিল' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = reelToDelete;
+                  setReelToDelete(null);
+                  if (onDeleteReel && target) {
+                    onDeleteReel(target);
+                  }
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition shadow-lg shadow-rose-600/30 cursor-pointer"
+              >
+                {lang === 'bn' ? 'হ্যাঁ, মুছুন' : 'Yes, Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Profile Info Modal (Levels, FAQ, Terms) */}
+      <ProfileInfoModal
+        mode={infoModalMode}
+        onClose={() => setInfoModalMode(null)}
+        reelsWatchedCount={user.reelsWatchedCount || 0}
+        pointRate={pointRate}
+        minWithdrawal={minWithdrawal}
+        lang={lang}
+      />
+    </div>
+  );
+};

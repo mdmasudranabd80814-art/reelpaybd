@@ -1,0 +1,12 @@
+{
+  "projectId": "reelpay-bd",
+  "appId": "1:136223972828:web:2fe3822dacaf3531a14319",
+  "apiKey": "AIzaSyCfe9dFOsLTUQwWv-gMSSG21efyvcbsbh4",
+  "authDomain": "reelpay-bd.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-reelpaybd-75704cbe-d0b3-4b33-b493-b4f7941ce899",
+  "storageBucket": "reelpay-bd.firebasestorage.app",
+  "messagingSenderId": "136223972828",
+  "measurementId": "",
+  "oAuthClientId": "136223972828-ap9f9v4ecvivum2ukju2t2k4aqef7l37.apps.googleusercontent.com",
+  "recaptchaSiteKey": ""
+}

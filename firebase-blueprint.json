@@ -1,0 +1,382 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Application user profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "pattern": "^[0-9]{11}$" },
+        "email": { "type": "string", "format": "email" },
+        "password": { "type": "string" },
+        "points": { "type": "number" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "avatar": { "type": "string", "format": "uri" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "totalWithdrawn": { "type": "number" },
+        "reelsWatchedCount": { "type": "number" },
+        "referralCode": { "type": "string", "maxLength": 20 },
+        "referredBy": { "type": "string", "maxLength": 20 },
+        "referralBonusClaimed": { "type": "boolean" },
+        "isVerified": { "type": "boolean" },
+        "lastActive": { "type": "string", "format": "date-time" },
+        "totalSessions": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["bKash", "Nagad", "Rocket"] },
+        "paymentAccountNumber": { "type": "string", "pattern": "^[0-9]{11}$" },
+        "followersCount": { "type": "number" },
+        "followingCount": { "type": "number" },
+        "followers": { "type": "array", "items": { "type": "string" }, "maxItems": 1000 },
+        "following": { "type": "array", "items": { "type": "string" }, "maxItems": 1000 },
+        "completedTaskIds": { "type": "array", "items": { "type": "string" }, "maxItems": 500 },
+        "dailyReelClaimDate": { "type": "string", "maxLength": 20 },
+        "dailyReelClaimsCount": { "type": "number" },
+        "dailyReelPointsEarned": { "type": "number" },
+        "loginOfferClaimed": { "type": "boolean" },
+        "loginOfferCampaignId": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "name", "phone", "points", "role", "createdAt"]
+    },
+    "Reel": {
+      "title": "Reel",
+      "description": "Video reel document",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "maxLength": 200 },
+        "creatorName": { "type": "string" },
+        "creatorHandle": { "type": "string" },
+        "creatorAvatar": { "type": "string", "format": "uri" },
+        "isVerified": { "type": "boolean" },
+        "category": { "type": "string", "enum": ["সকল", "ট্রেন্ডিং", "কমেডি", "গেমিং", "রান্না", "শিক্ষা"] },
+        "thumbnailUrl": { "type": "string", "format": "uri" },
+        "videoUrl": { "type": "string", "format": "uri" },
+        "likesCount": { "type": "number" },
+        "commentsCount": { "type": "number" },
+        "sharesCount": { "type": "number" },
+        "pointsReward": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "viewsCount": { "type": "number" },
+        "audioTrack": { "type": "string" },
+        "caption": { "type": "string", "maxLength": 1000 },
+        "hashtags": { "type": "array", "items": { "type": "string" }, "maxItems": 10 },
+        "isEarningEnabled": { "type": "boolean" },
+        "isSpecialOffer": { "type": "boolean" },
+        "specialOfferBadge": { "type": "string", "maxLength": 50 },
+        "customWatchSeconds": { "type": "number" }
+      },
+      "required": ["id", "title", "creatorName", "category", "thumbnailUrl", "createdAt"]
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "User comment on a reel",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "reelId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userName": { "type": "string" },
+        "userAvatar": { "type": "string", "format": "uri" },
+        "text": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "likes": { "type": "number" }
+      },
+      "required": ["id", "reelId", "userId", "userName", "text", "createdAt"]
+    },
+    "WithdrawalRequest": {
+      "title": "WithdrawalRequest",
+      "description": "Request to withdraw points for cash",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userName": { "type": "string" },
+        "userPhone": { "type": "string" },
+        "accountNumber": { "type": "string" },
+        "accountType": { "type": "string", "enum": ["Personal", "Agent"] },
+        "method": { "type": "string", "enum": ["bKash", "Nagad", "Rocket"] },
+        "pointsDeducted": { "type": "number" },
+        "amountBDT": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "transactionId": { "type": "string" },
+        "rejectionReason": { "type": "string" }
+      },
+      "required": ["id", "userId", "amountBDT", "status", "createdAt"]
+    },
+    "DepositRequest": {
+      "title": "DepositRequest",
+      "description": "Request to deposit money for points",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userName": { "type": "string" },
+        "userPhone": { "type": "string" },
+        "method": { "type": "string", "enum": ["bKash", "Nagad", "Rocket"] },
+        "amountBDT": { "type": "number" },
+        "pointsToAdd": { "type": "number" },
+        "transactionId": { "type": "string" },
+        "senderNumber": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "amountBDT", "status", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User notification",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["reel_deleted", "deposit", "withdrawal", "general"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["id", "userId", "title", "message", "type", "createdAt"]
+    },
+    "LiveStream": {
+      "title": "LiveStream",
+      "description": "Active personal audio or video live stream",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "hostId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "hostName": { "type": "string", "maxLength": 100 },
+        "hostAvatar": { "type": "string" },
+        "title": { "type": "string", "maxLength": 140 },
+        "mode": { "type": "string", "enum": ["audio", "video"] },
+        "category": { "type": "string", "maxLength": 50 },
+        "pinnedNotice": { "type": "string", "maxLength": 240 },
+        "isMicMuted": { "type": "boolean" },
+        "isCameraOn": { "type": "boolean" },
+        "chatEnabled": { "type": "boolean" },
+        "allowSpeakerRequests": { "type": "boolean" },
+        "viewersCount": { "type": "number" },
+        "likesCount": { "type": "number" },
+        "giftsTotalPoints": { "type": "number" },
+        "adminGiftPoints": { "type": "number" },
+        "coHosts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "avatar": { "type": "string" },
+              "isMuted": { "type": "boolean" },
+              "joinedAt": { "type": "string" }
+            }
+          },
+          "maxItems": 6
+        },
+        "status": { "type": "string", "enum": ["active", "ended"] },
+        "cancelledByAdmin": { "type": "boolean" },
+        "cancelReason": { "type": "string", "maxLength": 240 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "endedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "hostId", "hostName", "mode", "status", "createdAt"]
+    },
+    "LiveChatMessage": {
+      "title": "LiveChatMessage",
+      "description": "A message or gift event in a live stream chat",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userAvatar": { "type": "string" },
+        "text": { "type": "string", "maxLength": 400 },
+        "type": { "type": "string", "enum": ["chat", "gift", "join", "system"] },
+        "giftId": { "type": "string" },
+        "giftIcon": { "type": "string" },
+        "giftName": { "type": "string" },
+        "giftPoints": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "userName", "text", "createdAt"]
+    },
+    "LiveSpeakerRequest": {
+      "title": "LiveSpeakerRequest",
+      "description": "Request by viewer to join audio adda speaker seat",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userAvatar": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "userName", "status", "createdAt"]
+    },
+    "LiveViewer": {
+      "title": "LiveViewer",
+      "description": "Active viewer presence in a live room",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "avatar": { "type": "string" },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "joinedAt"]
+    },
+    "LiveRtcSignal": {
+      "title": "LiveRtcSignal",
+      "description": "WebRTC signaling & live frame preview relay for active live streams",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["peer", "preview"] },
+        "viewerId": { "type": "string" },
+        "viewerName": { "type": "string" },
+        "hostId": { "type": "string" },
+        "status": { "type": "string", "enum": ["requesting", "offered", "answered"] },
+        "offer": { "type": "object" },
+        "answer": { "type": "object" },
+        "hostCandidates": { "type": "array", "items": { "type": "string" }, "maxItems": 30 },
+        "viewerCandidates": { "type": "array", "items": { "type": "string" }, "maxItems": 30 },
+        "frameDataUrl": { "type": "string" },
+        "audioLevel": { "type": "number" },
+        "isCameraOn": { "type": "boolean" },
+        "isMicMuted": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "type", "updatedAt"]
+    },
+    "ChatSession": {
+      "title": "ChatSession",
+      "description": "A conversation between two users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "participants": { "type": "array", "items": { "type": "string" }, "maxItems": 2 },
+        "lastMessage": { "type": "string" },
+        "lastMessageTime": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "participants", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "A single message in a chat",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "text": { "type": "string" },
+        "imageUrl": { "type": "string", "format": "uri" },
+        "sharedReelId": { "type": "string" },
+        "sharedReelThumbnail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "isHidden": { "type": "boolean" }
+      },
+      "required": ["id", "sessionId", "senderId", "text", "createdAt"]
+    },
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Global application and points earning settings",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "isMasterEarningEnabled": { "type": "boolean" },
+        "isLoginOfferEnabled": { "type": "boolean" },
+        "loginOfferPoints": { "type": "number" },
+        "loginOfferCampaignId": { "type": "string", "maxLength": 100 },
+        "loginOfferTitle": { "type": "string", "maxLength": 120 },
+        "isVideoWatchEarningEnabled": { "type": "boolean" },
+        "videoWatchDurationSeconds": { "type": "number" },
+        "defaultVideoRewardPoints": { "type": "number" },
+        "videoEarningScope": { "type": "string", "enum": ["all_reels", "offer_reels_only"] },
+        "allowDirectFeedClaim": { "type": "boolean" },
+        "isDailyReelLimitEnabled": { "type": "boolean" },
+        "dailyMaxReelClaims": { "type": "number" },
+        "dailyMaxReelPoints": { "type": "number" },
+        "requireFullWatchTimeInFullScreen": { "type": "boolean" },
+        "isDailyBonusEnabled": { "type": "boolean" },
+        "dailyBonusPoints": { "type": "number" },
+        "isSpinWheelEnabled": { "type": "boolean" },
+        "spinMaxPrize": { "type": "number" },
+        "spinPrizes": { "type": "array", "items": { "type": "number" }, "maxItems": 20 },
+        "isScratchCardEnabled": { "type": "boolean" },
+        "scratchCardPrize": { "type": "number" },
+        "isReferralEnabled": { "type": "boolean" },
+        "referralRewardPoints": { "type": "number" },
+        "referredUserRewardPoints": { "type": "number" },
+        "isTasksEnabled": { "type": "boolean" },
+        "isLevelMultiplierEnabled": { "type": "boolean" },
+        "giftHostPercent": { "type": "number" },
+        "giftAdminPercent": { "type": "number" },
+        "giftCashbackPercent": { "type": "number" },
+        "adminCommissionReceiverId": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "isMasterEarningEnabled", "isVideoWatchEarningEnabled", "videoWatchDurationSeconds"]
+    }
+  },
+  "firestore": {
+    "settings/{settingId}": {
+      "schema": "AppSettings",
+      "description": "Global app configurations and point customization"
+    },
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents"
+    },
+    "users/{userId}/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "User personal notifications"
+    },
+    "reels/{reelId}": {
+      "schema": "Reel",
+      "description": "Video reels"
+    },
+    "reels/{reelId}/comments/{commentId}": {
+      "schema": "Comment",
+      "description": "Comments on a specific reel"
+    },
+    "withdrawals/{requestId}": {
+      "schema": "WithdrawalRequest",
+      "description": "Withdrawal requests"
+    },
+    "deposits/{requestId}": {
+      "schema": "DepositRequest",
+      "description": "Deposit requests"
+    },
+    "live_streams/{liveId}": {
+      "schema": "LiveStream",
+      "description": "Live stream session metadata"
+    },
+    "live_streams/{liveId}/chat/{messageId}": {
+      "schema": "LiveChatMessage",
+      "description": "Real-time chat messages for a live stream"
+    },
+    "live_streams/{liveId}/requests/{requestId}": {
+      "schema": "LiveSpeakerRequest",
+      "description": "Audio adda speaker join requests"
+    },
+    "live_streams/{liveId}/viewers/{viewerId}": {
+      "schema": "LiveViewer",
+      "description": "Active viewers in a live session"
+    },
+    "live_streams/{liveId}/rtc/{peerId}": {
+      "schema": "LiveRtcSignal",
+      "description": "WebRTC signaling and live video frame relay for active live sessions"
+    },
+    "chats/{sessionId}": {
+      "schema": "ChatSession",
+      "description": "Personal chat sessions"
+    },
+    "chats/{sessionId}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Messages within a session"
+    }
+  }
+}

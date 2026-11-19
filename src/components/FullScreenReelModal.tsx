@@ -1,0 +1,946 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  X,
+  Heart,
+  MessageCircle,
+  Share2,
+  Gift,
+  Sparkles,
+  Check,
+  Music,
+  ChevronDown,
+  ChevronUp,
+  Volume2,
+  VolumeX,
+  AlertCircle,
+  RotateCcw,
+  Radio,
+  Users,
+  Mic,
+  Send,
+  Flame,
+  Eye,
+  UserPlus,
+} from 'lucide-react';
+import { Reel, LiveStream, EarningSettings } from '../types';
+import { toBengaliNumber } from '../utils/bengali';
+import { playCoinSound, playPopSound, playSuccessChime } from '../utils/audio';
+import { normalizeVideoUrl, extractYouTubeId, extractVimeoId } from '../utils/video';
+import { getVideoFromDB } from '../utils/videoStorage';
+import confetti from 'canvas-confetti';
+
+interface FullScreenReelModalProps {
+  reels: Reel[];
+  initialReelId: string;
+  onClose: () => void;
+  isLiked: boolean;
+  onToggleLike: (reelId: string) => void;
+  onOpenComments: (reel: Reel) => void;
+  onRewardEarned: (points: number, reelTitle: string, reelId?: string) => void;
+  onOpenGiftSheet?: () => void;
+  onDownload?: (reel: Reel) => void;
+  onShare: (reel: Reel) => void;
+  onOpenProfile?: (userId: string) => void;
+  lang: 'bn' | 'en';
+  isMuted: boolean;
+  onToggleMute: () => void;
+  levelProgress: number;
+  activeLiveStreams?: LiveStream[];
+  onOpenLiveSheet?: () => void;
+  earningSettings?: EarningSettings;
+  watchedReelIds?: string[];
+  isDailyLimitReached?: boolean;
+  dailyClaimsUsed?: number;
+  dailyClaimsLimit?: number;
+  dailyPointsUsed?: number;
+  dailyPointsLimit?: number;
+  onToggleFollow?: (userId: string, creatorName?: string) => void;
+  isFollowingCreator?: boolean;
+  followingIds?: string[];
+  onOpenChatWithCreator?: (creatorId: string) => void;
+}
+
+export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
+  reels,
+  initialReelId,
+  onClose,
+  isLiked,
+  onToggleLike,
+  onOpenComments,
+  onRewardEarned,
+  onOpenGiftSheet,
+  onDownload,
+  onShare,
+  onOpenProfile,
+  lang,
+  isMuted,
+  onToggleMute,
+  levelProgress,
+  activeLiveStreams = [],
+  onOpenLiveSheet,
+  earningSettings,
+  watchedReelIds = [],
+  isDailyLimitReached = false,
+  dailyClaimsUsed = 0,
+  dailyClaimsLimit = 0,
+  dailyPointsUsed = 0,
+  dailyPointsLimit = 0,
+  onToggleFollow,
+  isFollowingCreator = false,
+  followingIds,
+  onOpenChatWithCreator,
+}) => {
+  const [viewMode, setViewMode] = useState<'reels' | 'live'>('reels');
+  const [activeLiveIndex, setActiveLiveIndex] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(() => {
+    const idx = reels.findIndex((r) => r.id === initialReelId);
+    return idx !== -1 ? idx : 0;
+  });
+
+  const reel = reels[currentIndex] || reels[0];
+  const [videoSrc, setVideoSrc] = useState<string>(() => reel?.videoUrl || '');
+  const [videoFailed, setVideoFailed] = useState(false);
+
+  useEffect(() => {
+    let isCancelled = false;
+    let createdBlobUrl = '';
+
+    const resolveVideo = async () => {
+      setVideoFailed(false);
+
+      if (!reel) {
+        setVideoSrc('');
+        return;
+      }
+
+      // Check IndexedDB for uploaded user videos by reel.id
+      if (reel.id) {
+        const dbBlob = await getVideoFromDB(reel.id);
+        if (dbBlob && !isCancelled) {
+          createdBlobUrl = URL.createObjectURL(dbBlob);
+          setVideoSrc(createdBlobUrl);
+          return;
+        }
+      }
+
+      // Check if videoUrl starts with 'local:'
+      if (reel.videoUrl?.startsWith('local:')) {
+        const localKey = reel.videoUrl.replace('local:', '');
+        const dbBlob = await getVideoFromDB(localKey);
+        if (dbBlob && !isCancelled) {
+          createdBlobUrl = URL.createObjectURL(dbBlob);
+          setVideoSrc(createdBlobUrl);
+          return;
+        }
+      }
+
+      // If it's a broken sample bucket URL from legacy seed data, sanitize it; otherwise preserve user's original URL!
+      if (!isCancelled) {
+        const sanitized = normalizeVideoUrl(reel.videoUrl, currentIndex);
+        setVideoSrc(sanitized || reel.videoUrl || '');
+      }
+    };
+
+    resolveVideo();
+
+    return () => {
+      isCancelled = true;
+      if (createdBlobUrl) {
+        URL.revokeObjectURL(createdBlobUrl);
+      }
+    };
+  }, [currentIndex, reel?.id, reel?.videoUrl]);
+
+  // Master & Reel Earning Eligibility controlled by Admin
+  const masterEarningOn = earningSettings ? earningSettings.isMasterEarningEnabled : true;
+  const videoEarningOn = earningSettings ? earningSettings.isVideoWatchEarningEnabled : true;
+  const scope = earningSettings?.videoEarningScope || 'all_reels';
+  
+  // Specific reel earning criteria
+  const isReelEligible = scope === 'offer_reels_only'
+    ? Boolean(reel?.isEarningEnabled || reel?.isSpecialOffer)
+    : (reel?.isEarningEnabled !== false);
+
+  const isEarningActive = masterEarningOn && videoEarningOn && isReelEligible;
+
+  // Custom seconds controlled by admin (per reel or default app setting)
+  const totalSeconds = (reel?.customWatchSeconds && reel.customWatchSeconds > 0)
+    ? reel.customWatchSeconds
+    : (earningSettings?.videoWatchDurationSeconds || 15);
+
+  const currentRewardPoints = reel?.pointsReward || earningSettings?.defaultVideoRewardPoints || 10;
+
+  const [watchSeconds, setWatchSeconds] = useState(0);
+  const [hasClaimedCurrent, setHasClaimedCurrent] = useState(false);
+  const [modalNotice, setModalNotice] = useState<string | null>(null);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const isFollowingCurrent = followingIds
+    ? Boolean(reel && followingIds.includes(reel.userId))
+    : (isFollowingCreator || isFollowing);
+  const [showGiftModal, setShowGiftModal] = useState(false);
+  const [floatingHearts, setFloatingHearts] = useState<{ id: number; x: number }[]>([]);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const showModalNotice = (msg: string) => {
+    setModalNotice(msg);
+    setTimeout(() => setModalNotice(null), 2600);
+  };
+
+  const isReelAlreadyClaimed = hasClaimedCurrent || (reel ? watchedReelIds.includes(reel.id) : false);
+  const requireFullWatch = earningSettings ? earningSettings.requireFullWatchTimeInFullScreen !== false : true;
+  const isLimitActive = Boolean(earningSettings?.isDailyReelLimitEnabled !== false);
+
+  const touchStartY = useRef<number>(0);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const touchEndY = e.changedTouches[0].clientY;
+    const diff = touchStartY.current - touchEndY;
+    if (diff > 50) {
+      goNext();
+    } else if (diff < -50) {
+      goPrev();
+    }
+  };
+
+  // Watch Timer Progress
+  useEffect(() => {
+    setWatchSeconds(0);
+    setHasClaimedCurrent(reel ? watchedReelIds.includes(reel.id) : false);
+
+    if (videoRef.current) {
+      videoRef.current.currentTime = 0;
+      videoRef.current.play().catch(() => {});
+    }
+
+    if (!isEarningActive || isDailyLimitReached || (reel && watchedReelIds.includes(reel.id))) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setWatchSeconds((prev) => {
+        if (prev >= totalSeconds) {
+          clearInterval(timer);
+          return totalSeconds;
+        }
+        return prev + 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [currentIndex, reel?.id, totalSeconds, isEarningActive, isDailyLimitReached]);
+
+  // Sync mute state
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = isMuted;
+    }
+  }, [isMuted]);
+
+  useEffect(() => {
+    if (isEarningActive && !isDailyLimitReached && !isReelAlreadyClaimed && watchSeconds >= totalSeconds) {
+      handleClaimPoints(true);
+    }
+  }, [watchSeconds, isReelAlreadyClaimed, isEarningActive, isDailyLimitReached, totalSeconds]);
+
+  // Handle claiming points (respects watch time & admin daily limit)
+  const handleClaimPoints = (fromTimer = false) => {
+    if (!isEarningActive) {
+      showModalNotice(lang === 'bn' ? '📺 এই ভিডিওতে পয়েন্ট আর্নিং বন্ধ রয়েছে।' : '📺 Point earning is disabled on this video.');
+      return;
+    }
+
+    if (isReelAlreadyClaimed) {
+      showModalNotice(lang === 'bn' ? '✓ আপনি ইতিমধ্যে এই রিলের পয়েন্ট সংগ্রহ করেছেন!' : '✓ You already collected points for this reel!');
+      return;
+    }
+
+    if (isDailyLimitReached) {
+      showModalNotice(
+        lang === 'bn'
+          ? `🔒 আজকের রিল আর্নিং লিমিট পূর্ণ হয়েছে! (${toBengaliNumber(dailyClaimsUsed, lang)}/${toBengaliNumber(dailyClaimsLimit, lang)} রিল)`
+          : `🔒 Daily reel earning limit reached! (${dailyClaimsUsed}/${dailyClaimsLimit})`
+      );
+      return;
+    }
+
+    if (!fromTimer && requireFullWatch && watchSeconds < totalSeconds) {
+      const remaining = Math.max(1, totalSeconds - watchSeconds);
+      showModalNotice(
+        lang === 'bn'
+          ? `⏳ পয়েন্ট পেতে আর ${toBengaliNumber(remaining, lang)} সেকেন্ড ভিডিওটি দেখুন!`
+          : `⏳ Watch ${remaining}s more to unlock points!`
+      );
+      return;
+    }
+
+    if (!isMuted) {
+      playCoinSound();
+    }
+
+    try {
+      confetti({
+        particleCount: 50,
+        spread: 60,
+        origin: { y: 0.6 },
+        colors: ['#00e676', '#00c853', '#ffffff', '#ffab00'],
+      });
+    } catch {
+      // Ignore
+    }
+
+    setHasClaimedCurrent(true);
+    onRewardEarned(currentRewardPoints, reel.title, reel.id);
+  };
+
+  const handleLike = () => {
+    if (!isMuted) playPopSound();
+    onToggleLike(reel.id);
+
+    // Spawn floating heart
+    const newHeart = { id: Date.now(), x: Math.random() * 40 - 20 };
+    setFloatingHearts((prev) => [...prev, newHeart]);
+    setTimeout(() => {
+      setFloatingHearts((prev) => prev.filter((h) => h.id !== newHeart.id));
+    }, 1200);
+  };
+
+  const handleShare = () => {
+    onShare(reel);
+  };
+
+  const handleSendGift = (giftName: string) => {
+    setShowGiftModal(false);
+    if (!isMuted) playSuccessChime();
+    showModalNotice(`🎉 আপনি ক্রিয়েটরকে "${giftName}" উপহার পাঠিয়েছেন! ধন্যবাদ।`);
+  };
+
+  const goNext = () => {
+    if (currentIndex < reels.length - 1) {
+      setCurrentIndex((prev) => prev + 1);
+    }
+  };
+
+  const goPrev = () => {
+    if (currentIndex > 0) {
+      setCurrentIndex((prev) => prev - 1);
+    }
+  };
+
+  const progressPercent = Math.min(100, (watchSeconds / totalSeconds) * 100);
+  const likesDisplay = isLiked ? reel.likesCount + 1 : reel.likesCount;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black flex justify-center items-center select-none overflow-hidden">
+      {/* Mobile Frame Container */}
+      <div 
+        className="relative w-full h-full max-w-md bg-neutral-950 flex flex-col justify-between overflow-hidden shadow-2xl"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
+        {/* Background Visual (Video, YouTube Embed, or Image preview) */}
+        <div className="absolute inset-0 z-0" style={reel.filter ? { filter: reel.filter } : {}}>
+          {(() => {
+            const ytId = extractYouTubeId(videoSrc);
+            const vimeoId = extractVimeoId(videoSrc);
+
+            if (ytId) {
+              return (
+                <div className="w-full h-full relative overflow-hidden bg-black pointer-events-auto">
+                  <iframe
+                    src={`https://www.youtube-nocookie.com/embed/${ytId}?autoplay=1&mute=${isMuted ? 1 : 0}&loop=1&playlist=${ytId}&controls=0&modestbranding=1&playsinline=1&rel=0`}
+                    title={reel.title}
+                    className="w-full h-full object-cover scale-[1.3] pointer-events-auto border-0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                </div>
+              );
+            }
+
+            if (vimeoId) {
+              return (
+                <div className="w-full h-full relative overflow-hidden bg-black pointer-events-auto">
+                  <iframe
+                    src={`https://player.vimeo.com/video/${vimeoId}?autoplay=1&muted=${isMuted ? 1 : 0}&loop=1&controls=0`}
+                    title={reel.title}
+                    className="w-full h-full object-cover scale-[1.3] pointer-events-auto border-0"
+                    allow="autoplay; fullscreen; picture-in-picture"
+                  />
+                </div>
+              );
+            }
+
+            if (!videoFailed && videoSrc) {
+              return (
+                <video
+                  ref={videoRef}
+                  key={videoSrc}
+                  src={videoSrc}
+                  poster={reel.thumbnailUrl}
+                  autoPlay
+                  muted={isMuted}
+                  loop
+                  playsInline
+                  preload="auto"
+                  onCanPlay={(e) => {
+                    e.currentTarget.play().catch(() => {});
+                  }}
+                  onError={() => {
+                    // DO NOT replace user's video with another video!
+                    setVideoFailed(true);
+                  }}
+                  className="w-full h-full object-cover"
+                />
+              );
+            }
+
+            return (
+              <div className="relative w-full h-full">
+                <img
+                  src={reel.thumbnailUrl}
+                  alt={reel.title}
+                  className="w-full h-full object-cover"
+                />
+                {videoFailed && (
+                  <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex flex-col items-center justify-center p-6 text-center z-10">
+                    <AlertCircle className="w-9 h-9 text-amber-400 mb-2" />
+                    <p className="text-sm font-bold text-white mb-1">
+                      {lang === 'bn' ? 'ইউজারের মূল ভিডিও চালানো যায়নি' : 'Original video could not be played'}
+                    </p>
+                    <p className="text-[11px] text-neutral-300 mb-3 max-w-xs">
+                      {lang === 'bn'
+                        ? 'ভিডিও ফরম্যাট বা লিংক চেক করুন।'
+                        : 'Please check video format or link.'}
+                    </p>
+                    <button
+                      onClick={() => {
+                        setVideoFailed(false);
+                        if (videoRef.current) {
+                          videoRef.current.load();
+                          videoRef.current.play().catch(() => {});
+                        }
+                      }}
+                      className="px-3.5 py-1.5 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold transition flex items-center gap-1.5 shadow-md"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>{lang === 'bn' ? 'আবার চেষ্টা করুন' : 'Retry'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Gradients matching Screenshot 2 */}
+          <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-transparent to-black/90 pointer-events-none" />
+        </div>
+
+        {/* Floating Heart Animations */}
+        {floatingHearts.map((h) => (
+          <div
+            key={h.id}
+            className="absolute z-30 bottom-40 right-8 text-rose-500 pointer-events-none animate-floatUp"
+            style={{ transform: `translateX(${h.x}px)` }}
+          >
+            <Heart className="w-8 h-8 fill-rose-500 drop-shadow-lg" />
+          </div>
+        ))}
+
+        {/* TOP BAR matching Screenshot 2 with Reels vs Live Switcher */}
+        <div className="relative z-20 pt-3 px-4 flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            {/* Logo */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-lg font-black text-white tracking-wide">
+                ReelPay <span className="text-emerald-400">✨</span>
+              </span>
+            </div>
+
+            {/* Interactive Top Switcher: Reels vs Live */}
+            <div className="flex items-center bg-black/60 backdrop-blur-md p-0.5 rounded-full border border-white/10 shadow-lg">
+              <button
+                onClick={() => setViewMode('reels')}
+                className={`px-3 py-1 rounded-full text-[11px] font-bold transition cursor-pointer ${
+                  viewMode === 'reels'
+                    ? 'bg-[#00c853] text-black shadow-md'
+                    : 'text-neutral-300 hover:text-white'
+                }`}
+              >
+                {lang === 'bn' ? 'রিলস' : 'Reels'}
+              </button>
+              <button
+                onClick={() => setViewMode('live')}
+                className={`px-3 py-1 rounded-full text-[11px] font-bold transition cursor-pointer flex items-center gap-1 ${
+                  viewMode === 'live'
+                    ? 'bg-rose-600 text-white shadow-md'
+                    : 'text-neutral-300 hover:text-white'
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                <span>{lang === 'bn' ? 'লাইভ' : 'Live'}</span>
+              </button>
+            </div>
+
+            {/* Controls */}
+            <div className="flex items-center gap-1.5">
+              {/* Sound Toggle */}
+              <button
+                onClick={onToggleMute}
+                className="w-8 h-8 rounded-full bg-black/40 backdrop-blur-md text-white flex items-center justify-center hover:bg-black/60 transition"
+              >
+                {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              </button>
+
+              {/* Close Button */}
+              <button
+                onClick={onClose}
+                className="w-8 h-8 rounded-full bg-black/40 backdrop-blur-md text-white flex items-center justify-center hover:bg-black/60 transition"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Dynamic Mode Content: Live Streams vs Reels */}
+        {viewMode === 'live' ? (
+          /* FULL-SCREEN LIVE STREAM MODE */
+          <div className="relative z-10 flex-1 flex flex-col justify-between p-4 pt-2">
+            {/* Live Host Stage Header */}
+            <div className="flex items-center justify-between bg-black/60 backdrop-blur-md p-3 rounded-2xl border border-rose-500/30 shadow-lg">
+              <div className="flex items-center gap-2.5">
+                <div className="relative">
+                  <img
+                    src={activeLiveStreams[activeLiveIndex]?.hostAvatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80"}
+                    alt="Live Host"
+                    className="w-10 h-10 rounded-full object-cover border-2 border-rose-500"
+                  />
+                  <span className="absolute -bottom-1 -right-1 bg-rose-600 text-[8px] font-black text-white px-1 rounded uppercase border border-black animate-pulse">LIVE</span>
+                </div>
+                <div>
+                  <h3 className="text-xs font-extrabold text-white flex items-center gap-1">
+                    <span>{activeLiveStreams[activeLiveIndex]?.hostName || (lang === 'bn' ? 'আরিয়ান লাইভ 🎤' : 'Aryan Live 🎤')}</span>
+                  </h3>
+                  <p className="text-[10px] text-rose-300 flex items-center gap-1 mt-0.5">
+                    <Users className="w-3 h-3 text-rose-400" />
+                    <span>{toBengaliNumber(activeLiveStreams[activeLiveIndex]?.viewersCount || 2450, lang)} {lang === 'bn' ? 'জন সরাসরি দেখছে' : 'watching live'}</span>
+                  </p>
+                </div>
+              </div>
+
+              {onOpenLiveSheet && (
+                <button
+                  onClick={onOpenLiveSheet}
+                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-md"
+                >
+                  <Radio className="w-3.5 h-3.5" />
+                  <span>{lang === 'bn' ? 'চ্যাট রুম' : 'Chat Room'}</span>
+                </button>
+              )}
+            </div>
+
+            {/* Live Stage Visual */}
+            <div className="relative flex-1 my-3 rounded-3xl overflow-hidden bg-gradient-to-br from-rose-950/40 via-neutral-900 to-black border border-rose-900/40 flex flex-col justify-center items-center text-center p-6 shadow-2xl">
+              <img
+                src={activeLiveStreams[activeLiveIndex]?.hostAvatar || "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=700&auto=format&fit=crop&q=80"}
+                alt="Live Stream Visual"
+                className="absolute inset-0 w-full h-full object-cover opacity-35 blur-xs"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-black/60 pointer-events-none" />
+
+              <div className="relative z-10">
+                <div className="w-16 h-16 rounded-full bg-rose-600/30 border-2 border-rose-500/50 flex items-center justify-center mx-auto mb-3 animate-pulse shadow-lg">
+                  <Mic className="w-8 h-8 text-rose-400" />
+                </div>
+                <span className="bg-rose-600 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-widest shadow-md inline-block mb-2 animate-bounce">
+                  🔴 LIVE STREAM
+                </span>
+                <h2 className="text-base sm:text-lg font-extrabold text-white drop-shadow-md">
+                  {activeLiveStreams[activeLiveIndex]?.title || (lang === 'bn' ? 'সরাসরি লাইভ স্ট্রিম ও গান 🎤' : 'Live Music Stream')}
+                </h2>
+                <p className="text-xs text-neutral-300 mt-1 max-w-xs mx-auto">
+                  {lang === 'bn' ? 'লাইভে মেসেজ করুন এবং প্রিয় ক্রিয়েটরকে গিফট পাঠান!' : 'Chat live and send gifts to support the host!'}
+                </p>
+              </div>
+
+              {/* Action Floating Buttons */}
+              <div className="relative z-10 flex gap-3 mt-5">
+                <button
+                  onClick={handleLike}
+                  className="px-4 py-2 rounded-2xl bg-rose-600/90 hover:bg-rose-500 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-lg active:scale-95 cursor-pointer"
+                >
+                  <Heart className="w-4 h-4 fill-current" />
+                  <span>{toBengaliNumber(activeLiveStreams[activeLiveIndex]?.likesCount || 1840, lang)}</span>
+                </button>
+                <button
+                  onClick={() => (onOpenGiftSheet ? onOpenGiftSheet() : setShowGiftModal(true))}
+                  className="px-4 py-2 rounded-2xl bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-black font-extrabold text-xs transition flex items-center gap-1.5 shadow-lg active:scale-95 cursor-pointer"
+                >
+                  <Gift className="w-4 h-4" />
+                  <span>{lang === 'bn' ? '🎁 গিফট পাঠান' : '🎁 Send Gift'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Bottom Bar: Live Chat Action */}
+            <div className="relative z-20 flex items-center justify-between gap-2 bg-black/70 backdrop-blur-md p-3 rounded-2xl border border-white/10">
+              <span className="text-xs text-neutral-300 font-medium truncate flex-1">
+                💬 {lang === 'bn' ? 'লাইভ চ্যাট চলছে...' : 'Live chat active...'}
+              </span>
+              <button
+                onClick={() => {
+                  if (onOpenLiveSheet) onOpenLiveSheet();
+                }}
+                className="px-3 py-1.5 rounded-xl bg-[#00c853] hover:bg-[#00e676] text-black font-bold text-xs transition cursor-pointer shadow-md"
+              >
+                {lang === 'bn' ? 'লাইভে যোগ দিন' : 'Join Live'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* STANDARD REELS MODE */
+          <div className="relative z-10 flex-1 flex flex-col justify-between">
+            {/* Watch Progress Bar & Coin Counter matching Screenshot 2 or Entertainment Banner */}
+            {isEarningActive ? (
+              <div className="w-full flex flex-col gap-1 mt-1 px-4">
+                {modalNotice && (
+                  <div className="mx-auto mb-1 px-3 py-1.5 rounded-xl bg-black/85 border border-amber-400/50 text-amber-200 text-[11px] font-bold shadow-lg text-center animate-in fade-in">
+                    {modalNotice}
+                  </div>
+                )}
+
+                {/* Special Offer Badge if configured by Admin */}
+                {reel.isSpecialOffer && (
+                  <div className="self-start px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-black font-black text-[10px] flex items-center gap-1 shadow-md animate-pulse mb-0.5">
+                    <Flame className="w-3 h-3 fill-current text-black" />
+                    <span>{reel.specialOfferBadge || (lang === 'bn' ? '🔥 স্পেশাল অফার রিল' : '🔥 Special Offer')} (+{toBengaliNumber(currentRewardPoints, lang)} Pts)</span>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between text-[10px] font-bold text-emerald-400/80 px-1 mb-0.5">
+                  <span>
+                    {isDailyLimitReached
+                      ? (lang === 'bn' ? '🔒 আজকের লিমিট পূর্ণ হয়েছে' : '🔒 Daily Limit Reached')
+                      : isReelAlreadyClaimed
+                      ? (lang === 'bn' ? '✓ এই রিলের পয়েন্ট অর্জিত' : '✓ Reel Points Claimed')
+                      : (lang === 'bn' ? 'রিওয়ার্ড প্রগ্রেস' : 'Reward Progress')}
+                  </span>
+                  <span>
+                    {isDailyLimitReached || isReelAlreadyClaimed
+                      ? '১০০%'
+                      : `${toBengaliNumber(Math.round(progressPercent), lang)}%`}
+                  </span>
+                </div>
+                <div className="w-full bg-neutral-800/80 rounded-full h-1.5 overflow-hidden backdrop-blur-sm relative">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 shadow-sm ${
+                      isDailyLimitReached ? 'bg-amber-400 shadow-amber-400/50' : 'bg-emerald-400 shadow-emerald-400/50'
+                    }`}
+                    style={{ width: `${isDailyLimitReached || isReelAlreadyClaimed ? 100 : progressPercent}%` }}
+                  />
+                </div>
+                
+                {/* Level Progress Bar matching prompt: Next Reel Reward (Higher multiplier) */}
+                <div className="mt-1.5">
+                  <div className="flex items-center justify-between text-[9px] font-bold text-amber-400/80 px-1 mb-0.5">
+                    <span>{lang === 'bn' ? 'পরবর্তী লেভেল রিওয়ার্ড' : 'Next Level Reward'}</span>
+                    <span>{toBengaliNumber(Math.round(levelProgress), lang)}%</span>
+                  </div>
+                  <div className="w-full bg-neutral-800/60 rounded-full h-1 overflow-hidden backdrop-blur-sm">
+                    <div
+                      className="bg-amber-400 h-full rounded-full transition-all duration-700"
+                      style={{ width: `${levelProgress}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-[10px] font-semibold text-emerald-300 drop-shadow-sm mt-1">
+                  {isLimitActive && (dailyClaimsLimit > 0 || dailyPointsLimit > 0) ? (
+                    <span className={isDailyLimitReached ? 'text-amber-300 font-bold' : 'text-neutral-300'}>
+                      {lang === 'bn'
+                        ? `লিমিট: ${dailyClaimsLimit > 0 ? `${toBengaliNumber(dailyClaimsUsed, lang)}/${toBengaliNumber(dailyClaimsLimit, lang)} রিল` : ''}${dailyClaimsLimit > 0 && dailyPointsLimit > 0 ? ' • ' : ''}${dailyPointsLimit > 0 ? `${toBengaliNumber(dailyPointsUsed, lang)}/${toBengaliNumber(dailyPointsLimit, lang)} Pts` : ''}`
+                        : `Limit: ${dailyClaimsLimit > 0 ? `${dailyClaimsUsed}/${dailyClaimsLimit} reels` : ''}${dailyClaimsLimit > 0 && dailyPointsLimit > 0 ? ' • ' : ''}${dailyPointsLimit > 0 ? `${dailyPointsUsed}/${dailyPointsLimit} pts` : ''}`}
+                    </span>
+                  ) : <span />}
+                  <span>
+                    পয়েন্ট +{toBengaliNumber(currentRewardPoints, lang)} • {toBengaliNumber(Math.floor(watchSeconds / 60), lang)}:
+                    {toBengaliNumber(watchSeconds % 60 < 10 ? `0${watchSeconds % 60}` : watchSeconds % 60, lang)} /{' '}
+                    {toBengaliNumber(Math.floor(totalSeconds / 60), lang)}:{toBengaliNumber(totalSeconds % 60 < 10 ? `0${totalSeconds % 60}` : totalSeconds % 60, lang)} 🪙
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="w-full mt-1 px-3 py-1.5 rounded-xl bg-black/60 backdrop-blur-md border border-neutral-800/80 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-1.5 text-amber-300 font-bold">
+                  <Eye className="w-3.5 h-3.5 text-amber-400" />
+                  <span>{lang === 'bn' ? '📺 বিনোদন মোড (আর্নিং বন্ধ)' : '📺 Entertainment Mode (Earning Off)'}</span>
+                </div>
+                <span className="text-[10px] text-neutral-400">
+                  {lang === 'bn' ? 'শুধুমাত্র ভিডিও দেখুন' : 'Watch only'}
+                </span>
+              </div>
+            )}
+
+          {/* Up / Down navigation buttons for quick flipping */}
+        <div className="absolute left-3 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-3 pointer-events-auto">
+          {currentIndex > 0 && (
+            <button
+              onClick={goPrev}
+              className="w-8 h-8 rounded-full bg-black/50 backdrop-blur-md text-white flex items-center justify-center hover:bg-emerald-500 hover:text-black transition shadow-lg"
+              title="পূর্ববর্তী রিল"
+            >
+              <ChevronUp className="w-5 h-5" />
+            </button>
+          )}
+          {currentIndex < reels.length - 1 && (
+            <button
+              onClick={goNext}
+              className="w-8 h-8 rounded-full bg-black/50 backdrop-blur-md text-white flex items-center justify-center hover:bg-emerald-500 hover:text-black transition shadow-lg"
+              title="পরবর্তী রিল"
+            >
+              <ChevronDown className="w-5 h-5" />
+            </button>
+          )}
+        </div>
+
+        {/* RIGHT SIDE FLOATING ACTION DOCK matching Screenshot 2 */}
+        <div className="relative z-20 self-end mr-3 mb-2 flex flex-col items-center gap-4 text-white">
+          {/* Like Button */}
+          <button
+            onClick={handleLike}
+            className="flex flex-col items-center gap-0.5 cursor-pointer group"
+          >
+            <div
+              className={`w-12 h-12 rounded-2xl bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center transition-all ${
+                isLiked ? 'text-rose-500 scale-105' : 'text-white'
+              }`}
+            >
+              <Heart className={`w-6 h-6 ${isLiked ? 'fill-rose-500 text-rose-500' : ''}`} />
+            </div>
+            <span className="text-xs font-bold drop-shadow">
+              {toBengaliNumber(likesDisplay)}
+            </span>
+          </button>
+
+          {/* Comment Button */}
+          <button
+            onClick={() => onOpenComments(reel)}
+            className="flex flex-col items-center gap-0.5 cursor-pointer group"
+          >
+            <div className="w-12 h-12 rounded-2xl bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center hover:bg-black/60 transition">
+              <MessageCircle className="w-6 h-6" />
+            </div>
+            <span className="text-xs font-bold drop-shadow">
+              {toBengaliNumber(reel.commentsCount)}
+            </span>
+          </button>
+
+          {/* Share Button */}
+          <button
+            onClick={handleShare}
+            className="flex flex-col items-center gap-0.5 cursor-pointer group"
+          >
+            <div className="w-12 h-12 rounded-2xl bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center hover:bg-black/60 transition">
+              <Share2 className="w-6 h-6" />
+            </div>
+            <span className="text-xs font-bold drop-shadow">
+              {lang === 'bn' ? 'শেয়ার' : 'Share'}
+            </span>
+          </button>
+
+          {/* Gift / উপহার Button */}
+          <button
+            onClick={() => (onOpenGiftSheet ? onOpenGiftSheet() : setShowGiftModal(true))}
+            className="flex flex-col items-center gap-0.5 cursor-pointer group"
+          >
+            <div className="w-12 h-12 rounded-2xl bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center hover:bg-black/60 transition text-rose-400">
+              <Gift className="w-6 h-6" />
+            </div>
+            <span className="text-xs font-bold drop-shadow">
+              {lang === 'bn' ? 'উপহার' : 'Gift'}
+            </span>
+          </button>
+
+          {/* Reward Button or Entertainment Badge */}
+          {isEarningActive ? (
+            <button
+              onClick={() => handleClaimPoints(false)}
+              className={`px-3 py-2 rounded-2xl text-xs font-extrabold flex items-center gap-1.5 shadow-xl transition-all active:scale-95 cursor-pointer ${
+                isReelAlreadyClaimed
+                  ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-500/40'
+                  : isDailyLimitReached
+                  ? 'bg-neutral-900/90 text-amber-300 border border-amber-500/40'
+                  : requireFullWatch && watchSeconds < totalSeconds
+                  ? 'bg-black/75 text-emerald-300 border border-emerald-500/40'
+                  : reel.isSpecialOffer
+                  ? 'bg-gradient-to-r from-amber-400 to-[#00c853] hover:from-amber-300 hover:to-[#00e676] text-black shadow-amber-500/40 border border-amber-300 animate-pulse'
+                  : 'bg-[#00c853] hover:bg-[#00e676] text-black shadow-emerald-500/40 animate-pulse'
+              }`}
+            >
+              {reel.isSpecialOffer && !isDailyLimitReached && !isReelAlreadyClaimed ? (
+                <Flame className="w-4 h-4 fill-current text-black" />
+              ) : (
+                <Sparkles className="w-4 h-4 fill-current" />
+              )}
+              <span>
+                {isReelAlreadyClaimed
+                  ? (lang === 'bn' ? 'পয়েন্ট অর্জিত ✓' : 'Earned ✓')
+                  : isDailyLimitReached
+                  ? (lang === 'bn' ? '🔒 লিমিট পূর্ণ' : '🔒 Limit Reached')
+                  : requireFullWatch && watchSeconds < totalSeconds
+                  ? `⏳ ${toBengaliNumber(Math.max(1, totalSeconds - watchSeconds), lang)}s • +${toBengaliNumber(currentRewardPoints, lang)}`
+                  : `+${toBengaliNumber(currentRewardPoints, lang)} পয়েন্ট`}
+              </span>
+            </button>
+          ) : (
+            <div className="px-2.5 py-1.5 rounded-2xl text-[10px] font-bold bg-neutral-900/90 text-neutral-400 border border-neutral-800 flex items-center gap-1 shadow-md select-none">
+              <Eye className="w-3.5 h-3.5" />
+              <span>{lang === 'bn' ? 'আর্নিং বন্ধ' : 'Earning Off'}</span>
+            </div>
+          )}
+        </div>
+
+        {/* BOTTOM METADATA OVERLAY matching Screenshot 2 */}
+        <div className="relative z-20 px-4 pb-4 bg-gradient-to-t from-black/95 via-black/60 to-transparent pt-6">
+          {/* Creator row */}
+          <div className="flex items-center gap-2.5 mb-2">
+            <div 
+              className="flex items-center gap-2.5 cursor-pointer group/creator"
+              onClick={() => onOpenProfile && onOpenProfile(reel.userId)}
+            >
+              <div className="relative">
+                <img
+                  src={reel.creatorAvatar}
+                  alt={reel.creatorName}
+                  className="w-10 h-10 rounded-full object-cover border-2 border-emerald-400 shadow-md group-hover/creator:border-white transition"
+                />
+                {reel.isVerified && (
+                  <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 text-black rounded-full flex items-center justify-center text-[9px] font-black">
+                    <Check className="w-3 h-3 stroke-[3]" />
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-bold text-white tracking-wide group-hover/creator:text-emerald-400 transition">
+                  @{reel.creatorHandle}
+                </span>
+              </div>
+            </div>
+
+            {/* Prominently Awake Follow Button ("শুরুতে জেগে থাকবে") */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onToggleFollow) {
+                  onToggleFollow(reel.userId, reel.creatorName);
+                } else {
+                  setIsFollowing(!isFollowing);
+                }
+              }}
+              className={`text-xs font-black px-3 py-1 rounded-full flex items-center gap-1.5 shadow-lg active:scale-95 transition-all cursor-pointer ${
+                isFollowingCurrent
+                  ? 'bg-neutral-800/90 text-neutral-300 border border-neutral-600 hover:bg-neutral-700'
+                  : 'bg-gradient-to-r from-[#00e676] to-[#00c853] hover:from-[#00ff88] hover:to-[#00e676] text-black ring-2 ring-emerald-400/60 shadow-emerald-500/40 animate-pulse'
+              }`}
+              title={lang === 'bn' ? 'ক্রিয়েটরকে ফলো করুন' : 'Follow Creator'}
+            >
+              {isFollowingCurrent ? (
+                <>
+                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                  <span>{lang === 'bn' ? 'ফলোয়িং' : 'Following'}</span>
+                </>
+              ) : (
+                <>
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>{lang === 'bn' ? '+ ফলো' : '+ Follow'}</span>
+                </>
+              )}
+            </button>
+
+            {/* Quick Direct Message Button */}
+            {onOpenChatWithCreator && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenChatWithCreator(reel.userId);
+                }}
+                className="w-7 h-7 rounded-full bg-black/60 hover:bg-emerald-500 hover:text-black text-emerald-400 border border-emerald-500/30 flex items-center justify-center transition shadow-md active:scale-95 cursor-pointer ml-0.5"
+                title={lang === 'bn' ? 'ক্রিয়েটরকে মেসেজ পাঠান' : 'Message Creator'}
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Caption & Hashtags */}
+          <p className="text-sm text-slate-100 font-medium leading-relaxed drop-shadow-sm mb-1.5">
+            {reel.caption}
+          </p>
+
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {reel.hashtags.map((tag, idx) => (
+              <span key={idx} className="text-xs font-semibold text-emerald-400">
+                {tag}
+              </span>
+            ))}
+          </div>
+
+          {/* Audio Marquee matching Screenshot 2 */}
+          <div className="flex items-center gap-2 text-xs text-neutral-300 overflow-hidden">
+            <Music className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+            <div className="truncate font-medium">{reel.audioTrack}</div>
+          </div>
+        </div>
+        </div>
+        )}
+
+        {/* Send Gift Mini Modal */}
+        {showGiftModal && (
+          <div className="absolute inset-0 z-40 bg-black/70 backdrop-blur-sm flex items-end justify-center p-4">
+            <div className="w-full bg-[#121c17] border border-emerald-900/60 rounded-3xl p-4 text-white shadow-2xl animate-in slide-in-from-bottom-5">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="font-bold text-base flex items-center gap-1.5">
+                  <Gift className="w-4 h-4 text-emerald-400" />
+                  <span>ক্রিয়েটরকে উপহার দিন</span>
+                </h3>
+                <button
+                  onClick={() => setShowGiftModal(false)}
+                  className="p-1 hover:bg-neutral-800 rounded-full"
+                >
+                  <X className="w-4 h-4 text-neutral-400" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-4 gap-2 mb-3">
+                {[
+                  { name: 'গরম চা', icon: '☕️', points: 10 },
+                  { name: 'মিষ্টি', icon: '🍬', points: 20 },
+                  { name: 'লাল গোলাপ', icon: '🌹', points: 50 },
+                  { name: 'সুপার লাভ', icon: '💖', points: 100 },
+                ].map((item, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleSendGift(item.name)}
+                    className="p-3 bg-[#192720] hover:bg-emerald-900/40 rounded-2xl flex flex-col items-center gap-1 border border-emerald-900/40 transition active:scale-95"
+                  >
+                    <span className="text-2xl">{item.icon}</span>
+                    <span className="text-xs font-semibold">{item.name}</span>
+                    <span className="text-[10px] text-emerald-400">
+                      {toBengaliNumber(item.points)} পয়েন্ট
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};

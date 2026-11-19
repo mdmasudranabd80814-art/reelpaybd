@@ -1,0 +1,6 @@
+{
+  "name": "ReelPay BD - রিল দেখুন টাকা জিতুন",
+  "description": "Watch reels and earn money with bKash, Nagad, and Rocket withdrawals on ReelPay BD, featuring a mobile video player, reward tasks, and admin dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
