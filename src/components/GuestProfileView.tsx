@@ -2,13 +2,21 @@ import React, { useState } from 'react';
 import { User as UserIcon, ShieldCheck, ArrowRight, Smartphone, HelpCircle, FileText } from 'lucide-react';
 import { ProfileInfoModal, ProfileInfoModalMode } from './ProfileInfoModal';
 
+import { toBengaliNumber } from '../utils/bengali';
+
 interface GuestProfileViewProps {
+  guestId?: string;
+  guestPoints?: number;
+  savedCount?: number;
   onLogin: () => void;
   onRegister: () => void;
   lang?: 'bn' | 'en';
 }
 
 export const GuestProfileView: React.FC<GuestProfileViewProps> = ({
+  guestId = 'GUEST',
+  guestPoints = 0,
+  savedCount = 0,
   onLogin,
   onRegister,
   lang = 'bn',
@@ -23,15 +31,29 @@ export const GuestProfileView: React.FC<GuestProfileViewProps> = ({
           <UserIcon className="w-10 h-10" />
         </div>
 
-        <div>
+        <div className="space-y-1">
+          <span className="inline-block px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-black text-emerald-300">
+            ID: {guestId}
+          </span>
           <h2 className="text-lg font-black text-white">
-            {lang === 'bn' ? 'স্বাগতম অতিথি / ভিজিটর!' : 'Welcome Guest!'}
+            {lang === 'bn' ? 'অতিথি আইডি (Guest Mode)' : 'Guest Account'}
           </h2>
-          <p className="text-xs text-neutral-400 mt-0.5">
+          <p className="text-xs text-neutral-400">
             {lang === 'bn'
-              ? 'আপনি অতিথি হিসেবে হোমপেজের রিল উপভোগ করছেন।'
-              : 'You are browsing public reels as a guest.'}
+              ? 'গেস্ট আইডিতে রিল দেখা ফ্রি, তবে গেস্ট পয়েন্ট উত্তোলনযোগ্য নয়। আসল টাকা আয় করতে লগইন করুন।'
+              : 'Watching reels is free as a guest, but guest points are not withdrawable. Login with a real account to earn.'}
           </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <div className="p-2.5 rounded-2xl bg-black/30 border border-amber-500/25">
+            <p className="text-[10px] text-neutral-400">{lang === 'bn' ? 'গেস্ট পয়েন্ট (অ-উত্তোলনযোগ্য)' : 'Guest Pts (Locked)'}</p>
+            <p className="text-sm font-black text-amber-300 mt-0.5">🔒 {toBengaliNumber(guestPoints, lang)}</p>
+          </div>
+          <div className="p-2.5 rounded-2xl bg-black/30 border border-emerald-500/20">
+            <p className="text-[10px] text-neutral-400">{lang === 'bn' ? 'সেভ করা রিল' : 'Saved Reels'}</p>
+            <p className="text-sm font-black text-emerald-300 mt-0.5">🔖 {toBengaliNumber(savedCount, lang)}</p>
+          </div>
         </div>
 
         {/* Buttons */}

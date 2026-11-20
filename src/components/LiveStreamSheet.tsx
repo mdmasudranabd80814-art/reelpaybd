@@ -213,7 +213,7 @@ export const LiveStreamSheet: React.FC<LiveStreamSheetProps> = ({
   const isAdminFirebaseAuthed = Boolean(
     firebaseUser &&
       firebaseUser.emailVerified &&
-      (isAdminOverride || firebaseUser.email?.toLowerCase() === 'mdmasudranabd80814@gmail.com')
+      isAdminOverride
   );
 
   const flashStudioNotice = (msg: string) => {
@@ -1145,8 +1145,8 @@ export const LiveStreamSheet: React.FC<LiveStreamSheetProps> = ({
       console.error('Failed to cancel/end live:', err);
       flashStudioNotice(
         lang === 'bn'
-          ? '⚠️ লাইভ ক্যানসেল ব্যর্থ হয়েছে! এডমিন Google অ্যাকাউন্ট (mdmasudranabd80814@gmail.com) দিয়ে লগইন করুন।'
-          : '⚠️ Failed to end live! Ensure signed in with Admin Google account.'
+          ? '⚠️ লাইভ ক্যানসেল ব্যর্থ হয়েছে! অনুমোদিত এডমিন অ্যাকাউন্ট দিয়ে লগইন করুন।'
+          : '⚠️ Failed to end live! Ensure signed in with an authorized Admin account.'
       );
     } finally {
       setIsCancellingLive(false);

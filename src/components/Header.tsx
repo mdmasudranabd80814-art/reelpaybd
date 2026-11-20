@@ -33,13 +33,24 @@ export const Header: React.FC<HeaderProps> = ({
 
         <div className="flex items-center gap-2">
           {!isAuthenticated ? (
-            <button
-              onClick={() => onOpenAuth?.('login')}
-              className="px-3 py-1.5 rounded-full bg-black/85 hover:bg-black text-[#00e676] font-black text-xs shadow-md border border-emerald-400/40 transition active:scale-95 flex items-center gap-1.5 cursor-pointer"
-            >
-              <UserIcon className="w-3.5 h-3.5" />
-              <span>{lang === 'bn' ? 'লগইন' : 'Login'}</span>
-            </button>
+            <div className="flex items-center gap-1.5">
+              {userPoints > 0 && (
+                <div
+                  className="flex items-center gap-1 bg-black/25 backdrop-blur-sm px-2 py-1 rounded-full text-amber-200 text-[10px] font-black border border-amber-300/30"
+                  title={lang === 'bn' ? 'গেস্ট প্রিভিউ পয়েন্ট (উত্তোলনযোগ্য নয়)' : 'Guest preview points (Non-withdrawable)'}
+                >
+                  <span>🪙</span>
+                  <span>{toBengaliNumber(userPoints, lang)}</span>
+                </div>
+              )}
+              <button
+                onClick={() => onOpenAuth?.('login')}
+                className="px-3 py-1.5 rounded-full bg-black/85 hover:bg-black text-[#00e676] font-black text-xs shadow-md border border-emerald-400/40 transition active:scale-95 flex items-center gap-1.5 cursor-pointer"
+              >
+                <UserIcon className="w-3.5 h-3.5" />
+                <span>{lang === 'bn' ? 'লগইন' : 'Login'}</span>
+              </button>
+            </div>
           ) : (
             <div className="flex items-center gap-1 bg-black/25 backdrop-blur-sm px-2.5 py-1 rounded-full text-white text-xs font-black border border-white/20">
               <span className="text-amber-300">💰</span>

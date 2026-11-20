@@ -24,6 +24,7 @@ interface AuthPageProps {
   ) => Promise<{ user: unknown; verificationSent: boolean; error: unknown }>;
   onGoogleLogin: (pendingProfile?: Partial<User>) => Promise<{ user: unknown; error: unknown }>;
   onResetPassword?: (email: string) => Promise<{ ok: boolean; error: unknown }>;
+  onClose?: () => void;
   initialView?: 'login' | 'register';
   reasonMessage?: string;
   lang?: 'bn' | 'en';
@@ -36,6 +37,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   onEmailRegister,
   onGoogleLogin,
   onResetPassword,
+  onClose,
   initialView = 'login',
   reasonMessage,
   lang = 'bn',
@@ -168,6 +170,18 @@ export const AuthPage: React.FC<AuthPageProps> = ({
       <div className="absolute bottom-1/4 -right-20 w-64 h-64 bg-emerald-500/10 rounded-full blur-[100px]" />
 
       <div className="max-w-sm mx-auto w-full space-y-5 z-10">
+        {onClose && (
+          <div className="flex items-center justify-start">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3.5 py-2 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-neutral-300 hover:text-white flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>{lang === 'bn' ? 'অতিথি হিসেবে রিল দেখতে ফিরুন' : 'Back to Guest Reels'}</span>
+            </button>
+          </div>
+        )}
         <div className="text-center space-y-2.5">
           <div className="w-20 h-20 bg-gradient-to-br from-[#00e676] to-[#00c853] rounded-3xl mx-auto flex items-center justify-center shadow-2xl shadow-emerald-500/30 ring-4 ring-emerald-500/20">
             <span className="text-4xl font-black text-white drop-shadow-lg">৳</span>

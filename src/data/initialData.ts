@@ -33,7 +33,7 @@ export const INITIAL_USERS_LIST: User[] = [
     id: 'system_admin',
     name: 'ReelPay BD অফিসিয়াল',
     phone: '01700000000',
-    email: 'mdmasudranabd80814@gmail.com',
+    email: 'official@reelpay.local',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=160&auto=format&fit=crop&q=80',
     points: 99999,
     role: 'admin',

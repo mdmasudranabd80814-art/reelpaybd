@@ -19,7 +19,10 @@ service cloud.firestore {
 
     function isAdmin() {
       return isSignedIn() && (
-        (request.auth.token.email == 'mdmasudranabd80814@gmail.com' && request.auth.token.email_verified == true) ||
+        ('email' in request.auth.token &&
+         request.auth.token.email is string &&
+         request.auth.token.email.lower() == 'mdmasudranabd80814@gmail.com' &&
+         request.auth.token.email_verified == true) ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
@@ -193,7 +196,7 @@ service cloud.firestore {
 
     match /public_profiles/{userId} {
       allow get: if isSignedIn() && isValidId(userId);
-      allow list: if isSignedIn() && resource.data.id is string;
+      allow list: if isAdmin() || isSignedIn();
       allow create: if (isOwner(userId) && isValidId(userId) && isValidPublicProfile(incoming()) && incoming().id == request.auth.uid) ||
                      (isAdmin() && isValidId(userId) && isValidPublicProfile(incoming()));
       allow update: if isAdmin() ||
@@ -205,8 +208,9 @@ service cloud.firestore {
     }
 
     match /reels/{reelId} {
-      allow get: if isSignedIn() && isValidId(reelId);
-      allow list: if isSignedIn() && resource.data.title is string;
+      // Public reels are viewable by guests (unauthenticated) and email-verified users; writes require verified auth
+      allow get: if (request.auth == null || isSignedIn()) && isValidId(reelId);
+      allow list: if request.auth == null || isSignedIn() || isAdmin();
       allow create: if (isSignedIn() && isValidId(reelId) && isValidReel(incoming()) && incoming().userId == request.auth.uid) ||
                      (isAdmin() && isValidId(reelId) && isValidReel(incoming()));
       allow update: if isAdmin() ||
@@ -219,8 +223,8 @@ service cloud.firestore {
       allow delete: if isAdmin() || (isSignedIn() && isValidId(reelId) && existing().userId == request.auth.uid);
 
       match /comments/{commentId} {
-        allow get: if isSignedIn() && isValidId(commentId);
-        allow list: if isSignedIn() && resource.data.reelId == reelId;
+        allow get: if (request.auth == null || isSignedIn()) && isValidId(commentId);
+        allow list: if request.auth == null || isSignedIn() || isAdmin();
         allow create: if isSignedIn() && isValidId(commentId) && isValidComment(incoming()) && incoming().reelId == reelId && exists(/databases/$(database)/documents/reels/$(reelId));
         allow delete: if isAdmin() || (isSignedIn() && isValidId(commentId) && existing().userId == request.auth.uid);
         allow update: if isAdmin();
@@ -229,7 +233,7 @@ service cloud.firestore {
 
     match /settings/{settingId} {
       allow get: if isSignedIn() && isValidId(settingId);
-      allow list: if isSignedIn() && resource.data.id is string;
+      allow list: if isAdmin() || isSignedIn();
       allow write: if isAdmin();
     }
 
@@ -250,8 +254,8 @@ service cloud.firestore {
     }
 
     match /live_streams/{liveId} {
-      allow get: if isSignedIn() && isValidId(liveId);
-      allow list: if isSignedIn() && resource.data.status is string;
+      allow get: if (request.auth == null || isSignedIn()) && isValidId(liveId);
+      allow list: if request.auth == null || isSignedIn() || isAdmin();
       allow create: if isSignedIn() &&
                        isValidId(liveId) &&
                        incoming().keys().hasAll(['id', 'hostId', 'hostName', 'title', 'mode', 'status', 'createdAt']) &&
@@ -276,7 +280,7 @@ service cloud.firestore {
 
       match /chat/{messageId} {
         allow get: if isSignedIn() && isValidId(messageId);
-        allow list: if isSignedIn() && resource.data.text is string;
+        allow list: if isAdmin() || isSignedIn();
         allow create: if isSignedIn() &&
                          incoming().keys().hasAll(['userId', 'userName', 'text', 'createdAt']) &&
                          incoming().keys().hasOnly(['id', 'userId', 'userName', 'userAvatar', 'text', 'type', 'giftId', 'giftIcon', 'giftName', 'giftPoints', 'createdAt']) &&
@@ -291,7 +295,7 @@ service cloud.firestore {
 
       match /requests/{requestId} {
         allow get: if isSignedIn() && isValidId(requestId);
-        allow list: if isSignedIn() && resource.data.userId is string;
+        allow list: if isAdmin() || isSignedIn();
         allow create: if isSignedIn() &&
                          isValidId(requestId) &&
                          incoming().keys().hasAll(['userId', 'userName', 'status', 'createdAt']) &&
@@ -312,14 +316,14 @@ service cloud.firestore {
 
       match /viewers/{viewerId} {
         allow get: if isSignedIn() && isValidId(viewerId);
-        allow list: if isSignedIn() && resource.data.id is string;
+        allow list: if isAdmin() || isSignedIn();
         allow create, update: if isSignedIn() && isValidId(viewerId) && (viewerId == request.auth.uid || isAdmin());
         allow delete: if isSignedIn() && isValidId(viewerId) && (viewerId == request.auth.uid || isAdmin());
       }
 
       match /rtc/{peerId} {
         allow get: if isSignedIn() && isValidId(peerId);
-        allow list: if isSignedIn() && resource.data.type is string;
+        allow list: if isAdmin() || isSignedIn();
         allow create, update: if isSignedIn() && isValidId(peerId) &&
                                 incoming().keys().hasAll(['id', 'type', 'updatedAt']) &&
                                 incoming().keys().hasOnly(['id', 'type', 'viewerId', 'viewerName', 'hostId', 'status', 'offer', 'answer', 'hostCandidates', 'viewerCandidates', 'frameDataUrl', 'audioLevel', 'isCameraOn', 'isMicMuted', 'updatedAt']) &&
@@ -355,7 +359,7 @@ service cloud.firestore {
 
     match /tasks/{taskId} {
       allow get: if isSignedIn() && isValidId(taskId);
-      allow list: if isSignedIn() && resource.data.title is string;
+      allow list: if isAdmin() || isSignedIn();
       allow create, update, delete: if isAdmin();
     }
 

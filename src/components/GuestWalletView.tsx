@@ -4,6 +4,8 @@ import { toBengaliNumber } from '../utils/bengali';
 
 interface GuestWalletViewProps {
   pointRate: number;
+  guestId?: string;
+  guestPoints?: number;
   onLogin: () => void;
   onRegister: () => void;
   lang?: 'bn' | 'en';
@@ -11,30 +13,42 @@ interface GuestWalletViewProps {
 
 export const GuestWalletView: React.FC<GuestWalletViewProps> = ({
   pointRate,
+  guestId = 'GUEST',
+  guestPoints = 0,
   onLogin,
   onRegister,
   lang = 'bn',
 }) => {
+  const previewBDT = (guestPoints / (pointRate || 10)).toFixed(2);
   return (
     <div className="space-y-4 pb-20 text-white animate-in fade-in duration-200">
       {/* Wallet Preview Card */}
       <div className="rounded-3xl bg-gradient-to-br from-[#132c1e] via-[#0e2016] to-[#09130e] border border-emerald-500/40 p-5 shadow-2xl relative overflow-hidden">
         <div className="absolute -top-10 -right-10 w-32 h-32 bg-emerald-500/20 rounded-full blur-2xl pointer-events-none" />
 
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <span className="text-[11px] font-black uppercase text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
-            {lang === 'bn' ? 'ওয়ালেট সার্ভিস' : 'Wallet Service'}
+            {lang === 'bn' ? `গেস্ট ওয়ালেট (${guestId})` : `Guest Wallet (${guestId})`}
           </span>
           <span className="text-xs text-neutral-400 font-medium">
             {toBengaliNumber(pointRate, lang)} {lang === 'bn' ? 'পয়েন্ট = ১ টাকা' : 'pts = 1 BDT'}
           </span>
         </div>
 
-        <div className="mt-4">
-          <p className="text-xs text-neutral-400">{lang === 'bn' ? 'বর্তমান ব্যালেন্স' : 'Current Balance'}</p>
-          <div className="flex items-baseline gap-2 mt-1">
-            <span className="text-3xl font-black text-white">৳ ০.০০</span>
-            <span className="text-xs text-emerald-400 font-bold">({lang === 'bn' ? 'লগইন প্রয়োজন' : 'Login required'})</span>
+        <div className="mt-4 space-y-1.5">
+          <p className="text-xs text-neutral-400">
+            {lang === 'bn' ? 'গেস্ট প্রিভিউ ব্যালেন্স (অ-উত্তোলনযোগ্য)' : 'Guest Preview Balance (Non-Withdrawable)'}
+          </p>
+          <div className="flex flex-wrap items-baseline gap-2 mt-1">
+            <span className="text-3xl font-black text-amber-300">
+              {toBengaliNumber(guestPoints, lang)} {lang === 'bn' ? 'পয়েন্ট' : 'Pts'}
+            </span>
+            <span className="text-xs text-neutral-400 font-bold">
+              (≈ ৳{toBengaliNumber(previewBDT, lang)})
+            </span>
+          </div>
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[11px] font-bold">
+            <span>🔒 {lang === 'bn' ? 'উত্তোলনযোগ্য নয় — আসল আয় ও উইথড্র করতে রিয়েল আইডিতে লগইন করুন' : 'Not withdrawable — login to a real account to earn & cashout'}</span>
           </div>
         </div>
 

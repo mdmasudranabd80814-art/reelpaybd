@@ -35,7 +35,7 @@ export const AuthPromptModal: React.FC<AuthPromptModalProps> = ({
   const offerPts = earningSettings?.loginOfferPoints || 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[75] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="relative w-full max-w-sm rounded-[28px] bg-gradient-to-b from-[#13231a] to-[#0a120e] border border-emerald-500/40 p-6 shadow-2xl text-white text-center space-y-4 animate-in zoom-in-95 duration-200">
         {/* Close Button */}
         <button

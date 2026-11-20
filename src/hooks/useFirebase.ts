@@ -22,6 +22,7 @@ import {
   deleteDoc,
   onSnapshot,
   query,
+  limit,
   QueryConstraint,
 } from 'firebase/firestore';
 import { auth, db } from '../firebase';
@@ -106,8 +107,23 @@ export function formatFirebaseAuthError(error: unknown, lang: 'bn' | 'en' = 'bn'
       ? 'অনেকবার চেষ্টা করা হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন।'
       : 'Too many attempts. Please try again later.';
   }
+  if (code === 'auth/popup-blocked') {
+    return lang === 'bn'
+      ? 'ব্রাউজার সাইন-ইন পপআপ ব্লক করেছে। পপআপ Allow করুন অথবা লিংকটি নতুন ট্যাবে খুলে লগইন করুন।'
+      : 'Sign-in popup was blocked by your browser. Allow popups or open the link in a new tab.';
+  }
   if (code === 'auth/popup-closed-by-user') {
     return lang === 'bn' ? 'সাইন-ইন পপআপ বন্ধ করা হয়েছে।' : 'Sign-in popup was closed.';
+  }
+  if (code === 'auth/unauthorized-domain') {
+    return lang === 'bn'
+      ? 'এই ডোমেইনটি Firebase Authentication Authorized Domains-এ যুক্ত নেই। Firebase Console → Authentication → Settings → Authorized domains-এ ডোমেইনটি যোগ করুন।'
+      : 'This domain is not in Firebase Authentication Authorized Domains.';
+  }
+  if (code === 'auth/network-request-failed') {
+    return lang === 'bn'
+      ? 'ইন্টারনেট সংযোগে সমস্যা হয়েছে। নেটওয়ার্ক চেক করে আবার চেষ্টা করুন।'
+      : 'Network error. Please check your connection and try again.';
   }
   return error instanceof Error
     ? error.message
@@ -289,6 +305,18 @@ export function useFirebase() {
     []
   );
 
+  const verifyAdminAccess = useCallback(async (): Promise<boolean> => {
+    if (!auth.currentUser || !auth.currentUser.emailVerified) {
+      return false;
+    }
+    try {
+      await getDocs(query(collection(db, 'admins'), limit(1)));
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   return {
     user,
     emailVerified,
@@ -300,6 +328,7 @@ export function useFirebase() {
     refreshVerificationStatus,
     resetPassword,
     logout,
+    verifyAdminAccess,
     getDocument,
     getCollection,
     setDocument,

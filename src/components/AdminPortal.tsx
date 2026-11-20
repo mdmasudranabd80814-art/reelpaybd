@@ -33,8 +33,6 @@ import { playSuccessChime } from '../utils/audio';
 import { toBengaliNumber } from '../utils/bengali';
 import { normalizeVideoUrl } from '../utils/video';
 
-const SUPER_ADMIN_EMAIL = 'mdmasudranabd80814@gmail.com';
-
 export const AdminPortal: React.FC = () => {
   const {
     user: firebaseUser,
@@ -42,10 +40,12 @@ export const AdminPortal: React.FC = () => {
     loading: authLoading,
     loginWithGoogle,
     loginWithEmail,
+    registerWithEmail,
     resendVerificationEmail,
     refreshVerificationStatus,
     resetPassword,
     logout,
+    verifyAdminAccess,
     getDocument,
     setDocument,
     updateDocument,
@@ -54,6 +54,7 @@ export const AdminPortal: React.FC = () => {
     onSnapshot: firebaseOnSnapshot,
   } = useFirebase();
 
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPass, setLoginPass] = useState('');
   const [authSubmitting, setAuthSubmitting] = useState(false);
@@ -62,6 +63,7 @@ export const AdminPortal: React.FC = () => {
 
   const [checkingAdmin, setCheckingAdmin] = useState(false);
   const [isAuthorizedAdmin, setIsAuthorizedAdmin] = useState(false);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const showToast = (msg: string) => {
@@ -140,7 +142,13 @@ export const AdminPortal: React.FC = () => {
   const adminIdRef = useRef<string>('');
   adminIdRef.current = firebaseUser?.uid || '';
 
-  // Verify admin authority whenever Firebase auth + emailVerified changes
+  const resolvedEmail = (
+    firebaseUser?.email ||
+    firebaseUser?.providerData?.find((p) => p.email)?.email ||
+    ''
+  ).toLowerCase();
+
+  // Verify admin authority strictly via server-side Firestore rules (zero client email exposure)
   useEffect(() => {
     let cancelled = false;
     if (!firebaseUser || !emailVerified) {
@@ -152,16 +160,9 @@ export const AdminPortal: React.FC = () => {
     const verifyAdmin = async () => {
       setCheckingAdmin(true);
       try {
-        if (firebaseUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL) {
-          if (!cancelled) {
-            setIsAuthorizedAdmin(true);
-            setCheckingAdmin(false);
-          }
-          return;
-        }
-        const adminDoc = await getDocument('admins', firebaseUser.uid);
+        const allowed = await verifyAdminAccess();
         if (!cancelled) {
-          setIsAuthorizedAdmin(Boolean(adminDoc));
+          setIsAuthorizedAdmin(allowed);
         }
       } catch {
         if (!cancelled) {
@@ -176,11 +177,12 @@ export const AdminPortal: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [firebaseUser?.uid, firebaseUser?.email, emailVerified, getDocument]);
+  }, [firebaseUser?.uid, emailVerified, verifyAdminAccess]);
 
-  // Ensure admin commission UID is synced when authorized
+  // Ensure admin commission UID is synced AFTER settings load from Firestore
   useEffect(() => {
     if (
+      settingsLoaded &&
       isAuthorizedAdmin &&
       firebaseUser?.uid &&
       earningSettings.adminCommissionReceiverId !== firebaseUser.uid
@@ -192,7 +194,7 @@ export const AdminPortal: React.FC = () => {
         updatedAt: new Date().toISOString(),
       }).catch(() => {});
     }
-  }, [isAuthorizedAdmin, firebaseUser?.uid, earningSettings.adminCommissionReceiverId]);
+  }, [settingsLoaded, isAuthorizedAdmin, firebaseUser?.uid, earningSettings.adminCommissionReceiverId]);
 
   // Attach Firestore listeners ONLY when emailVerified AND isAuthorizedAdmin
   useEffect(() => {
@@ -244,6 +246,7 @@ export const AdminPortal: React.FC = () => {
           localStorage.setItem('rt_earning_settings', JSON.stringify(earningDoc));
         } catch {}
       }
+      setSettingsLoaded(true);
     });
 
     const unsubLives = firebaseOnSnapshot('live_streams', (data) => {
@@ -265,7 +268,7 @@ export const AdminPortal: React.FC = () => {
     };
   }, [isAuthorizedAdmin, firebaseUser?.uid, emailVerified]);
 
-  const handleAdminEmailLogin = async (e: React.FormEvent) => {
+  const handleAdminEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
     setAuthInfo(null);
@@ -273,10 +276,21 @@ export const AdminPortal: React.FC = () => {
       setAuthError('এডমিন ইমেইল এবং পাসওয়ার্ড দিন।');
       return;
     }
+    if (authMode === 'register' && loginPass.length < 6) {
+      setAuthError('পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে।');
+      return;
+    }
     setAuthSubmitting(true);
-    const res = await loginWithEmail(loginEmail.trim(), loginPass);
-    if (res.error) {
-      setAuthError(formatFirebaseAuthError(res.error, 'bn'));
+    if (authMode === 'register') {
+      const res = await registerWithEmail(loginEmail.trim(), loginPass, 'Admin');
+      if (res.error) {
+        setAuthError(formatFirebaseAuthError(res.error, 'bn'));
+      }
+    } else {
+      const res = await loginWithEmail(loginEmail.trim(), loginPass);
+      if (res.error) {
+        setAuthError(formatFirebaseAuthError(res.error, 'bn'));
+      }
     }
     setAuthSubmitting(false);
   };
@@ -671,6 +685,7 @@ export const AdminPortal: React.FC = () => {
 
   // GATE 2: Not Signed In -> Dedicated Admin Login Portal
   if (!firebaseUser) {
+    const isInIframe = typeof window !== 'undefined' && window.self !== window.top;
     return (
       <div className="min-h-screen bg-[#06090e] text-white p-4 flex flex-col justify-center items-center relative overflow-hidden">
         <div className="absolute top-1/4 -left-20 w-72 h-72 bg-blue-500/15 rounded-full blur-[120px]" />
@@ -695,6 +710,39 @@ export const AdminPortal: React.FC = () => {
               <span>Security-First Admin Gateway</span>
             </div>
 
+            <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#090e17] rounded-2xl border border-blue-900/40">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('login');
+                  setAuthError(null);
+                  setAuthInfo(null);
+                }}
+                className={`py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  authMode === 'login'
+                    ? 'bg-blue-600 text-white shadow'
+                    : 'text-neutral-400 hover:text-white'
+                }`}
+              >
+                এডমিন লগইন
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('register');
+                  setAuthError(null);
+                  setAuthInfo(null);
+                }}
+                className={`py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  authMode === 'register'
+                    ? 'bg-blue-600 text-white shadow'
+                    : 'text-neutral-400 hover:text-white'
+                }`}
+              >
+                ইমেইল রেজিস্ট্রেশন
+              </button>
+            </div>
+
             {authError && (
               <div className="bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold px-3.5 py-2.5 rounded-2xl leading-relaxed">
                 ⚠️ {authError}
@@ -707,14 +755,14 @@ export const AdminPortal: React.FC = () => {
               </div>
             )}
 
-            <form onSubmit={handleAdminEmailLogin} className="space-y-3.5">
+            <form onSubmit={handleAdminEmailSubmit} className="space-y-3.5">
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-neutral-500">
                   <Mail className="w-4 h-4" />
                 </div>
                 <input
                   type="email"
-                  placeholder="এডমিন ইমেইল এড্রেস"
+                  placeholder="অনুমোদিত এডমিন ইমেইল"
                   value={loginEmail}
                   onChange={(e) => setLoginEmail(e.target.value)}
                   className="w-full bg-[#090e17] border border-blue-900/50 rounded-2xl py-3.5 pl-11 pr-4 text-sm focus:outline-none focus:border-blue-500 transition"
@@ -728,7 +776,7 @@ export const AdminPortal: React.FC = () => {
                 </div>
                 <input
                   type="password"
-                  placeholder="এডমিন পাসওয়ার্ড"
+                  placeholder={authMode === 'register' ? 'পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)' : 'এডমিন পাসওয়ার্ড'}
                   value={loginPass}
                   onChange={(e) => setLoginPass(e.target.value)}
                   className="w-full bg-[#090e17] border border-blue-900/50 rounded-2xl py-3.5 pl-11 pr-4 text-sm focus:outline-none focus:border-blue-500 transition"
@@ -736,15 +784,17 @@ export const AdminPortal: React.FC = () => {
                 />
               </div>
 
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={handleAdminForgotPassword}
-                  className="text-[11px] font-semibold text-blue-400 hover:text-blue-300 cursor-pointer"
-                >
-                  পাসওয়ার্ড ভুলে গেছেন?
-                </button>
-              </div>
+              {authMode === 'login' && (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleAdminForgotPassword}
+                    className="text-[11px] font-semibold text-blue-400 hover:text-blue-300 cursor-pointer"
+                  >
+                    পাসওয়ার্ড ভুলে গেছেন?
+                  </button>
+                </div>
+              )}
 
               <button
                 type="submit"
@@ -756,7 +806,11 @@ export const AdminPortal: React.FC = () => {
                 ) : (
                   <>
                     <LogIn className="w-4 h-4" />
-                    <span>এডমিন ইমেইল লগইন</span>
+                    <span>
+                      {authMode === 'register'
+                        ? 'রেজিস্ট্রেশন ও ইমেইল ভেরিফাই করুন'
+                        : 'এডমিন ইমেইল লগইন'}
+                    </span>
                   </>
                 )}
               </button>
@@ -777,6 +831,17 @@ export const AdminPortal: React.FC = () => {
               <ShieldCheck className="w-4 h-4 text-blue-600" />
               <span>Google দিয়ে এডমিন সাইন-ইন</span>
             </button>
+
+            {isInIframe && (
+              <a
+                href="/admin"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block w-full text-center py-2.5 rounded-2xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-300 text-[11px] font-bold transition"
+              >
+                পপআপ ব্লক হলে এডমিন লিংক নতুন ট্যাবে খুলুন ↗
+              </a>
+            )}
           </div>
         </div>
       </div>
@@ -787,7 +852,7 @@ export const AdminPortal: React.FC = () => {
   if (!emailVerified) {
     return (
       <EmailVerificationGate
-        email={firebaseUser.email || ''}
+        email={resolvedEmail || firebaseUser.email || ''}
         portal="admin"
         lang="bn"
         onRefreshStatus={refreshVerificationStatus}
@@ -807,7 +872,7 @@ export const AdminPortal: React.FC = () => {
           </div>
           <h2 className="text-xl font-black text-white">403 — অ্যাক্সেস অনুমোদিত নয়</h2>
           <p className="text-xs text-neutral-300 leading-relaxed">
-            আপনার অ্যাকাউন্ট <span className="font-bold text-rose-300">{firebaseUser.email}</span> অনুমোদিত এডমিন তালিকায় নেই। শুধুমাত্র অনুমোদিত এডমিনই এই প্যানেলে প্রবেশ করতে পারবেন।
+            আপনার অ্যাকাউন্টটি অনুমোদিত এডমিন তালিকায় নেই। শুধুমাত্র অনুমোদিত এডমিনরাই এই প্যানেলে প্রবেশ করতে পারবেন।
           </p>
           <button
             type="button"
@@ -815,7 +880,7 @@ export const AdminPortal: React.FC = () => {
             className="w-full min-h-[44px] rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center justify-center gap-2 cursor-pointer transition"
           >
             <LogOut className="w-4 h-4" />
-            <span>সাইন আউট করুন</span>
+            <span>অন্য অ্যাকাউন্ট দিয়ে লগইন করতে সাইন আউট করুন</span>
           </button>
         </div>
       </div>

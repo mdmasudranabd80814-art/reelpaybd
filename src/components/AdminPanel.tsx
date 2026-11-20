@@ -211,8 +211,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const isAdminFirebaseAuthed = Boolean(
     adminFirebaseUser &&
       adminFirebaseUser.emailVerified &&
-      (isAuthorizedAdmin ||
-        adminFirebaseUser.email?.toLowerCase() === 'mdmasudranabd80814@gmail.com')
+      isAuthorizedAdmin
   );
 
   const showLiveFeedback = (msg: string) => {
@@ -220,13 +219,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setTimeout(() => setLiveFeedback(null), 3500);
   };
 
-  // Sync Live Streams for Admin Moderation (live_streams list is public-read)
+  // Sync Live Streams for Admin Moderation
   useEffect(() => {
+    if (!isAdminFirebaseAuthed) return;
     const unsub = adminOnSnapshot('live_streams', (data: any[]) => {
       setLiveStreamsList(data as LiveStream[]);
     }, [orderBy('createdAt', 'desc'), limit(40)]);
     return unsub;
-  }, []);
+  }, [isAdminFirebaseAuthed]);
 
   // Sync Chat Sessions for Admin ONLY when authenticated as Firebase Admin
   useEffect(() => {
@@ -590,8 +590,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </p>
             <p className="text-[11px] text-amber-100/80 mt-0.5">
               {adminFirebaseUser?.email
-                ? `বর্তমান ইমেইল (${adminFirebaseUser.email}) এডমিন নয়। mdmasudranabd80814@gmail.com দিয়ে লগইন করুন।`
-                : 'লাইভ ক্যানসেল, ডিলিট, চ্যাট মনিটরিং ও ডাটাবেজ এডিট করতে Google দিয়ে এডমিন সাইন-ইন করুন।'}
+                ? 'বর্তমান অ্যাকাউন্টটি এডমিন নয়। অনুমোদিত এডমিন অ্যাকাউন্ট দিয়ে লগইন করুন।'
+                : 'লাইভ ক্যানসেল, ডিলিট, চ্যাট মনিটরিং ও ডাটাবেজ এডিট করতে অনুমোদিত এডমিন অ্যাকাউন্টে সাইন-ইন করুন।'}
             </p>
           </div>
           <button
@@ -2775,7 +2775,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                         }
                                         showLiveFeedback(`🛑 "${live.title}" লাইভটি ক্যানসেল করা হয়েছে`);
                                       } catch {
-                                        showLiveFeedback('⚠️ লাইভ ক্যানসেল ব্যর্থ! এডমিন Google অ্যাকাউন্ট (mdmasudranabd80814@gmail.com) দিয়ে লগইন করুন।');
+                                        showLiveFeedback('⚠️ লাইভ ক্যানসেল ব্যর্থ! অনুমোদিত এডমিন অ্যাকাউন্ট দিয়ে লগইন করুন।');
                                       }
                                     },
                                     true

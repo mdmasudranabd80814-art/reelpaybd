@@ -46,6 +46,11 @@ const UserPickerModal = lazy(() => import('./components/UserPickerModal').then(m
 const ChatListModal = lazy(() => import('./components/ChatListModal').then(m => ({ default: m.ChatListModal })));
 import { AuthPage } from './components/AuthPage';
 import { EmailVerificationGate } from './components/EmailVerificationGate';
+import { GuestBanner } from './components/GuestBanner';
+import { GuestEarnView } from './components/GuestEarnView';
+import { GuestWalletView } from './components/GuestWalletView';
+import { GuestProfileView } from './components/GuestProfileView';
+import { AuthPromptModal } from './components/AuthPromptModal';
 import { useFirebase } from './hooks/useFirebase';
 import { where, orderBy, increment, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { normalizeVideoUrl } from './utils/video';
@@ -88,16 +93,87 @@ const toPublicProfile = (u: User) => ({
   createdAt: u.createdAt || new Date().toISOString(),
 });
 
+interface ErrorBoundaryState {
+  hasError: boolean;
+  errorMessage: string;
+}
+
+class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, ErrorBoundaryState> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, errorMessage: '' };
+  }
+
+  static getDerivedStateFromError(error: unknown): ErrorBoundaryState {
+    return {
+      hasError: true,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-[#06090e] text-white flex flex-col items-center justify-center p-6 text-center space-y-4">
+          <div className="max-w-sm w-full bg-[#121923] border border-rose-700/50 rounded-3xl p-6 space-y-3 shadow-2xl">
+            <h2 className="text-lg font-black text-rose-400">সিস্টেম এরর ধরা পড়েছে</h2>
+            <p className="text-xs text-neutral-300 leading-relaxed break-words">
+              {this.state.errorMessage || 'অপ্রত্যাশিত সমস্যা হয়েছে। অনুগ্রহ করে রিলোড করুন।'}
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="w-full py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs cursor-pointer transition"
+            >
+              পুনরায় লোড করুন
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const checkIsAdminLocation = () => {
+  if (typeof window === 'undefined') return false;
+  const pathname = window.location.pathname.toLowerCase();
+  const hash = window.location.hash.toLowerCase();
+  return (
+    pathname === '/admin' ||
+    pathname.startsWith('/admin/') ||
+    hash === '#/admin' ||
+    hash.startsWith('#/admin/')
+  );
+};
+
 export default function App() {
-  const isAdminRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
+  const [isAdminRoute, setIsAdminRoute] = useState<boolean>(checkIsAdminLocation);
+
+  useEffect(() => {
+    const syncRoute = () => setIsAdminRoute(checkIsAdminLocation());
+    window.addEventListener('popstate', syncRoute);
+    window.addEventListener('hashchange', syncRoute);
+    return () => {
+      window.removeEventListener('popstate', syncRoute);
+      window.removeEventListener('hashchange', syncRoute);
+    };
+  }, []);
+
   if (isAdminRoute) {
     return (
-      <Suspense fallback={<FullPageLoader />}>
-        <AdminPortal />
-      </Suspense>
+      <AppErrorBoundary>
+        <Suspense fallback={<FullPageLoader />}>
+          <AdminPortal />
+        </Suspense>
+      </AppErrorBoundary>
     );
   }
-  return <UserApp />;
+  return (
+    <AppErrorBoundary>
+      <UserApp />
+    </AppErrorBoundary>
+  );
 }
 
 function UserApp() {
@@ -123,8 +199,44 @@ function UserApp() {
 
   // Persistent State
   const [users, setUsers] = useState<User[]>(INITIAL_USERS_LIST);
+  const [guestId] = useState<string>(() => {
+    try {
+      const existing = localStorage.getItem('rt_guest_id');
+      if (existing) return existing;
+      const created = `GUEST-${Math.floor(1000 + Math.random() * 9000)}`;
+      localStorage.setItem('rt_guest_id', created);
+      return created;
+    } catch {
+      return `GUEST-${Math.floor(1000 + Math.random() * 9000)}`;
+    }
+  });
+  const [guestPoints, setGuestPoints] = useState<number>(() => {
+    try {
+      const val = localStorage.getItem('rt_guest_points');
+      return val ? Math.max(0, Number(val)) : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const [guestWatchedReelIds, setGuestWatchedReelIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('rt_guest_watched_reels') || '[]');
+    } catch {
+      return [];
+    }
+  });
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  const [authModalView, setAuthModalView] = useState<'login' | 'register'>('login');
+  const [authPromptState, setAuthPromptState] = useState<{ open: boolean; title?: string; message?: string }>({
+    open: false,
+  });
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [currentUser, setCurrentUser] = useState<User>(INITIAL_USER);
+  const [currentUser, setCurrentUser] = useState<User>(() => ({
+    ...INITIAL_USER,
+    id: guestId,
+    name: 'অতিথি ইউজার',
+    points: 0,
+  }));
   const [pointRate, setPointRate] = useState<number>(() => {
     try {
       const val = localStorage.getItem('rt_point_rate');
@@ -253,6 +365,8 @@ function UserApp() {
   useEffect(() => {
     if (firebaseUser && emailVerified) {
       setIsAuthenticated(true);
+      setShowAuthModal(false);
+      setAuthPromptState({ open: false });
       const syncProfile = async () => {
         try {
           const [profile, remoteSettings] = await Promise.all([
@@ -374,13 +488,18 @@ function UserApp() {
       syncProfile();
     } else {
       setIsAuthenticated(false);
-      setCurrentUser(INITIAL_USER);
+      setCurrentUser({
+        ...INITIAL_USER,
+        id: guestId,
+        name: 'অতিথি ইউজার',
+        points: guestPoints,
+      });
     }
-  }, [firebaseUser, emailVerified]);
+  }, [firebaseUser, emailVerified, guestId]);
 
-  // Firestore Listeners (strictly gated on verified email!)
+  // Public Reels Listener (Viewable in Guest Mode & Verified Mode; paused during unverified gate)
   useEffect(() => {
-    if (!firebaseUser || !emailVerified) return;
+    if (firebaseUser && !emailVerified) return;
 
     const unsubReels = firebaseOnSnapshot('reels', (data) => {
       const deleted: string[] = (() => {
@@ -421,6 +540,15 @@ function UserApp() {
       setReels(initial);
     }, [orderBy('createdAt', 'desc')]);
 
+    return () => {
+      unsubReels();
+    };
+  }, [firebaseUser?.uid, emailVerified]);
+
+  // Authenticated & Email-Verified Private Firestore Listeners
+  useEffect(() => {
+    if (!firebaseUser || !emailVerified) return;
+
     // Public discovery profiles (non-PII directory)
     const unsubPublicProfiles = firebaseOnSnapshot('public_profiles', (data) => {
       if (data && data.length > 0) {
@@ -438,7 +566,6 @@ function UserApp() {
     }, [where('userId', '==', firebaseUser.uid), orderBy('createdAt', 'desc')]);
 
     return () => {
-      unsubReels();
       unsubPublicProfiles();
       unsubUserWithdrawals();
       unsubUserDeposits();
@@ -473,9 +600,9 @@ function UserApp() {
     }
   }, [isAuthenticated, currentUser.id, firebaseUser?.uid, emailVerified]);
 
-  // Sync active live streams
+  // Sync active live streams (viewable in Guest preview & Verified User mode)
   useEffect(() => {
-    if (!firebaseUser || !emailVerified) return;
+    if (firebaseUser && !emailVerified) return;
     const unsub = firebaseOnSnapshot('live_streams', (data) => {
       const active = (data as LiveStream[])
         .filter((s) => s && s.status === 'active')
@@ -601,6 +728,19 @@ function UserApp() {
   // Sharing in Chat
   const [isUserPickerOpen, setIsUserPickerOpen] = useState(false);
   const [sharingReelInChat, setSharingReelInChat] = useState<Reel | null>(null);
+
+  const openAuthModal = (view: 'login' | 'register' = 'login') => {
+    setAuthModalView(view);
+    setShowAuthModal(true);
+  };
+
+  const triggerAuthPrompt = (message?: string, title?: string) => {
+    setAuthPromptState({
+      open: true,
+      title,
+      message,
+    });
+  };
 
   const handleUserEmailRegister = async (email: string, pass: string, userData: Partial<User>) => {
     try {
@@ -768,7 +908,41 @@ function UserApp() {
       }
     }
 
-    if (!isAuthenticated) return;
+    if (!isAuthenticated) {
+      if (targetReelId && guestWatchedReelIds.includes(targetReelId)) {
+        showToast(
+          lang === 'bn'
+            ? 'এই রিলের গেস্ট প্রিভিউ পয়েন্ট ইতিমধ্যে সংগ্রহ করেছেন (উত্তোলনযোগ্য নয়)।'
+            : 'Already collected guest preview points for this reel (non-withdrawable).'
+        );
+        return;
+      }
+      const previewReward = Math.max(1, Math.round(rewardPoints));
+      setGuestPoints((prev) => {
+        const next = prev + previewReward;
+        try {
+          localStorage.setItem('rt_guest_points', String(next));
+        } catch {}
+        return next;
+      });
+      if (targetReelId) {
+        setGuestWatchedReelIds((prev) => {
+          if (prev.includes(targetReelId)) return prev;
+          const next = [...prev, targetReelId];
+          try {
+            localStorage.setItem('rt_guest_watched_reels', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+      }
+      if (!isMuted) playCoinSound();
+      showToast(
+        lang === 'bn'
+          ? `🪙 গেস্ট প্রিভিউ +${toBengaliNumber(previewReward, lang)} পয়েন্ট (উত্তোলনযোগ্য নয়)। আসল টাকা আর্ন করতে লগইন করুন!`
+          : `🪙 Guest preview +${previewReward} pts (Non-withdrawable). Login with a real account to earn!`
+      );
+      return;
+    }
 
     // 3. Prevent claiming the same reel twice
     if (targetReelId && watchedReelIds.includes(targetReelId)) {
@@ -950,7 +1124,27 @@ function UserApp() {
       return;
     }
 
-    if (!isAuthenticated) return;
+    if (!isAuthenticated) {
+      if (guestWatchedReelIds.includes(reel.id)) {
+        showToast(
+          lang === 'bn'
+            ? 'এই রিলের গেস্ট প্রিভিউ পয়েন্ট ইতিমধ্যে সংগ্রহ করেছেন (উত্তোলনযোগ্য নয়)।'
+            : 'Already collected guest preview points for this reel (non-withdrawable).'
+        );
+        return;
+      }
+      try {
+        confetti({
+          particleCount: 24,
+          spread: 45,
+          origin: { y: 0.7 },
+          colors: ['#fbbf24', '#00c853', '#ffffff'],
+        });
+      } catch {}
+      const pts = reel.pointsReward || earningSettings.defaultVideoRewardPoints || 10;
+      handleEarnReelReward(pts, reel.title, reel.id);
+      return;
+    }
 
     if (watchedReelIds.includes(reel.id)) {
       showToast(lang === 'bn' ? 'আপনি ইতিমধ্যে এই রিলের পয়েন্ট সংগ্রহ করেছেন!' : 'Already collected points for this reel!');
@@ -983,7 +1177,14 @@ function UserApp() {
 
   // Add Comment
   const handleAddComment = async (reelId: string, text: string) => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated) {
+      triggerAuthPrompt(
+        lang === 'bn'
+          ? 'মন্তব্য করতে অনুগ্রহ করে লগইন বা রেজিস্ট্রেশন করুন!'
+          : 'Please log in or register to comment!'
+      );
+      return;
+    }
     const newComment: Partial<Comment> = {
       reelId,
       userId: currentUser.id,
@@ -1056,6 +1257,14 @@ function UserApp() {
     explicitLiveId?: string,
     _explicitAdminShare?: number
   ) => {
+    if (!isAuthenticated) {
+      triggerAuthPrompt(
+        lang === 'bn'
+          ? 'গিফট পাঠাতে ও রিয়েল পয়েন্ট ব্যবহার করতে লগইন করুন!'
+          : 'Please log in to send gifts!'
+      );
+      return;
+    }
     const split = calculateGiftSplit(gift.costPoints, earningSettings);
     const creatorShare = split.creatorShare;
     const adminShare = split.adminShare;
@@ -1140,6 +1349,14 @@ function UserApp() {
       setSelectedUserProfileUser(userToView);
       setIsUserProfileModalOpen(true);
     } else {
+      if (!isAuthenticated) {
+        triggerAuthPrompt(
+          lang === 'bn'
+            ? 'ক্রিয়েটরের পূর্ণ প্রোফাইল দেখতে অনুগ্রহ করে লগইন করুন!'
+            : 'Please log in to view full creator profiles!'
+        );
+        return;
+      }
       const remoteUser = await getDocument('public_profiles', userId) as User | null;
       if (remoteUser) {
         setSelectedUserProfileUser(remoteUser);
@@ -1151,7 +1368,14 @@ function UserApp() {
   };
 
   const handleToggleFollow = async (targetUserId: string, targetName?: string) => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated) {
+      triggerAuthPrompt(
+        lang === 'bn'
+          ? 'ক্রিয়েটরদের ফলো করতে অনুগ্রহ করে লগইন বা রেজিস্ট্রেশন করুন!'
+          : 'Please log in or register to follow creators!'
+      );
+      return;
+    }
 
     const me = currentUserRef.current;
     if (!targetUserId || targetUserId === me.id) return;
@@ -1242,7 +1466,14 @@ function UserApp() {
   };
 
   const handleOpenChat = async (otherUser: User) => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated) {
+      triggerAuthPrompt(
+        lang === 'bn'
+          ? 'মেসেজ পাঠাতে অনুগ্রহ করে লগইন করুন!'
+          : 'Please log in to send messages!'
+      );
+      return;
+    }
 
     // Generate unique session ID: uid1_uid2 (alphabetically sorted)
     const sessionId = [currentUser.id, otherUser.id].sort().join('_');
@@ -1268,6 +1499,14 @@ function UserApp() {
   };
 
   const handleShareInChat = (reel: Reel) => {
+    if (!isAuthenticated) {
+      triggerAuthPrompt(
+        lang === 'bn'
+          ? 'চ্যাটে রিল শেয়ার করতে অনুগ্রহ করে লগইন করুন!'
+          : 'Please log in to share reels in chat!'
+      );
+      return;
+    }
     setSharingReelInChat(reel);
     setIsUserPickerOpen(true);
   };
@@ -1387,8 +1626,28 @@ function UserApp() {
     }
   }, [activeLiveStreams]);
 
+  const handleJoinLiveStream = (liveId: string) => {
+    if (!isAuthenticated) {
+      triggerAuthPrompt(
+        lang === 'bn'
+          ? 'সরাসরি লাইভে যুক্ত হতে ও চ্যাট/গিফট পাঠাতে অনুগ্রহ করে লগইন করুন!'
+          : 'Please log in to join live streams and interact!'
+      );
+      return;
+    }
+    setCurrentLiveStreamId(liveId);
+    setShowLiveSheet(true);
+  };
+
   const openPersonalLiveStudio = (mode: LiveMode = 'audio') => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated) {
+      triggerAuthPrompt(
+        lang === 'bn'
+          ? 'লাইভ স্ট্রিম শুরু করতে অনুগ্রহ করে লগইন করুন!'
+          : 'Please log in to start a live stream!'
+      );
+      return;
+    }
     const existingMyLive = activeLiveStreams.find((s) => s.hostId === currentUser.id);
     if (existingMyLive) {
       setCurrentLiveStreamId(existingMyLive.id);
@@ -1599,25 +1858,12 @@ function UserApp() {
     return result;
   })();
 
-  // MANDATORY SECURITY GATES: No user dashboard access without verified email
+  // MANDATORY SECURITY GATES: Show loader during auth init, and enforce email verification whenever signed in
   if (authLoading) {
     return <FullPageLoader />;
   }
 
-  if (!firebaseUser) {
-    return (
-      <AuthPage
-        onEmailLogin={loginWithEmail}
-        onEmailRegister={handleUserEmailRegister}
-        onGoogleLogin={handleUserGoogleLogin}
-        onResetPassword={resetPassword}
-        initialView="login"
-        lang={lang}
-      />
-    );
-  }
-
-  if (!emailVerified) {
+  if (firebaseUser && !emailVerified) {
     return (
       <EmailVerificationGate
         email={firebaseUser.email || ''}
@@ -1634,7 +1880,7 @@ function UserApp() {
     <div className="min-h-screen bg-[#0a0f0d] text-slate-100 flex flex-col font-sans selection:bg-[#00c853] selection:text-black">
       {/* Toast Notification */}
       {notificationToast && (
-        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 bg-[#122419] border border-emerald-400 text-white px-4 py-2 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3">
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-[90] bg-[#122419] border border-emerald-400 text-white px-4 py-2 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 max-w-[92vw]">
           <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{notificationToast}</span>
         </div>
@@ -1650,7 +1896,8 @@ function UserApp() {
           lang={lang}
           onToggleLang={toggleLang}
           isAuthenticated={isAuthenticated}
-          userPoints={currentUser.points}
+          onOpenAuth={(view) => openAuthModal(view || 'login')}
+          userPoints={isAuthenticated ? currentUser.points : guestPoints}
         />
 
         {/* Global Announcement Marquee Ticker */}
@@ -1673,6 +1920,15 @@ function UserApp() {
             <>
                 {activeTab === 'home' && (
                   <div className="space-y-3.5 pb-20">
+                    {!isAuthenticated && (
+                      <GuestBanner
+                        guestId={guestId}
+                        guestPoints={guestPoints}
+                        onLogin={() => openAuthModal('login')}
+                        onRegister={() => openAuthModal('register')}
+                        lang={lang}
+                      />
+                    )}
                     {/* TOP STORIES / LIVE STREAMERS BAR (Always visible for fast live discovery) */}
                     <div className="space-y-2 pb-1 bg-[#0d1611]/80 -mx-1 px-3 py-2.5 rounded-3xl border border-emerald-950/60 shadow-lg">
                       <div className="flex items-center justify-between px-0.5">
@@ -1709,8 +1965,7 @@ function UserApp() {
                               type="button"
                               onClick={() => {
                                 if (myLive) {
-                                  setCurrentLiveStreamId(myLive.id);
-                                  setShowLiveSheet(true);
+                                  handleJoinLiveStream(myLive.id);
                                 } else {
                                   openPersonalLiveStudio('audio');
                                 }
@@ -1750,10 +2005,7 @@ function UserApp() {
                             <button
                               key={live.id}
                               type="button"
-                              onClick={() => {
-                                setCurrentLiveStreamId(live.id);
-                                setShowLiveSheet(true);
-                              }}
+                              onClick={() => handleJoinLiveStream(live.id)}
                               className="flex flex-col items-center gap-1.5 shrink-0 group transition active:scale-95 cursor-pointer"
                             >
                               <div className="relative">
@@ -1862,10 +2114,7 @@ function UserApp() {
                         <div className="mt-3 flex gap-2">
                           <button
                             type="button"
-                            onClick={() => {
-                              setCurrentLiveStreamId(activeLiveStreams[0].id);
-                              setShowLiveSheet(true);
-                            }}
+                            onClick={() => handleJoinLiveStream(activeLiveStreams[0].id)}
                             className="flex-1 min-h-[38px] rounded-2xl bg-gradient-to-r from-rose-600 via-rose-500 to-amber-500 hover:brightness-110 font-black text-xs text-white shadow-lg shadow-rose-900/40 flex items-center justify-center gap-2 transition active:scale-95 cursor-pointer"
                           >
                             <Play className="w-3.5 h-3.5 fill-current" />
@@ -2000,10 +2249,7 @@ function UserApp() {
                                   </div>
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setCurrentLiveStreamId(live.id);
-                                      setShowLiveSheet(true);
-                                    }}
+                                    onClick={() => handleJoinLiveStream(live.id)}
                                     className="px-4 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-amber-500 hover:brightness-110 font-black text-xs text-white shadow-md flex items-center gap-1.5 cursor-pointer"
                                   >
                                     <Play className="w-3 h-3 fill-current" />
@@ -2054,12 +2300,20 @@ function UserApp() {
                                 <ReelFeedCard
                                   reel={reel}
                                   isLiked={likedReelIds.includes(reel.id)}
-                                  hasWatched={watchedReelIds.includes(reel.id)}
+                                  hasWatched={(isAuthenticated ? watchedReelIds : guestWatchedReelIds).includes(reel.id)}
                                   onLikeToggle={handleToggleLike}
                                   onOpenReel={(r) => setFullScreenReelId(r.id)}
                                   onOpenComments={(r) => setActiveCommentReel(r)}
                                   onClaimDirect={handleClaimDirect}
                                   onOpenGift={() => {
+                                    if (!isAuthenticated) {
+                                      triggerAuthPrompt(
+                                        lang === 'bn'
+                                          ? 'ক্রিয়েটরকে গিফট পাঠাতে অনুগ্রহ করে রিয়েল আইডিতে লগইন করুন!'
+                                          : 'Please log in with a real account to send gifts!'
+                                      );
+                                      return;
+                                    }
                                     setGiftTarget({ userId: reel.userId, creatorName: reel.creatorName });
                                     setShowGiftSheet(true);
                                   }}
@@ -2077,10 +2331,7 @@ function UserApp() {
                                 {/* In-feed Live Recommendation Interstitial Card after 1st reel */}
                                 {rIdx === 0 && activeLiveStreams.length > 0 && (
                                   <div
-                                    onClick={() => {
-                                      setCurrentLiveStreamId(activeLiveStreams[0].id);
-                                      setShowLiveSheet(true);
-                                    }}
+                                    onClick={() => handleJoinLiveStream(activeLiveStreams[0].id)}
                                     className="my-2 p-3.5 rounded-3xl bg-gradient-to-r from-rose-950/60 via-[#13221a] to-[#0d1611] border border-rose-500/40 shadow-lg flex items-center justify-between cursor-pointer hover:border-rose-400/60 transition group"
                                   >
                                     <div className="flex items-center gap-3 min-w-0">
@@ -2170,64 +2421,92 @@ function UserApp() {
                 )}
 
                 {activeTab === 'earn' && (
-                  <EarnView
-                    user={currentUser}
-                    tasks={tasks}
-                    onCompleteTask={handleCompleteTask}
-                    onAddPoints={handleAddPointsGeneral}
-                    isMuted={isMuted}
-                    spinPrizes={[10, 25, 50, 15, spinMaxPrize, 30, 20, Math.round(spinMaxPrize * 0.4)]}
-                    scratchPrize={scratchPrize}
-                    earningSettings={earningSettings}
-                  />
+                  isAuthenticated ? (
+                    <EarnView
+                      user={currentUser}
+                      tasks={tasks}
+                      onCompleteTask={handleCompleteTask}
+                      onAddPoints={handleAddPointsGeneral}
+                      isMuted={isMuted}
+                      spinPrizes={[10, 25, 50, 15, spinMaxPrize, 30, 20, Math.round(spinMaxPrize * 0.4)]}
+                      scratchPrize={scratchPrize}
+                      earningSettings={earningSettings}
+                    />
+                  ) : (
+                    <GuestEarnView
+                      onLogin={() => openAuthModal('login')}
+                      onRegister={() => openAuthModal('register')}
+                      lang={lang}
+                      earningSettings={earningSettings}
+                    />
+                  )
                 )}
 
                 {activeTab === 'wallet' && (
-                  <WalletView
-                    user={currentUser}
-                    pointRate={pointRate}
-                    withdrawals={withdrawals}
-                    onRequestWithdrawal={handleRequestWithdrawal}
-                    onDepositClick={() => setShowDepositSheet(true)}
-                    isMuted={isMuted}
-                    minWithdrawal={minWithdrawal}
-                  />
+                  isAuthenticated ? (
+                    <WalletView
+                      user={currentUser}
+                      pointRate={pointRate}
+                      withdrawals={withdrawals}
+                      onRequestWithdrawal={handleRequestWithdrawal}
+                      onDepositClick={() => setShowDepositSheet(true)}
+                      isMuted={isMuted}
+                      minWithdrawal={minWithdrawal}
+                    />
+                  ) : (
+                    <GuestWalletView
+                      pointRate={pointRate}
+                      guestId={guestId}
+                      guestPoints={guestPoints}
+                      onLogin={() => openAuthModal('login')}
+                      onRegister={() => openAuthModal('register')}
+                      lang={lang}
+                    />
+                  )
                 )}
 
                 {activeTab === 'profile' && (
-                  <ProfileView
-                    user={currentUser}
-                    pointRate={pointRate}
-                    onLogout={handleLogout}
-                    onSwitchUser={handleUpdateUser}
-                    onClaimDailyBonus={handleClaimDailyBonus}
-                    isClaimedToday={isClaimedToday}
-                    isMuted={isMuted}
-                    isAuthenticated={isAuthenticated}
-                    onRequireAuth={() => {}}
-                    lang={lang}
-                    setShowGiftSheet={setShowGiftSheet}
-                    setShowLiveSheet={setShowLiveSheet}
-                    onOpenPersonalLive={(mode) => openPersonalLiveStudio(mode || 'audio')}
-                    activeMyLive={activeLiveStreams.find((s) => s.hostId === currentUser.id) || null}
-                    onManageMyLive={(liveId) => {
-                      setCurrentLiveStreamId(liveId);
-                      setShowLiveSheet(true);
-                    }}
-                    onEndMyLive={handleEndLive}
-                    reels={reels}
-                    onOpenReel={(r) => setFullScreenReelId(r.id)}
-                    onEditReel={(r) => setEditingReel(r)}
-                    onDeleteReel={handleDeleteReel}
-                    onOpenChatList={() => setIsChatListModalOpen(true)}
-                    onOpenFollowList={(tab) => setFollowListModal({ user: currentUser, tab })}
-                    onOpenWallet={() => setActiveTab('wallet')}
-                    minWithdrawal={minWithdrawal}
-                    earningSettings={earningSettings}
-                    savedReelIds={savedReelIds}
-                    onToggleSave={handleToggleSave}
-                    onNavigateToHome={() => setActiveTab('home')}
-                  />
+                  isAuthenticated ? (
+                    <ProfileView
+                      user={currentUser}
+                      pointRate={pointRate}
+                      onLogout={handleLogout}
+                      onSwitchUser={handleUpdateUser}
+                      onClaimDailyBonus={handleClaimDailyBonus}
+                      isClaimedToday={isClaimedToday}
+                      isMuted={isMuted}
+                      isAuthenticated={isAuthenticated}
+                      onRequireAuth={(msg) => triggerAuthPrompt(msg)}
+                      lang={lang}
+                      setShowGiftSheet={setShowGiftSheet}
+                      setShowLiveSheet={setShowLiveSheet}
+                      onOpenPersonalLive={(mode) => openPersonalLiveStudio(mode || 'audio')}
+                      activeMyLive={activeLiveStreams.find((s) => s.hostId === currentUser.id) || null}
+                      onManageMyLive={(liveId) => handleJoinLiveStream(liveId)}
+                      onEndMyLive={handleEndLive}
+                      reels={reels}
+                      onOpenReel={(r) => setFullScreenReelId(r.id)}
+                      onEditReel={(r) => setEditingReel(r)}
+                      onDeleteReel={handleDeleteReel}
+                      onOpenChatList={() => setIsChatListModalOpen(true)}
+                      onOpenFollowList={(tab) => setFollowListModal({ user: currentUser, tab })}
+                      onOpenWallet={() => setActiveTab('wallet')}
+                      minWithdrawal={minWithdrawal}
+                      earningSettings={earningSettings}
+                      savedReelIds={savedReelIds}
+                      onToggleSave={handleToggleSave}
+                      onNavigateToHome={() => setActiveTab('home')}
+                    />
+                  ) : (
+                    <GuestProfileView
+                      guestId={guestId}
+                      guestPoints={guestPoints}
+                      savedCount={savedReelIds.length}
+                      onLogin={() => openAuthModal('login')}
+                      onRegister={() => openAuthModal('register')}
+                      lang={lang}
+                    />
+                  )
                 )}
             </>
           </Suspense>
@@ -2237,7 +2516,17 @@ function UserApp() {
         <BottomNav
           activeTab={activeTab}
           onChangeTab={(t) => setActiveTab(t)}
-          onOpenCreate={() => setShowPlusSheet(true)}
+          onOpenCreate={() => {
+            if (!isAuthenticated) {
+              triggerAuthPrompt(
+                lang === 'bn'
+                  ? 'নতুন রিল তৈরি করতে বা লাইভে যেতে লগইন করুন!'
+                  : 'Please log in to create a reel or go live!'
+              );
+              return;
+            }
+            setShowPlusSheet(true);
+          }}
           lang={lang}
         />
 
@@ -2254,6 +2543,14 @@ function UserApp() {
               onOpenComments={(r) => setActiveCommentReel(r)}
               onRewardEarned={handleEarnReelReward}
               onOpenGiftSheet={() => {
+                if (!isAuthenticated) {
+                  triggerAuthPrompt(
+                    lang === 'bn'
+                      ? 'ক্রিয়েটরকে গিফট পাঠাতে অনুগ্রহ করে রিয়েল আইডিতে লগইন করুন!'
+                      : 'Please log in to send gifts!'
+                  );
+                  return;
+                }
                 const targetReel = reels.find((r) => r.id === fullScreenReelId);
                 if (targetReel) {
                   setGiftTarget({ userId: targetReel.userId, creatorName: targetReel.creatorName });
@@ -2268,16 +2565,23 @@ function UserApp() {
               levelProgress={levelProgress}
               activeLiveStreams={activeLiveStreams}
               onOpenLiveSheet={() => {
+                if (!isAuthenticated) {
+                  triggerAuthPrompt(
+                    lang === 'bn'
+                      ? 'লাইভ স্ট্রিমে যুক্ত হতে অনুগ্রহ করে লগইন করুন!'
+                      : 'Please log in to join live streams!'
+                  );
+                  return;
+                }
                 setFullScreenReelId(null);
                 if (activeLiveStreams.length > 0) {
-                  setCurrentLiveStreamId(activeLiveStreams[0].id);
-                  setShowLiveSheet(true);
+                  handleJoinLiveStream(activeLiveStreams[0].id);
                 } else {
                   openPersonalLiveStudio('audio');
                 }
               }}
               earningSettings={earningSettings}
-              watchedReelIds={watchedReelIds}
+              watchedReelIds={isAuthenticated ? watchedReelIds : guestWatchedReelIds}
               isDailyLimitReached={isDailyReelLimitReached}
               dailyClaimsUsed={dailyClaimsUsed}
               dailyClaimsLimit={dailyClaimsLimit}
@@ -2288,6 +2592,14 @@ function UserApp() {
               savedReelIds={savedReelIds}
               onToggleSave={handleToggleSave}
               onOpenChatWithCreator={async (creatorId) => {
+                if (!isAuthenticated) {
+                  triggerAuthPrompt(
+                    lang === 'bn'
+                      ? 'ক্রিয়েটরের সাথে চ্যাট করতে অনুগ্রহ করে লগইন করুন!'
+                      : 'Please log in to chat with creators!'
+                  );
+                  return;
+                }
                 const known = users.find((u) => u.id === creatorId) || (await getDocument('public_profiles', creatorId) as User | null);
                 if (known) {
                   setFullScreenReelId(null);
@@ -2414,7 +2726,7 @@ function UserApp() {
               liveStreamId={currentLiveStreamId}
               currentUser={currentUser}
               isAuthenticated={isAuthenticated}
-              onRequireAuth={() => {}}
+              onRequireAuth={(msg) => triggerAuthPrompt(msg)}
               onEndLive={handleEndLive}
               onOpenProfile={handleOpenUserProfile}
               onToggleFollow={handleToggleFollow}
@@ -2438,10 +2750,7 @@ function UserApp() {
           {activeLiveStreams.length > 0 && !showLiveSheet && (
             <button
               type="button"
-              onClick={() => {
-                setCurrentLiveStreamId(activeLiveStreams[0].id);
-                setShowLiveSheet(true);
-              }}
+              onClick={() => handleJoinLiveStream(activeLiveStreams[0].id)}
               className="fixed bottom-20 right-3 z-40 bg-gradient-to-r from-rose-600 via-rose-500 to-amber-500 text-white px-3.5 py-2 rounded-full shadow-2xl border-2 border-black/40 flex items-center gap-2 cursor-pointer hover:scale-105 transition active:scale-95 animate-pulse"
             >
               <span className="relative flex h-2 w-2 shrink-0">
@@ -2557,6 +2866,33 @@ function UserApp() {
             />
           )}
         </Suspense>
+
+        {/* Auth Prompt Modal for Guest Actions */}
+        <AuthPromptModal
+          isOpen={authPromptState.open}
+          onClose={() => setAuthPromptState({ open: false })}
+          onOpenLogin={() => openAuthModal('login')}
+          onOpenRegister={() => openAuthModal('register')}
+          title={authPromptState.title}
+          message={authPromptState.message}
+          lang={lang}
+          earningSettings={earningSettings}
+        />
+
+        {/* Dismissible Login / Registration Overlay for Guest Users */}
+        {showAuthModal && !isAuthenticated && (
+          <div className="fixed inset-0 z-[80] overflow-y-auto bg-[#0a0f0d]">
+            <AuthPage
+              onEmailLogin={loginWithEmail}
+              onEmailRegister={handleUserEmailRegister}
+              onGoogleLogin={handleUserGoogleLogin}
+              onResetPassword={resetPassword}
+              onClose={() => setShowAuthModal(false)}
+              initialView={authModalView}
+              lang={lang}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
