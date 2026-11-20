@@ -1,17 +1,14 @@
 import React from 'react';
-import { Bell, Settings, Volume2, VolumeX, X, User as UserIcon } from 'lucide-react';
+import { Bell, User as UserIcon } from 'lucide-react';
 import { toBengaliNumber } from '../utils/bengali';
 
 interface HeaderProps {
   onOpenNotifications: () => void;
-  isAdmin: boolean;
-  onToggleAdmin: () => void;
   isMuted: boolean;
   onToggleMute: () => void;
   unreadAnnouncementsCount: number;
   lang: 'bn' | 'en';
   onToggleLang: () => void;
-  onSecretAdminTrigger?: () => void;
   isAuthenticated?: boolean;
   onOpenAuth?: (view?: 'login' | 'register') => void;
   userPoints?: number;
@@ -19,50 +16,18 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   onOpenNotifications,
-  isAdmin,
-  onToggleAdmin,
-  isMuted,
-  onToggleMute,
   unreadAnnouncementsCount,
   lang,
   onToggleLang,
-  onSecretAdminTrigger,
   isAuthenticated = false,
   onOpenAuth,
   userPoints = 0,
 }) => {
-  const secretTapCountRef = React.useRef(0);
-  const secretTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleLogoTap = () => {
-    const next = secretTapCountRef.current + 1;
-    if (next >= 5) {
-      secretTapCountRef.current = 0;
-      if (secretTimerRef.current) clearTimeout(secretTimerRef.current);
-      if (isAdmin) {
-        onToggleAdmin();
-      } else if (onSecretAdminTrigger) {
-        onSecretAdminTrigger();
-      }
-      return;
-    }
-
-    secretTapCountRef.current = next;
-    if (secretTimerRef.current) clearTimeout(secretTimerRef.current);
-    secretTimerRef.current = setTimeout(() => {
-      secretTapCountRef.current = 0;
-    }, 2500);
-  };
-
   return (
     <header className="sticky top-0 z-40 w-full bg-[#0a0f0d] border-b border-emerald-950/40">
-
       {/* Main Bar */}
       <div className="max-w-md mx-auto px-4 py-3.5 flex items-center justify-between bg-[#00c853]">
-        <div
-          onClick={handleLogoTap}
-          className="flex items-center gap-2 select-none cursor-pointer"
-        >
+        <div className="flex items-center gap-2 select-none">
           <span className="text-lg font-black text-white tracking-tight">৳ ReelPay BD</span>
         </div>
 

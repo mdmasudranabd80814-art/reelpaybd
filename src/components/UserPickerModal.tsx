@@ -26,8 +26,7 @@ export const UserPickerModal: React.FC<UserPickerModalProps> = ({
   const filteredUsers = users.filter(
     (u) =>
       u.id !== currentUser.id &&
-      (u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        u.phone.includes(searchTerm))
+      (u.name || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (

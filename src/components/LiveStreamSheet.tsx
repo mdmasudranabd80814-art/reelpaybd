@@ -209,11 +209,11 @@ export const LiveStreamSheet: React.FC<LiveStreamSheetProps> = ({
   const isAdmin = Boolean(isAdminOverride || currentUser.role === 'admin');
   const isAdminView = isAdmin && !isHost;
   const canManage = isHost || isAdmin;
-  const isFirebaseSignedIn = Boolean(firebaseUser);
+  const isFirebaseSignedIn = Boolean(firebaseUser && firebaseUser.emailVerified);
   const isAdminFirebaseAuthed = Boolean(
     firebaseUser &&
-      (firebaseUser.email?.toLowerCase() === 'mdmasudranabd80814@gmail.com' ||
-        firebaseUser.uid === 'system_admin')
+      firebaseUser.emailVerified &&
+      (isAdminOverride || firebaseUser.email?.toLowerCase() === 'mdmasudranabd80814@gmail.com')
   );
 
   const flashStudioNotice = (msg: string) => {

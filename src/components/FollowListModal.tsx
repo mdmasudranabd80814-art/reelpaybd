@@ -74,7 +74,7 @@ export const FollowListModal: React.FC<FollowListModalProps> = ({
 
       if (isAuthenticated) {
         try {
-          const remoteList = (await getCollection('users', [limit(50)])) as User[];
+          const remoteList = (await getCollection('public_profiles', [limit(50)])) as User[];
           if (!cancelled && Array.isArray(remoteList)) {
             remoteList.forEach((u) => {
               if (u && u.id) nextMap[u.id] = u;
@@ -94,7 +94,7 @@ export const FollowListModal: React.FC<FollowListModalProps> = ({
           await Promise.all(
             neededIds.slice(0, 20).map(async (uid) => {
               try {
-                const doc = (await getDocument('users', uid)) as User | null;
+                const doc = (await getDocument('public_profiles', uid)) as User | null;
                 if (doc && doc.id) nextMap[doc.id] = doc;
               } catch {
                 // ignore missing profile

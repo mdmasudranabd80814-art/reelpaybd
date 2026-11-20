@@ -9,32 +9,29 @@ import {
   INITIAL_USERS_LIST,
   INITIAL_REELS,
   INITIAL_WITHDRAWALS,
-  INITIAL_COMMENTS,
   INITIAL_TASKS,
 } from './data/initialData';
 import { User, Reel, WithdrawalRequest, Comment, TaskItem, DepositRequest, Notification, LiveStream, LiveMode, ChatSession, ChatMessage, EarningSettings, DEFAULT_EARNING_SETTINGS } from './types';
 import { Header } from './components/Header';
-import { DailyBonusCard } from './components/DailyBonusCard';
 import { ReelFeedCard } from './components/ReelFeedCard';
 import { BottomNav, TabType } from './components/BottomNav';
-import { ChevronRight, Sparkles, AlertCircle, Radio, Mic, Video, Loader2, Headphones, Play, Users, X } from 'lucide-react';
+import { ChevronRight, Sparkles, Radio, Mic, Video, Loader2, Headphones, Play, Users } from 'lucide-react';
 import type { StartLivePayload } from './components/GoLiveSetupModal';
 import { GiftItem } from './types';
 import { playCoinSound, playSuccessChime, playPopSound } from './utils/audio';
 import { toBengaliNumber } from './utils/bengali';
-import { getUserLevel, getNextLevel, getProgressToNextLevel } from './utils/levels';
+import { getUserLevel, getProgressToNextLevel } from './utils/levels';
 import { calculateGiftSplit } from './utils/gifts';
 import confetti from 'canvas-confetti';
 
 // Lazy Loaded Components
+const AdminPortal = lazy(() => import('./components/AdminPortal').then(m => ({ default: m.AdminPortal })));
 const FullScreenReelModal = lazy(() => import('./components/FullScreenReelModal').then(m => ({ default: m.FullScreenReelModal })));
 const WalletView = lazy(() => import('./components/WalletView').then(m => ({ default: m.WalletView })));
 const EarnView = lazy(() => import('./components/EarnView').then(m => ({ default: m.EarnView })));
 const ProfileView = lazy(() => import('./components/ProfileView').then(m => ({ default: m.ProfileView })));
-const AdminPanel = lazy(() => import('./components/AdminPanel').then(m => ({ default: m.AdminPanel })));
 const CommentsModal = lazy(() => import('./components/CommentsModal').then(m => ({ default: m.CommentsModal })));
 const NotificationModal = lazy(() => import('./components/NotificationModal').then(m => ({ default: m.NotificationModal })));
-const AdminLoginModal = lazy(() => import('./components/AdminLoginModal').then(m => ({ default: m.AdminLoginModal })));
 const GiftSheet = lazy(() => import('./components/GiftSheet').then(m => ({ default: m.GiftSheet })));
 const DepositSheet = lazy(() => import('./components/DepositSheet').then(m => ({ default: m.DepositSheet })));
 const LiveStreamSheet = lazy(() => import('./components/LiveStreamSheet').then(m => ({ default: m.LiveStreamSheet })));
@@ -48,20 +45,22 @@ const FollowListModal = lazy(() => import('./components/FollowListModal').then(m
 const UserPickerModal = lazy(() => import('./components/UserPickerModal').then(m => ({ default: m.UserPickerModal })));
 const ChatListModal = lazy(() => import('./components/ChatListModal').then(m => ({ default: m.ChatListModal })));
 import { AuthPage } from './components/AuthPage';
-import { GuestBanner } from './components/GuestBanner';
-import { AuthPromptModal } from './components/AuthPromptModal';
-import { GuestEarnView } from './components/GuestEarnView';
-import { GuestWalletView } from './components/GuestWalletView';
-import { GuestProfileView } from './components/GuestProfileView';
+import { EmailVerificationGate } from './components/EmailVerificationGate';
 import { useFirebase } from './hooks/useFirebase';
-import { where, orderBy, limit, increment, arrayUnion, arrayRemove, QueryConstraint } from 'firebase/firestore';
-import { seedInitialData } from './firebase';
+import { where, orderBy, increment, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { normalizeVideoUrl } from './utils/video';
 import { downloadReelVideo } from './utils/videoDownload';
 
 const LoadingSpinner = () => (
   <div className="flex-1 flex items-center justify-center p-12">
     <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
+  </div>
+);
+
+const FullPageLoader = () => (
+  <div className="min-h-screen bg-[#0a0f0d] text-white flex flex-col items-center justify-center p-6 gap-3">
+    <Loader2 className="w-10 h-10 text-emerald-400 animate-spin" />
+    <p className="text-xs font-bold text-emerald-300">সিকিউরিটি যাচাই হচ্ছে...</p>
   </div>
 );
 
@@ -75,11 +74,43 @@ const CATEGORIES: ('সকল' | '🔴 লাইভ' | 'ট্রেন্ডি
   'শিক্ষা',
 ];
 
+const toPublicProfile = (u: User) => ({
+  id: u.id,
+  name: (u.name || 'User').slice(0, 100),
+  avatar: u.avatar || INITIAL_USER.avatar,
+  isVerified: Boolean(u.isVerified),
+  referralCode: (u.referralCode || '').slice(0, 20),
+  followersCount: u.followersCount || 0,
+  followingCount: u.followingCount || 0,
+  followers: (u.followers || []).slice(0, 1000),
+  following: (u.following || []).slice(0, 1000),
+  reelsWatchedCount: u.reelsWatchedCount || 0,
+  createdAt: u.createdAt || new Date().toISOString(),
+});
+
 export default function App() {
-  const { 
-    user: firebaseUser, 
-    loading: authLoading, 
-    loginWithGoogle, 
+  const isAdminRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
+  if (isAdminRoute) {
+    return (
+      <Suspense fallback={<FullPageLoader />}>
+        <AdminPortal />
+      </Suspense>
+    );
+  }
+  return <UserApp />;
+}
+
+function UserApp() {
+  const {
+    user: firebaseUser,
+    emailVerified,
+    loading: authLoading,
+    loginWithGoogle,
+    loginWithEmail,
+    registerWithEmail,
+    resendVerificationEmail,
+    refreshVerificationStatus,
+    resetPassword,
     logout: firebaseLogout,
     getDocument,
     getCollection,
@@ -87,22 +118,13 @@ export default function App() {
     updateDocument,
     deleteDocument,
     addDocument,
-    onSnapshot: firebaseOnSnapshot
+    onSnapshot: firebaseOnSnapshot,
   } = useFirebase();
 
-  // Persistent State with Firebase & LocalStorage fallback for non-auth
+  // Persistent State
   const [users, setUsers] = useState<User[]>(INITIAL_USERS_LIST);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<User>(INITIAL_USER);
-  const [isAdminSession, setIsAdminSession] = useState<boolean>(() => {
-    try {
-      return sessionStorage.getItem('rt_admin_session') === '1';
-    } catch {
-      return false;
-    }
-  });
-  const isAdminSessionRef = useRef<boolean>(isAdminSession);
-  isAdminSessionRef.current = isAdminSession;
   const [pointRate, setPointRate] = useState<number>(() => {
     try {
       const val = localStorage.getItem('rt_point_rate');
@@ -160,6 +182,13 @@ export default function App() {
   });
   const [editingReel, setEditingReel] = useState<Reel | null>(null);
   const [likedReelIds, setLikedReelIds] = useState<string[]>(['reel_app_01']);
+  const [savedReelIds, setSavedReelIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('rt_saved_reels') || '[]');
+    } catch {
+      return [];
+    }
+  });
   const [watchedReelIds, setWatchedReelIds] = useState<string[]>(() => {
     try {
       return JSON.parse(localStorage.getItem('rt_watched_reels') || '[]');
@@ -168,7 +197,6 @@ export default function App() {
     }
   });
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>(INITIAL_WITHDRAWALS);
-  const [comments, setComments] = useState<Comment[]>(INITIAL_COMMENTS);
   const [tasks, setTasks] = useState<TaskItem[]>(INITIAL_TASKS);
   const [depositRequests, setDepositRequests] = useState<DepositRequest[]>([]);
   const [personalNotifications, setPersonalNotifications] = useState<Notification[]>([]);
@@ -221,9 +249,9 @@ export default function App() {
   const currentUserRef = useRef<User>(currentUser);
   currentUserRef.current = currentUser;
 
-  // Auth Sync: New users start with 0 points unless Admin has an active Login Offer
+  // Auth Sync: strictly require verified email before reading/writing Firestore
   useEffect(() => {
-    if (firebaseUser) {
+    if (firebaseUser && emailVerified) {
       setIsAuthenticated(true);
       const syncProfile = async () => {
         try {
@@ -251,16 +279,6 @@ export default function App() {
             : '';
 
           if (profile) {
-            const isOwnerEmail = firebaseUser.email === 'mdmasudranabd80814@gmail.com';
-            const resolvedRole: User['role'] =
-              profile.role === 'admin' || isAdminSessionRef.current || isOwnerEmail
-                ? (profile.role === 'admin' || isAdminSessionRef.current ? 'admin' : profile.role)
-                : profile.role;
-
-            if (isOwnerEmail && profile.role !== 'admin' && isAdminSessionRef.current) {
-              updateDocument('users', profile.id, { role: 'admin' }).catch(() => {});
-            }
-
             // Check if Admin enabled a new login offer campaign that this user hasn't claimed yet
             if (
               isOfferActive &&
@@ -270,17 +288,19 @@ export default function App() {
             ) {
               const updatedUser: User = {
                 ...profile,
-                role: resolvedRole,
                 points: (profile.points || 0) + offerPoints,
                 loginOfferClaimed: true,
                 loginOfferCampaignId: activeCampaignId,
               };
               setCurrentUser(updatedUser);
-              await updateDocument('users', profile.id, {
-                points: increment(offerPoints),
-                loginOfferClaimed: true,
-                loginOfferCampaignId: activeCampaignId,
-              });
+              await Promise.all([
+                updateDocument('users', profile.id, {
+                  points: increment(offerPoints),
+                  loginOfferClaimed: true,
+                  loginOfferCampaignId: activeCampaignId,
+                }),
+                setDocument('public_profiles', profile.id, toPublicProfile(updatedUser)).catch(() => {}),
+              ]);
               if (!isMuted) playSuccessChime();
               showToast(
                 lang === 'bn'
@@ -288,7 +308,8 @@ export default function App() {
                   : `🎁 Admin Login Offer! +${offerPoints} points credited!`
               );
             } else {
-              setCurrentUser({ ...profile, role: resolvedRole });
+              setCurrentUser(profile);
+              setDocument('public_profiles', profile.id, toPublicProfile(profile)).catch(() => {});
             }
           } else {
             let pendingReg: Partial<User> = {};
@@ -309,7 +330,7 @@ export default function App() {
               avatar: firebaseUser.photoURL || INITIAL_USER.avatar,
               paymentMethod: pendingReg.paymentMethod || 'bKash',
               paymentAccountNumber: pendingReg.paymentAccountNumber || '',
-              points: offerPoints, // ০ পয়েন্ট ডিফল্ট; শুধুমাত্র এডমিন অফার দিলে অফারের পয়েন্ট যোগ হবে
+              points: offerPoints,
               role: 'user',
               createdAt: new Date().toISOString(),
               referralCode: `REEL${Math.floor(1000 + Math.random() * 9000)}`,
@@ -326,7 +347,10 @@ export default function App() {
             };
 
             setCurrentUser(newUser);
-            await setDocument('users', firebaseUser.uid, newUser);
+            await Promise.all([
+              setDocument('users', firebaseUser.uid, newUser),
+              setDocument('public_profiles', firebaseUser.uid, toPublicProfile(newUser)).catch(() => {}),
+            ]);
 
             if (offerPoints > 0) {
               if (!isMuted) playSuccessChime();
@@ -352,11 +376,12 @@ export default function App() {
       setIsAuthenticated(false);
       setCurrentUser(INITIAL_USER);
     }
-  }, [firebaseUser]);
+  }, [firebaseUser, emailVerified]);
 
-  // Firestore Listeners
+  // Firestore Listeners (strictly gated on verified email!)
   useEffect(() => {
-    // Reels are public
+    if (!firebaseUser || !emailVerified) return;
+
     const unsubReels = firebaseOnSnapshot('reels', (data) => {
       const deleted: string[] = (() => {
         try {
@@ -374,11 +399,9 @@ export default function App() {
       })();
 
       if (data && data.length > 0) {
-        // Filter out old sample nature/recipe reels so app-related reels always take precedence
         const currentData = (data as Reel[]).filter((r) => r.id !== 'reel_01' && r.id !== 'reel_02');
         if (currentData.length > 0) {
           const loadedReels = currentData
-            // If it's in Firestore, it should usually be visible, unless locally hidden
             .filter((r) => !deleted.includes(r.id))
             .map((r, idx) => {
               const patched = edited[r.id] ? { ...r, ...edited[r.id] } : r;
@@ -392,92 +415,67 @@ export default function App() {
         }
       }
 
-      // Fallback if Firestore is empty but we have local initial data
       const initial = INITIAL_REELS
         .filter((r) => !deleted.includes(r.id))
         .map((r) => (edited[r.id] ? { ...r, ...edited[r.id] } : r));
       setReels(initial);
     }, [orderBy('createdAt', 'desc')]);
 
-    // Administrative listeners (strictly require signed-in Admin Google account)
-    let unsubUsers = () => {};
-    let unsubAdminWithdrawals = () => {};
-    let unsubAdminDeposits = () => {};
-
-    const isFirestoreAdmin = Boolean(
-      firebaseUser &&
-        (firebaseUser.email?.toLowerCase() === 'mdmasudranabd80814@gmail.com' ||
-          firebaseUser.uid === 'system_admin')
-    );
-
-    if (isAuthenticated && currentUser.role === 'admin' && isFirestoreAdmin) {
-      unsubUsers = firebaseOnSnapshot('users', (data) => {
+    // Public discovery profiles (non-PII directory)
+    const unsubPublicProfiles = firebaseOnSnapshot('public_profiles', (data) => {
+      if (data && data.length > 0) {
         setUsers(data as User[]);
-      });
+      }
+    });
 
-      unsubAdminWithdrawals = firebaseOnSnapshot('withdrawals', (data) => {
-        setWithdrawals(data as WithdrawalRequest[]);
-      }, [orderBy('createdAt', 'desc')]);
+    // User-specific financial listeners (Owner only)
+    const unsubUserWithdrawals = firebaseOnSnapshot('withdrawals', (data) => {
+      setWithdrawals(data as WithdrawalRequest[]);
+    }, [where('userId', '==', firebaseUser.uid), orderBy('createdAt', 'desc')]);
 
-      unsubAdminDeposits = firebaseOnSnapshot('deposits', (data) => {
-        setDepositRequests(data as DepositRequest[]);
-      }, [orderBy('createdAt', 'desc')]);
-    }
-
-    // User-specific listeners (Regular users only see their own)
-    let unsubUserWithdrawals = () => {};
-    let unsubUserDeposits = () => {};
-
-    if (isAuthenticated && firebaseUser && !isFirestoreAdmin && currentUser.id !== INITIAL_USER.id) {
-      unsubUserWithdrawals = firebaseOnSnapshot('withdrawals', (data) => {
-        setWithdrawals(data as WithdrawalRequest[]);
-      }, [where('userId', '==', currentUser.id), orderBy('createdAt', 'desc')]);
-
-      unsubUserDeposits = firebaseOnSnapshot('deposits', (data) => {
-        setDepositRequests(data as DepositRequest[]);
-      }, [where('userId', '==', currentUser.id), orderBy('createdAt', 'desc')]);
-    }
+    const unsubUserDeposits = firebaseOnSnapshot('deposits', (data) => {
+      setDepositRequests(data as DepositRequest[]);
+    }, [where('userId', '==', firebaseUser.uid), orderBy('createdAt', 'desc')]);
 
     return () => {
       unsubReels();
-      unsubUsers();
-      unsubAdminWithdrawals();
-      unsubAdminDeposits();
+      unsubPublicProfiles();
       unsubUserWithdrawals();
       unsubUserDeposits();
     };
-  }, [isAuthenticated, currentUser.role, currentUser.id, firebaseUser?.email, firebaseUser?.uid]);
+  }, [firebaseUser?.uid, emailVerified]);
 
   const [activeTab, setActiveTab] = useState<TabType>(() => {
-    return (localStorage.getItem('rt_active_tab') as TabType) || 'home';
+    const saved = localStorage.getItem('rt_active_tab');
+    return saved === 'earn' || saved === 'wallet' || saved === 'profile' ? saved : 'home';
   });
 
-  // Sync specific user data if authenticated (preserve admin session role)
+  // Sync current user's private profile
   useEffect(() => {
-    if (isAuthenticated && firebaseUser && currentUser.id !== INITIAL_USER.id) {
+    if (isAuthenticated && firebaseUser && emailVerified && currentUser.id !== INITIAL_USER.id) {
       const unsubUser = firebaseOnSnapshot('users', (data) => {
-        const me = data.find(u => u.id === currentUser.id) as User | undefined;
+        const me = data.find(u => u.id === firebaseUser.uid) as User | undefined;
         if (me) {
-          const keepAdmin = isAdminSessionRef.current || me.role === 'admin';
-          setCurrentUser(keepAdmin ? { ...me, role: 'admin' } : me);
+          setCurrentUser(me);
         }
-      }, [where('id', '==', currentUser.id)]);
+      }, [where('id', '==', firebaseUser.uid)]);
       return unsubUser;
     }
-  }, [isAuthenticated, currentUser.id, firebaseUser?.uid]);
+  }, [isAuthenticated, currentUser.id, firebaseUser?.uid, emailVerified]);
 
   // Sync personal notifications
   useEffect(() => {
-    if (isAuthenticated && firebaseUser && currentUser.id !== INITIAL_USER.id) {
-      const unsub = firebaseOnSnapshot(`users/${currentUser.id}/notifications`, (data) => {
+    if (isAuthenticated && firebaseUser && emailVerified && currentUser.id !== INITIAL_USER.id) {
+      const unsub = firebaseOnSnapshot(`users/${firebaseUser.uid}/notifications`, (data) => {
         setPersonalNotifications(data as Notification[]);
       }, [orderBy('createdAt', 'desc')]);
       return unsub;
     }
-  }, [isAuthenticated, currentUser.id, firebaseUser?.uid]);
+  }, [isAuthenticated, currentUser.id, firebaseUser?.uid, emailVerified]);
 
-  // Sync active live streams (query collection directly and sort client-side to avoid index requirements)
+  // Sync active live streams
   useEffect(() => {
+    if (!firebaseUser || !emailVerified) return;
     const unsub = firebaseOnSnapshot('live_streams', (data) => {
       const active = (data as LiveStream[])
         .filter((s) => s && s.status === 'active')
@@ -485,10 +483,11 @@ export default function App() {
       setActiveLiveStreams(active);
     });
     return unsub;
-  }, []);
+  }, [firebaseUser?.uid, emailVerified]);
 
   // Sync tasks from Firestore
   useEffect(() => {
+    if (!firebaseUser || !emailVerified) return;
     const unsubTasks = firebaseOnSnapshot('tasks', (data) => {
       if (data && data.length > 0) {
         setTasks(data as TaskItem[]);
@@ -497,10 +496,11 @@ export default function App() {
       }
     });
     return unsubTasks;
-  }, []);
+  }, [firebaseUser?.uid, emailVerified]);
 
   // Sync Earning Settings from Firestore
   useEffect(() => {
+    if (!firebaseUser || !emailVerified) return;
     const unsubSettings = firebaseOnSnapshot('settings', (data) => {
       if (data && data.length > 0) {
         const earningDoc = (data as any[]).find((d) => d.id === 'earning');
@@ -513,24 +513,7 @@ export default function App() {
       }
     });
     return unsubSettings;
-  }, []);
-
-  // Ensure Admin UID is recorded in settings/earning for cross-user gift commission payouts
-  useEffect(() => {
-    if (
-      isAuthenticated &&
-      currentUser.role === 'admin' &&
-      currentUser.id !== INITIAL_USER.id &&
-      earningSettings.adminCommissionReceiverId !== currentUser.id
-    ) {
-      setDocument('settings', 'earning', {
-        ...earningSettings,
-        id: 'earning',
-        adminCommissionReceiverId: currentUser.id,
-        updatedAt: new Date().toISOString(),
-      }).catch(() => {});
-    }
-  }, [isAuthenticated, currentUser.role, currentUser.id, earningSettings.adminCommissionReceiverId]);
+  }, [firebaseUser?.uid, emailVerified]);
 
   useEffect(() => {
     localStorage.setItem('rt_active_tab', activeTab);
@@ -594,8 +577,6 @@ export default function App() {
   const [fullScreenReelId, setFullScreenReelId] = useState<string | null>(null);
   const [activeCommentReel, setActiveCommentReel] = useState<Reel | null>(null);
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
-  const [showAdminAuthModal, setShowAdminAuthModal] = useState<boolean>(false);
-  const [showCreateReelModal, setShowCreateReelModal] = useState<boolean>(false);
   const [showGiftSheet, setShowGiftSheet] = useState<boolean>(false);
   const [giftTarget, setGiftTarget] = useState<{ userId?: string; liveId?: string; creatorName?: string } | null>(null);
   const [showDepositSheet, setShowDepositSheet] = useState<boolean>(false);
@@ -621,45 +602,7 @@ export default function App() {
   const [isUserPickerOpen, setIsUserPickerOpen] = useState(false);
   const [sharingReelInChat, setSharingReelInChat] = useState<Reel | null>(null);
 
-  // Guest & Auth Modal State (Homepage is public for all!)
-  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
-  const [authModalView, setAuthModalView] = useState<'login' | 'register'>('login');
-  const [authModalReason, setAuthModalReason] = useState<string>('');
-  const [showAuthPrompt, setShowAuthPrompt] = useState<boolean>(false);
-  const [authPromptMessage, setAuthPromptMessage] = useState<string>('');
-
-  const triggerAuthFlow = (view: 'login' | 'register' = 'login', reason?: string) => {
-    if (view === 'login') {
-      loginWithGoogle();
-      return;
-    }
-    setAuthModalView(view);
-    setAuthModalReason(
-      reason ||
-        (lang === 'bn'
-          ? 'টাকা আর্ন করতে চাইলে লগইন বা রেজিস্ট্রেশন করুন!'
-          : 'Login or register to start earning money!')
-    );
-    setShowAuthModal(true);
-  };
-
-  const triggerAuthPrompt = (message?: string) => {
-    setAuthPromptMessage(
-      message ||
-        (lang === 'bn'
-          ? 'টাকা আর্ন করতে চাইলে লগইন বা রেজিস্ট্রেশন করুন! প্রতিটি রিল দেখার পয়েন্ট আপনার ব্যালেন্সে যোগ হবে।'
-          : 'Login or register to start earning money!')
-    );
-    setShowAuthPrompt(true);
-  };
-
-  const handleLogin = (phone: string, pass: string): boolean => {
-    // Legacy support or phone login logic if needed
-    loginWithGoogle();
-    return true;
-  };
-
-  const handleRegister = async (userData: Partial<User>) => {
+  const handleUserEmailRegister = async (email: string, pass: string, userData: Partial<User>) => {
     try {
       localStorage.setItem('rt_pending_reg', JSON.stringify({
         name: userData.name || '',
@@ -668,82 +611,40 @@ export default function App() {
         paymentAccountNumber: userData.paymentAccountNumber || '',
       }));
     } catch {}
-    setShowAuthModal(false);
-    await loginWithGoogle();
+    return registerWithEmail(email, pass, userData.name);
   };
 
-  const handleAdminLoginFlow = (pass: string): boolean => {
-    if (pass === 'admin123') {
-      setIsAdminSession(true);
-      isAdminSessionRef.current = true;
+  const handleUserGoogleLogin = async (pendingProfile?: Partial<User>) => {
+    if (pendingProfile) {
       try {
-        sessionStorage.setItem('rt_admin_session', '1');
+        localStorage.setItem('rt_pending_reg', JSON.stringify({
+          name: pendingProfile.name || '',
+          phone: pendingProfile.phone || '',
+          paymentMethod: pendingProfile.paymentMethod || 'bKash',
+          paymentAccountNumber: pendingProfile.paymentAccountNumber || '',
+        }));
       } catch {}
-      setCurrentUser(prev => ({ ...prev, role: 'admin' }));
-      if (isAuthenticated && currentUser.id !== INITIAL_USER.id) {
-        updateDocument('users', currentUser.id, { role: 'admin' }).catch(() => {});
-      }
-      setActiveTab('admin');
-      showToast(lang === 'bn' ? '⚡ এডমিন প্যানেলে স্বাগতম!' : '⚡ Welcome to Admin Panel!');
-      return true;
     }
-    return false;
+    return loginWithGoogle();
   };
 
-  // Tracking Effect
+  // Activity Tracking Effect (for verified user)
   useEffect(() => {
-    if (currentUser.role === 'admin' && activeTab === 'admin') return;
-
     const updateTracking = () => {
-      if (!isAuthenticated || currentUser.role === 'admin') return;
-      
+      if (!isAuthenticated || !firebaseUser || !emailVerified || currentUser.id === INITIAL_USER.id) return;
       const now = new Date().toISOString();
       const pageInfo = fullScreenReelId ? `Reel: ${fullScreenReelId}` : `Tab: ${activeTab}`;
-      
-      if (currentUser.id !== INITIAL_USER.id) {
-        updateDocument('users', currentUser.id, {
-          lastActive: now,
-          lastPage: pageInfo,
-          totalSessions: (currentUser.totalSessions || 0) + (currentUser.lastActive ? 0 : 1)
-        });
-      }
+      updateDocument('users', currentUser.id, {
+        lastActive: now,
+        lastPage: pageInfo,
+        totalSessions: (currentUser.totalSessions || 0) + (currentUser.lastActive ? 0 : 1),
+      }).catch(() => {});
     };
 
     updateTracking();
-    const interval = setInterval(updateTracking, 30000); // Update every 30s
+    const interval = setInterval(updateTracking, 30000);
     return () => clearInterval(interval);
-  }, [activeTab, fullScreenReelId, currentUser.role, isAuthenticated, currentUser.id]);
-
-  // Totally Private Admin Gateway (No visible UI links anywhere in user panel):
-  // 1. Tapping the logo 5 times in the header
-  // 2. Secret URL hashtag `#admin` or query `?admin=1`
-  // 3. Secret keyboard shortcut: Ctrl+Shift+A
-  useEffect(() => {
-    const checkSecretRoute = () => {
-      if (
-        window.location.search.includes('admin') ||
-        window.location.hash.toLowerCase().includes('admin')
-      ) {
-        setShowAdminAuthModal(true);
-      }
-    };
-
-    checkSecretRoute();
-    window.addEventListener('hashchange', checkSecretRoute);
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a') {
-        e.preventDefault();
-        setShowAdminAuthModal(true);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      window.removeEventListener('hashchange', checkSecretRoute);
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, []);
+  }, [activeTab, fullScreenReelId, isAuthenticated, currentUser.id, firebaseUser?.uid, emailVerified]);
 
   // Fast & Atomic Optimistic Point Mutation Helper (0ms UI response + Firestore increment)
   const applyFastUserMutation = (pointDelta: number, extraFields: Record<string, any> = {}) => {
@@ -807,16 +708,7 @@ export default function App() {
       return;
     }
 
-    if (!isAuthenticated) {
-      triggerAuthPrompt(
-        lang === 'bn'
-          ? 'দৈনিক বোনাস এবং টাকা আর্ন করতে লগইন বা রেজিস্ট্রেশন করুন!'
-          : 'Login or register to claim your daily bonus!'
-      );
-      return;
-    }
-
-    if (isClaimedToday) return;
+    if (!isAuthenticated || isClaimedToday) return;
 
     const actualBonus = earningSettings.dailyBonusPoints || bonusPoints;
     applyFastUserMutation(actualBonus, { dailyClaimedDate: todayKey });
@@ -830,8 +722,25 @@ export default function App() {
       const next = prev.includes(reelId)
         ? prev.filter((id) => id !== reelId)
         : [...prev, reelId];
-      
+
       localStorage.setItem('rt_liked_reels', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  // Bookmark / Save Reel
+  const handleToggleSave = (reelId: string) => {
+    setSavedReelIds((prev) => {
+      const alreadySaved = prev.includes(reelId);
+      const next = alreadySaved ? prev.filter((id) => id !== reelId) : [...prev, reelId];
+      try {
+        localStorage.setItem('rt_saved_reels', JSON.stringify(next));
+      } catch {}
+      showToast(
+        alreadySaved
+          ? (lang === 'bn' ? 'সংরক্ষিত তালিকা থেকে সরানো হয়েছে।' : 'Removed from saved.')
+          : (lang === 'bn' ? '🔖 রিলটি প্রোফাইলের সেভড সেকশনে সংরক্ষণ করা হয়েছে!' : '🔖 Reel saved to Profile!')
+      );
       return next;
     });
   };
@@ -859,14 +768,7 @@ export default function App() {
       }
     }
 
-    if (!isAuthenticated) {
-      triggerAuthPrompt(
-        lang === 'bn'
-          ? 'টাকা ও পয়েন্ট আর্ন করতে লগইন বা রেজিস্ট্রেশন করুন! প্রতিটি রিল দেখার পয়েন্ট আপনার ব্যালেন্সে যোগ হবে।'
-          : 'Login or register to earn points for watching reels!'
-      );
-      return;
-    }
+    if (!isAuthenticated) return;
 
     // 3. Prevent claiming the same reel twice
     if (targetReelId && watchedReelIds.includes(targetReelId)) {
@@ -942,7 +844,7 @@ export default function App() {
       const findReferrerAndBonus = async () => {
         try {
           const referrerCode = activeUser.referredBy;
-          const usersList = await getCollection('users', [where('referralCode', '==', referrerCode)]);
+          const usersList = await getCollection('public_profiles', [where('referralCode', '==', referrerCode)]);
           if (usersList && usersList.length > 0) {
             const referrer = usersList[0] as User;
             const refBonus = earningSettings.referralRewardPoints || 50;
@@ -1048,14 +950,7 @@ export default function App() {
       return;
     }
 
-    if (!isAuthenticated) {
-      triggerAuthPrompt(
-        lang === 'bn'
-          ? 'টাকা আর্ন করতে চাইলে লগইন বা রেজিস্ট্রেশন করুন! আপনার অ্যাকাউন্টে পয়েন্ট ও টাকা জমা হবে।'
-          : 'Login or register to earn points and withdraw money!'
-      );
-      return;
-    }
+    if (!isAuthenticated) return;
 
     if (watchedReelIds.includes(reel.id)) {
       showToast(lang === 'bn' ? 'আপনি ইতিমধ্যে এই রিলের পয়েন্ট সংগ্রহ করেছেন!' : 'Already collected points for this reel!');
@@ -1088,14 +983,7 @@ export default function App() {
 
   // Add Comment
   const handleAddComment = async (reelId: string, text: string) => {
-    if (!isAuthenticated) {
-      triggerAuthPrompt(
-        lang === 'bn'
-          ? 'কমেন্ট করতে এবং পয়েন্ট আর্ন করতে অনুগ্রহ করে লগইন বা রেজিস্ট্রেশন করুন!'
-          : 'Login or register to post comments!'
-      );
-      return;
-    }
+    if (!isAuthenticated) return;
     const newComment: Partial<Comment> = {
       reelId,
       userId: currentUser.id,
@@ -1157,53 +1045,6 @@ export default function App() {
         ? `💎 ডিপোজিট রিকোয়েস্ট জমা হয়েছে। এডমিন যাচাই করে পয়েন্ট যোগ করে দেবে।`
         : `💎 Deposit request submitted. Admin will credit points after verification.`
     );
-  };
-
-  const handleApproveDeposit = async (id: string) => {
-    const req = depositRequests.find((d) => d.id === id);
-    if (!req) return;
-
-    // Optimistic 0ms update
-    setDepositRequests((prev) => prev.map((d) => (d.id === id ? { ...d, status: 'approved' } : d)));
-    setUsers((prev) =>
-      prev.map((u) => (u.id === req.userId ? { ...u, points: (u.points || 0) + req.pointsToAdd } : u))
-    );
-    if (currentUserRef.current.id === req.userId) {
-      setCurrentUser((prev) => ({ ...prev, points: (prev.points || 0) + req.pointsToAdd }));
-    }
-
-    if (!isMuted) playSuccessChime();
-    showToast('✅ ডিপোজিট অনুমোদন করা হয়েছে এবং ইউজারকে পয়েন্ট দেওয়া হয়েছে!');
-
-    try {
-      await Promise.all([
-        updateDocument('users', req.userId, { points: increment(req.pointsToAdd) }),
-        updateDocument('deposits', id, { status: 'approved' }),
-      ]);
-      sendNotification(
-        req.userId,
-        '✅ ডিপোজিট সফল',
-        `আপনার ৳${req.amountBDT} ডিপোজিট রিকোয়েস্টটি সফল হয়েছে। +${req.pointsToAdd} পয়েন্ট আপনার ব্যালেন্সে যোগ করা হয়েছে।`,
-        'deposit'
-      );
-    } catch (err) {
-      console.warn('Approve deposit sync warning:', err);
-    }
-  };
-
-  const handleRejectDeposit = async (id: string) => {
-    const req = depositRequests.find((d) => d.id === id);
-    setDepositRequests((prev) => prev.map((d) => (d.id === id ? { ...d, status: 'rejected' } : d)));
-    showToast('❌ ডিপোজিট রিকোয়েস্ট বাতিল করা হয়েছে।');
-    if (req) {
-      sendNotification(
-        req.userId,
-        '❌ ডিপোজিট বাতিল',
-        `দুঃখিত, আপনার ৳${req.amountBDT} ডিপোজিট রিকোয়েস্টটি এডমিন বাতিল করেছে। বিস্তারিত জানতে সাপোর্ট টিমে যোগাযোগ করুন।`,
-        'deposit'
-      );
-    }
-    await updateDocument('deposits', id, { status: 'rejected' });
   };
 
   // Send Gift (Instant 0ms deduction + host/creator & admin commission split + Live Stream Celebration)
@@ -1299,8 +1140,7 @@ export default function App() {
       setSelectedUserProfileUser(userToView);
       setIsUserProfileModalOpen(true);
     } else {
-      // Fetch from Firestore if not in local list
-      const remoteUser = await getDocument('users', userId) as User | null;
+      const remoteUser = await getDocument('public_profiles', userId) as User | null;
       if (remoteUser) {
         setSelectedUserProfileUser(remoteUser);
         setIsUserProfileModalOpen(true);
@@ -1311,14 +1151,7 @@ export default function App() {
   };
 
   const handleToggleFollow = async (targetUserId: string, targetName?: string) => {
-    if (!isAuthenticated) {
-      triggerAuthPrompt(
-        lang === 'bn'
-          ? 'ক্রিয়েটরকে ফলো করতে অনুগ্রহ করে লগইন বা রেজিস্ট্রেশন করুন!'
-          : 'Please login or register to follow creators!'
-      );
-      return;
-    }
+    if (!isAuthenticated) return;
 
     const me = currentUserRef.current;
     if (!targetUserId || targetUserId === me.id) return;
@@ -1330,7 +1163,6 @@ export default function App() {
       : Array.from(new Set([...myFollowing, targetUserId]));
     const nextFollowingCount = Math.max(0, (me.followingCount ?? myFollowing.length) + (currentlyFollowing ? -1 : 1));
 
-    // Optimistic update on currentUser
     setCurrentUser((prev) => ({
       ...prev,
       following: nextFollowing,
@@ -1363,14 +1195,18 @@ export default function App() {
         : (lang === 'bn' ? `✅ ${targetName || 'ক্রিয়েটর'}-কে ফলো করেছেন!` : `✅ Followed ${targetName || 'creator'}!`)
     );
 
-    // Atomic Firestore persistence
+    const selfFollowPatch = {
+      following: currentlyFollowing ? arrayRemove(targetUserId) : arrayUnion(targetUserId),
+      followingCount: currentlyFollowing
+        ? (me.followingCount ?? myFollowing.length) > 0 ? increment(-1) : 0
+        : increment(1),
+    };
+
     try {
-      await updateDocument('users', me.id, {
-        following: currentlyFollowing ? arrayRemove(targetUserId) : arrayUnion(targetUserId),
-        followingCount: currentlyFollowing
-          ? (me.followingCount ?? myFollowing.length) > 0 ? increment(-1) : 0
-          : increment(1),
-      });
+      await Promise.all([
+        updateDocument('users', me.id, selfFollowPatch),
+        updateDocument('public_profiles', me.id, selfFollowPatch).catch(() => {}),
+      ]);
     } catch (err) {
       console.warn('Follow sync on self warning:', err);
     }
@@ -1378,12 +1214,17 @@ export default function App() {
     try {
       const targetLocal = users.find((u) => u.id === targetUserId);
       const targetFollowersCount = targetLocal?.followersCount ?? (targetLocal?.followers?.length || 0);
-      await updateDocument('users', targetUserId, {
+      const targetFollowPatch = {
         followers: currentlyFollowing ? arrayRemove(me.id) : arrayUnion(me.id),
         followersCount: currentlyFollowing
           ? targetFollowersCount > 0 ? increment(-1) : 0
           : increment(1),
-      });
+      };
+
+      await Promise.all([
+        updateDocument('users', targetUserId, targetFollowPatch).catch(() => {}),
+        updateDocument('public_profiles', targetUserId, targetFollowPatch).catch(() => {}),
+      ]);
 
       if (!currentlyFollowing) {
         sendNotification(
@@ -1401,10 +1242,7 @@ export default function App() {
   };
 
   const handleOpenChat = async (otherUser: User) => {
-    if (!isAuthenticated) {
-      triggerAuthPrompt();
-      return;
-    }
+    if (!isAuthenticated) return;
 
     // Generate unique session ID: uid1_uid2 (alphabetically sorted)
     const sessionId = [currentUser.id, otherUser.id].sort().join('_');
@@ -1504,125 +1342,10 @@ export default function App() {
     }
   };
 
-  // Admin Task Management
-  const handleAddTask = async (newTaskData: Omit<TaskItem, 'id' | 'completed'>) => {
-    const newTask: Partial<TaskItem> = {
-      ...newTaskData,
-      completed: false,
-      createdAt: new Date().toISOString()
-    };
-    await addDocument('tasks', newTask);
-    showToast(lang === 'bn' ? '✅ নতুন টাস্ক সফলভাবে যোগ করা হয়েছে!' : '✅ New task added successfully!');
-  };
-
-  const handleEditTask = async (task: TaskItem) => {
-    await updateDocument('tasks', task.id, task);
-    showToast(lang === 'bn' ? '✅ টাস্ক সফলভাবে আপডেট করা হয়েছে!' : '✅ Task updated successfully!');
-  };
-
-  const handleDeleteTask = async (taskId: string) => {
-    await deleteDocument('tasks', taskId);
-    showToast(lang === 'bn' ? '🗑️ টাস্ক মুছে ফেলা হয়েছে!' : '🗑️ Task deleted!');
-  };
-
   // Add Points (e.g., from spin wheel or scratch card)
   const handleAddPointsGeneral = (pts: number, reason: string) => {
     updateUserPoints(pts);
     showToast(`🎉 ${reason}: +${pts} পয়েন্ট ওয়ালেটে যুক্ত হয়েছে!`);
-  };
-
-    // Admin Actions
-  const handleApproveWithdrawal = async (id: string) => {
-    const w = withdrawals.find(req => req.id === id);
-    if (!w) return;
-
-    const trxId = `TRX${Math.floor(10000000 + Math.random() * 90000000)}`;
-    setWithdrawals((prev) => prev.map((item) => (item.id === id ? { ...item, status: 'approved', transactionId: trxId } : item)));
-    setUsers((prev) =>
-      prev.map((u) => (u.id === w.userId ? { ...u, totalWithdrawn: (u.totalWithdrawn || 0) + w.amountBDT } : u))
-    );
-    if (currentUserRef.current.id === w.userId) {
-      setCurrentUser((prev) => ({ ...prev, totalWithdrawn: (prev.totalWithdrawn || 0) + w.amountBDT }));
-    }
-
-    if (!isMuted) playSuccessChime();
-    showToast('✅ উইথড্রয়াল অনুমোদন করা হয়েছে এবং টাকা পাঠানো সম্পন্ন!');
-
-    try {
-      await Promise.all([
-        updateDocument('users', w.userId, { totalWithdrawn: increment(w.amountBDT) }),
-        updateDocument('withdrawals', id, { status: 'approved', transactionId: trxId }),
-      ]);
-      sendNotification(
-        w.userId,
-        '💸 উত্তোলন সফল',
-        `আপনার ৳${w.amountBDT} উত্তোলনের আবেদনটি সফলভাবে সম্পন্ন হয়েছে। আপনার পেমেন্ট পাঠিয়ে দেওয়া হয়েছে।`,
-        'withdrawal'
-      );
-    } catch (err) {
-      console.warn('Approve withdrawal sync warning:', err);
-    }
-  };
-
-  const handleRejectWithdrawal = async (id: string) => {
-    const req = withdrawals.find((w) => w.id === id);
-    if (!req) return;
-
-    setWithdrawals((prev) => prev.map((item) => (item.id === id ? { ...item, status: 'rejected' } : item)));
-    setUsers((prev) =>
-      prev.map((u) => (u.id === req.userId ? { ...u, points: (u.points || 0) + req.pointsDeducted } : u))
-    );
-    if (currentUserRef.current.id === req.userId) {
-      setCurrentUser((prev) => ({ ...prev, points: (prev.points || 0) + req.pointsDeducted }));
-    }
-    showToast('❌ রিকোয়েস্ট বাতিল করা হয়েছে এবং পয়েন্ট ইউজারের অ্যাকাউন্টে ফেরত দেওয়া হয়েছে।');
-
-    try {
-      await Promise.all([
-        updateDocument('users', req.userId, { points: increment(req.pointsDeducted) }),
-        updateDocument('withdrawals', id, { status: 'rejected' }),
-      ]);
-      sendNotification(
-        req.userId,
-        '❌ উত্তোলন বাতিল',
-        `আপনার ৳${req.amountBDT} উত্তোলনের আবেদনটি বাতিল করা হয়েছে। আপনার পয়েন্টগুলো অ্যাকাউন্টে ফেরত দেওয়া হয়েছে।`,
-        'withdrawal'
-      );
-    } catch (err) {
-      console.warn('Reject withdrawal sync warning:', err);
-    }
-  };
-
-  const handleGiveUserBonus = async (userId: string, pointsDelta: number) => {
-    const targetUser = users.find((u) => u.id === userId) || (currentUserRef.current.id === userId ? currentUserRef.current : null);
-    const currentPts = targetUser?.points ?? 0;
-    const effectiveDelta = pointsDelta < 0 ? -Math.min(currentPts, Math.abs(pointsDelta)) : pointsDelta;
-
-    if (effectiveDelta === 0) {
-      showToast(pointsDelta < 0 ? '⚠️ এই ইউজারের পয়েন্ট ইতিমধ্যে ০!' : '⚠️ পয়েন্ট ০ দেওয়া যাবে না!');
-      return;
-    }
-
-    // Instant 0ms optimistic UI update
-    setUsers((prev) =>
-      prev.map((u) => (u.id === userId ? { ...u, points: Math.max(0, (u.points || 0) + effectiveDelta) } : u))
-    );
-    if (currentUserRef.current.id === userId) {
-      setCurrentUser((prev) => ({ ...prev, points: Math.max(0, (prev.points || 0) + effectiveDelta) }));
-    }
-
-    if (effectiveDelta > 0 && !isMuted) playSuccessChime();
-    showToast(
-      effectiveDelta > 0
-        ? `🎉 ইউজারকে +${toBengaliNumber(effectiveDelta, lang)} পয়েন্ট দ্রুত যোগ করা হয়েছে!`
-        : `➖ ইউজার থেকে ${toBengaliNumber(Math.abs(effectiveDelta), lang)} পয়েন্ট মাইনাস করা হয়েছে!`
-    );
-
-    try {
-      await updateDocument('users', userId, { points: increment(effectiveDelta) });
-    } catch (err) {
-      console.warn('Admin bonus sync warning:', err);
-    }
   };
 
   const handleAddNewReel = async (
@@ -1665,14 +1388,7 @@ export default function App() {
   }, [activeLiveStreams]);
 
   const openPersonalLiveStudio = (mode: LiveMode = 'audio') => {
-    if (!isAuthenticated) {
-      triggerAuthPrompt(
-        lang === 'bn'
-          ? 'পার্সোনাল লাইভ শুরু করতে লগইন বা রেজিস্ট্রেশন করুন!'
-          : 'Login or register to start your personal live!'
-      );
-      return;
-    }
+    if (!isAuthenticated) return;
     const existingMyLive = activeLiveStreams.find((s) => s.hostId === currentUser.id);
     if (existingMyLive) {
       setCurrentLiveStreamId(existingMyLive.id);
@@ -1684,14 +1400,7 @@ export default function App() {
   };
 
   const handleStartLive = async (payload: StartLivePayload) => {
-    if (!isAuthenticated) {
-      triggerAuthPrompt(
-        lang === 'bn'
-          ? 'লাইভ শুরু করতে আগে লগইন বা রেজিস্ট্রেশন করুন!'
-          : 'Please login or register to start live!'
-      );
-      return;
-    }
+    if (!isAuthenticated) return;
 
     const hostId = firebaseUser?.uid || currentUser.id;
 
@@ -1762,31 +1471,11 @@ export default function App() {
     }
   };
 
-  const handleEndLive = async (liveId: string, byAdmin = false, reason?: string) => {
-    const isAdminFirebaseAuthed = Boolean(
-      firebaseUser &&
-        (firebaseUser.email?.toLowerCase() === 'mdmasudranabd80814@gmail.com' ||
-          firebaseUser.uid === 'system_admin')
-    );
-    if (!firebaseUser || (byAdmin && !isAdminFirebaseAuthed)) {
-      showToast(
-        lang === 'bn'
-          ? '⚠️ লাইভ ক্যানসেল করতে এডমিন Google অ্যাকাউন্ট (mdmasudranabd80814@gmail.com) দিয়ে লগইন করুন!'
-          : '⚠️ Sign in with Admin Google account first!'
-      );
-      return;
-    }
-    const targetStream = activeLiveStreams.find((s) => s.id === liveId);
-    const cleanReason = (reason || '').trim();
+  const handleEndLive = async (liveId: string) => {
+    if (!firebaseUser) return;
     const endedPayload: Partial<LiveStream> = {
       status: 'ended',
       endedAt: new Date().toISOString(),
-      ...(byAdmin
-        ? {
-            cancelledByAdmin: true,
-            cancelReason: cleanReason || 'এডমিন নীতিমালার কারণে লাইভটি বাতিল করা হয়েছে',
-          }
-        : {}),
     };
     try {
       await updateDocument('live_streams', liveId, endedPayload);
@@ -1794,39 +1483,9 @@ export default function App() {
       if (currentLiveStreamId === liveId) {
         setCurrentLiveStreamId(null);
       }
-      if (byAdmin) {
-        await addDocument(`live_streams/${liveId}/chat`, {
-          userId: currentUserRef.current.id || 'admin',
-          userName: currentUserRef.current.name || 'Admin',
-          userAvatar: currentUserRef.current.avatar || '',
-          text: cleanReason
-            ? `🛑 এডমিন লাইভটি ক্যানসেল করেছেন (${cleanReason})`
-            : '🛑 এডমিন এই লাইভ সেশনটি ক্যানসেল করেছেন',
-          type: 'system',
-          createdAt: new Date().toISOString(),
-        }).catch(() => {});
-
-        if (targetStream?.hostId) {
-          sendNotification(
-            targetStream.hostId,
-            '🛑 লাইভ ক্যানসেল করা হয়েছে',
-            cleanReason
-              ? `আপনার "${targetStream.title}" লাইভটি এডমিন ক্যানসেল করেছেন। কারণ: ${cleanReason}`
-              : `আপনার "${targetStream.title}" লাইভটি এডমিন ক্যানসেল করেছেন।`,
-            'general'
-          );
-        }
-        showToast(lang === 'bn' ? '🛑 লাইভ সেশনটি এডমিন দ্বারা ক্যানসেল করা হয়েছে।' : '🛑 Live session cancelled by Admin.');
-      } else {
-        showToast(lang === 'bn' ? '🛑 আপনার লাইভ সেশনটি শেষ হয়েছে।' : '🛑 Live session ended.');
-      }
+      showToast(lang === 'bn' ? '🛑 আপনার লাইভ সেশনটি শেষ হয়েছে।' : '🛑 Live session ended.');
     } catch (err) {
       console.error('Failed to end live:', err);
-      showToast(
-        lang === 'bn'
-          ? '⚠️ লাইভ ক্যানসেল করতে এডমিন Google অ্যাকাউন্ট (mdmasudranabd80814@gmail.com) দিয়ে লগইন থাকা প্রয়োজন!'
-          : '⚠️ Admin Google login required to cancel live!'
-      );
       throw err;
     }
   };
@@ -1894,230 +1553,30 @@ export default function App() {
     }
   };
 
-  // Switch User Profile (legacy, can be removed or simplified)
-  const handleSwitchUser = (updatedUser: User) => {
-    updateDocument('users', updatedUser.id, updatedUser);
-  };
-
   const handleUpdateUser = async (updatedUser: User) => {
     setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
     if (currentUser.id === updatedUser.id) {
       setCurrentUser(updatedUser);
     }
     try {
-      await updateDocument('users', updatedUser.id, updatedUser);
+      await Promise.all([
+        updateDocument('users', updatedUser.id, updatedUser),
+        updateDocument('public_profiles', updatedUser.id, toPublicProfile(updatedUser)).catch(() => {}),
+      ]);
     } catch (err) {
       console.warn('Firestore update user note:', err);
     }
-    showToast(lang === 'bn' ? '✅ ইউজার প্রোফাইল সফলভাবে আপডেট করা হয়েছে!' : '✅ User profile updated!');
+    showToast(lang === 'bn' ? '✅ প্রোফাইল সফলভাবে আপডেট করা হয়েছে!' : '✅ Profile updated!');
   };
 
-  const handleDeleteUser = async (userId: string, userName: string) => {
-    setUsers((prev) => prev.filter((u) => u.id !== userId));
-    try {
-      await deleteDocument('users', userId);
-    } catch (err) {
-      console.warn('Firestore delete user note:', err);
-    }
-    showToast(lang === 'bn' ? `🗑️ ${userName} কে সফলভাবে রিমুভ করা হয়েছে!` : `🗑️ ${userName} removed!`);
-  };
-
-  const handleUpdatePaymentNumbers = (nums: { bKash: string; Nagad: string; Rocket: string }) => {
-    setAdminPaymentNumbers(nums);
-    try {
-      localStorage.setItem('rt_payment_numbers', JSON.stringify(nums));
-    } catch (e) {
-      console.warn(e);
-    }
-    showToast(lang === 'bn' ? '✅ পেমেন্ট নম্বর সফলভাবে সংরক্ষিত হয়েছে!' : '✅ Payment numbers saved!');
-  };
-
-  const handleUpdateMinWithdrawal = (amt: number) => {
-    setMinWithdrawal(amt);
-    try {
-      localStorage.setItem('rt_min_withdrawal', String(amt));
-    } catch (e) {
-      console.warn(e);
-    }
-    showToast(lang === 'bn' ? `✅ সর্বনিম্ন ক্যাশআউট ৳${amt} নির্ধারণ করা হয়েছে!` : `✅ Min withdrawal set to ৳${amt}!`);
-  };
-
-  const handleUpdateSpinMaxPrize = (val: number) => {
-    setSpinMaxPrize(val);
-    try {
-      localStorage.setItem('rt_spin_max', String(val));
-    } catch (e) {}
-    showToast(lang === 'bn' ? `✅ স্পিন হুইল সর্বোচ্চ পুরস্কার ${toBengaliNumber(val, lang)} পয়েন্ট সেভ করা হয়েছে!` : `✅ Spin wheel max reward set to ${val} pts!`);
-  };
-
-  const handleUpdateScratchPrize = (val: number) => {
-    setScratchPrize(val);
-    try {
-      localStorage.setItem('rt_scratch_prize', String(val));
-    } catch (e) {}
-    showToast(lang === 'bn' ? `✅ স্ক্র্যাচ কার্ড পুরস্কার ${toBengaliNumber(val, lang)} পয়েন্ট সেভ করা হয়েছে!` : `✅ Scratch card prize set to ${val} pts!`);
-  };
-
-  const handleSendDirectNotification = async (targetUserId: string, title: string, message: string) => {
-    // User requested: "এডমিন কোন ইউজারকে মেসেজ দিলে সেটা শুধু মেসেজ অপশনে দেখা যাবে নোটিফিকেশনে না"
-    // Deliver directly to the user's message/chat option (chats collection) ONLY, NOT to notifications collection
-    try {
-      const adminId = currentUser.id || 'admin';
-      const sessionId = [adminId, targetUserId].sort().join('_');
-      const now = new Date().toISOString();
-      const messageText = message.trim();
-
-      // Ensure chat session exists between admin and this user
-      const existingSession = await getDocument('chats', sessionId) as ChatSession | null;
-      if (!existingSession) {
-        await setDocument('chats', sessionId, {
-          id: sessionId,
-          participants: [adminId, targetUserId],
-          updatedAt: now,
-          lastMessage: messageText,
-          lastMessageTime: now,
-        });
-      } else {
-        await updateDocument('chats', sessionId, {
-          updatedAt: now,
-          lastMessage: messageText,
-          lastMessageTime: now,
-        });
-      }
-
-      // Add message into the chat session
-      await addDocument(`chats/${sessionId}/messages`, {
-        sessionId,
-        senderId: adminId,
-        text: messageText,
-        createdAt: now,
-        isHidden: false,
-      });
-
-      showToast(lang === 'bn' ? '✅ মেসেজটি সফলভাবে ইউজারের মেসেজ অপশনে পাঠানো হয়েছে!' : '✅ Message sent to user message inbox!');
-    } catch (err) {
-      console.error('Failed to send admin direct message:', err);
-      showToast(lang === 'bn' ? '❌ মেসেজ পাঠাতে সমস্যা হয়েছে' : '❌ Failed to send message');
-    }
-  };
-
-  const handleBroadcastNotification = async (title: string, message: string) => {
-    // Deliver broadcast directly to users' chat inbox (message option) without adding to notifications
-    try {
-      const adminId = currentUser.id || 'admin';
-      const now = new Date().toISOString();
-      const messageText = title ? `📢 [${title}]\n${message.trim()}` : message.trim();
-
-      for (const u of users) {
-        if (u.id && u.id !== adminId) {
-          const sessionId = [adminId, u.id].sort().join('_');
-          try {
-            const existingSession = await getDocument('chats', sessionId) as ChatSession | null;
-            if (!existingSession) {
-              await setDocument('chats', sessionId, {
-                id: sessionId,
-                participants: [adminId, u.id],
-                updatedAt: now,
-                lastMessage: messageText,
-                lastMessageTime: now,
-              });
-            } else {
-              await updateDocument('chats', sessionId, {
-                updatedAt: now,
-                lastMessage: messageText,
-                lastMessageTime: now,
-              });
-            }
-            await addDocument(`chats/${sessionId}/messages`, {
-              sessionId,
-              senderId: adminId,
-              text: messageText,
-              createdAt: now,
-              isHidden: false,
-            });
-          } catch (e) {
-            console.warn('Failed to send broadcast to user chat:', u.id, e);
-          }
-        }
-      }
-      showToast(lang === 'bn' ? `✅ সকল ${toBengaliNumber(users.length, lang)} জন ইউজারের মেসেজ অপশনে পাঠানো হয়েছে!` : `✅ Sent to message option of all ${users.length} users!`);
-    } catch (err) {
-      console.error('Failed to broadcast message:', err);
-    }
-  };
-
-  const handleUpdateRate = (newRate: number) => {
-    setPointRate(newRate);
-    try {
-      localStorage.setItem('rt_point_rate', String(newRate));
-    } catch (e) {
-      console.warn(e);
-    }
-  };
-
-  const handleUpdateAnnouncement = (text: string) => {
-    setAnnouncement(text);
-    try {
-      localStorage.setItem('rt_announcement', text);
-    } catch (e) {
-      console.warn(e);
-    }
-  };
-
-  const handleUpdateEarningSettings = async (newSettings: EarningSettings) => {
-    const normalizedSettings: EarningSettings = {
-      ...newSettings,
-      adminCommissionReceiverId:
-        newSettings.adminCommissionReceiverId ||
-        earningSettings.adminCommissionReceiverId ||
-        (currentUserRef.current.role === 'admin' && currentUserRef.current.id !== INITIAL_USER.id
-          ? currentUserRef.current.id
-          : ''),
-      loginOfferCampaignId:
-        newSettings.isLoginOfferEnabled && (newSettings.loginOfferPoints || 0) > 0
-          ? newSettings.loginOfferCampaignId || `offer_${Date.now()}`
-          : '',
-    };
-    setEarningSettings(normalizedSettings);
-    try {
-      localStorage.setItem('rt_earning_settings', JSON.stringify(normalizedSettings));
-    } catch (e) {
-      console.warn(e);
-    }
-    if (normalizedSettings.spinMaxPrize) {
-      setSpinMaxPrize(normalizedSettings.spinMaxPrize);
-    }
-    if (normalizedSettings.scratchCardPrize) {
-      setScratchPrize(normalizedSettings.scratchCardPrize);
-    }
-
-    try {
-      await setDocument('settings', 'earning', {
-        ...normalizedSettings,
-        id: 'earning',
-        updatedAt: new Date().toISOString(),
-      });
-    } catch (err) {
-      console.warn('Firestore setDocument settings/earning warning:', err);
-    }
-    showToast(lang === 'bn' ? '✅ আর্নিং ও অফার সেটিংস সফলভাবে সেভ করা হয়েছে!' : '✅ Earning settings saved successfully!');
-  };
-
-  const handleLogout = () => {
-    if (confirm(lang === 'bn' ? 'আপনি কি লগআউট করতে চান?' : 'Are you sure you want to log out?')) {
-      setIsAdminSession(false);
-      isAdminSessionRef.current = false;
-      try {
-        sessionStorage.removeItem('rt_admin_session');
-      } catch {}
-      firebaseLogout();
-      setActiveTab('home');
-      showToast(
-        lang === 'bn'
-          ? 'লগআউট সম্পন্ন হয়েছে। হোমপেজ সবার জন্য উন্মুক্ত!'
-          : 'Logged out. Homepage is open for everyone!'
-      );
-    }
+  const handleLogout = async () => {
+    await firebaseLogout();
+    setActiveTab('home');
+    showToast(
+      lang === 'bn'
+        ? 'সফলভাবে সাইন-আউট সম্পন্ন হয়েছে।'
+        : 'Signed out successfully.'
+    );
   };
 
   // Filtered and Sorted Reels
@@ -2140,8 +1599,36 @@ export default function App() {
     return result;
   })();
 
-  const isAdminQuery = window.location.search.includes('admin');
-  const loginMode = isAdminQuery ? 'admin' : 'user';
+  // MANDATORY SECURITY GATES: No user dashboard access without verified email
+  if (authLoading) {
+    return <FullPageLoader />;
+  }
+
+  if (!firebaseUser) {
+    return (
+      <AuthPage
+        onEmailLogin={loginWithEmail}
+        onEmailRegister={handleUserEmailRegister}
+        onGoogleLogin={handleUserGoogleLogin}
+        onResetPassword={resetPassword}
+        initialView="login"
+        lang={lang}
+      />
+    );
+  }
+
+  if (!emailVerified) {
+    return (
+      <EmailVerificationGate
+        email={firebaseUser.email || ''}
+        portal="user"
+        lang={lang}
+        onRefreshStatus={refreshVerificationStatus}
+        onResendEmail={resendVerificationEmail}
+        onLogout={firebaseLogout}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0a0f0d] text-slate-100 flex flex-col font-sans selection:bg-[#00c853] selection:text-black">
@@ -2155,20 +1642,15 @@ export default function App() {
 
       {/* Main Container constrained to Mobile/Tablet Frame */}
       <div className="w-full max-w-md mx-auto min-h-screen bg-[#0a120e] flex flex-col relative shadow-2xl border-x border-emerald-950/40">
-        {/* Header matching Screenshot 1 + BN | EN toggle + Auth Status */}
         <Header
           onOpenNotifications={() => setShowNotifications(true)}
-          isAdmin={currentUser.role === 'admin'}
-          onToggleAdmin={() => setActiveTab(activeTab === 'admin' ? 'home' : 'admin')}
           isMuted={isMuted}
           onToggleMute={() => setIsMuted(!isMuted)}
-          unreadAnnouncementsCount={1}
+          unreadAnnouncementsCount={personalNotifications.filter((n) => !n.read).length || 1}
           lang={lang}
           onToggleLang={toggleLang}
-          onSecretAdminTrigger={() => setShowAdminAuthModal(true)}
           isAuthenticated={isAuthenticated}
-          onOpenAuth={(view) => triggerAuthFlow(view || 'login')}
-          userPoints={isAuthenticated ? currentUser.points : 0}
+          userPoints={currentUser.points}
         />
 
         {/* Global Announcement Marquee Ticker */}
@@ -2185,58 +1667,10 @@ export default function App() {
           </div>
         )}
 
-        {/* Dynamic Body Content */}
+        {/* Dynamic Body Content (User Portal Only) */}
         <main className="flex-1 p-3.5 space-y-3.5">
           <Suspense fallback={<LoadingSpinner />}>
-            {activeTab === 'admin' ? (
-              /* ADMIN CONTROL PANEL */
-              <AdminPanel
-                users={users}
-                pointRate={pointRate}
-                onUpdateRate={handleUpdateRate}
-                announcement={announcement}
-                onUpdateAnnouncement={handleUpdateAnnouncement}
-                withdrawals={withdrawals}
-                onApproveWithdrawal={handleApproveWithdrawal}
-                onRejectWithdrawal={handleRejectWithdrawal}
-                depositRequests={depositRequests}
-                onApproveDeposit={handleApproveDeposit}
-                onRejectDeposit={handleRejectDeposit}
-                reels={reels}
-                onAddReel={handleAddNewReel}
-                onEditReel={(r) => setEditingReel(r)}
-                onDeleteReel={handleDeleteReel}
-                onGiveUserBonus={handleGiveUserBonus}
-                onUpdateUser={handleUpdateUser}
-                onDeleteUser={handleDeleteUser}
-                onExitAdmin={() => setActiveTab('home')}
-                currentUserUid={currentUser.id}
-                adminPaymentNumbers={adminPaymentNumbers}
-                onUpdatePaymentNumbers={handleUpdatePaymentNumbers}
-                minWithdrawal={minWithdrawal}
-                onUpdateMinWithdrawal={handleUpdateMinWithdrawal}
-                tasks={tasks}
-                onAddTask={handleAddTask}
-                onEditTask={handleEditTask}
-                onDeleteTask={handleDeleteTask}
-                spinMaxPrize={spinMaxPrize}
-                onUpdateSpinMaxPrize={handleUpdateSpinMaxPrize}
-                scratchCardPrize={scratchPrize}
-                onUpdateScratchPrize={handleUpdateScratchPrize}
-                onSendNotification={handleSendDirectNotification}
-                onBroadcastNotification={handleBroadcastNotification}
-                earningSettings={earningSettings}
-                onUpdateEarningSettings={handleUpdateEarningSettings}
-                onQuickUpdateReel={handleUpdateReel}
-                onInspectLive={(liveId) => {
-                  setCurrentLiveStreamId(liveId);
-                  setShowLiveSheet(true);
-                }}
-                onCancelLive={(liveId, reason) => handleEndLive(liveId, true, reason)}
-              />
-            ) : (
-              /* USER INTERFACE WITH TABS */
-              <>
+            <>
                 {activeTab === 'home' && (
                   <div className="space-y-3.5 pb-20">
                     {/* TOP STORIES / LIVE STREAMERS BAR (Always visible for fast live discovery) */}
@@ -2626,14 +2060,6 @@ export default function App() {
                                   onOpenComments={(r) => setActiveCommentReel(r)}
                                   onClaimDirect={handleClaimDirect}
                                   onOpenGift={() => {
-                                    if (!isAuthenticated) {
-                                      triggerAuthPrompt(
-                                        lang === 'bn'
-                                          ? 'উপহার পাঠাতে এবং গিফট বোনাস পেতে লগইন বা রেজিস্ট্রেশন করুন!'
-                                          : 'Login or register to send gifts!'
-                                      );
-                                      return;
-                                    }
                                     setGiftTarget({ userId: reel.userId, creatorName: reel.creatorName });
                                     setShowGiftSheet(true);
                                   }}
@@ -2644,6 +2070,8 @@ export default function App() {
                                   levelProgress={levelProgress}
                                   earningSettings={earningSettings}
                                   isDailyLimitReached={isDailyReelLimitReached}
+                                  isSaved={savedReelIds.includes(reel.id)}
+                                  onToggleSave={handleToggleSave}
                                 />
 
                                 {/* In-feed Live Recommendation Interstitial Card after 1st reel */}
@@ -2742,115 +2170,80 @@ export default function App() {
                 )}
 
                 {activeTab === 'earn' && (
-                  isAuthenticated ? (
-                    <EarnView
-                      user={currentUser}
-                      tasks={tasks}
-                      onCompleteTask={handleCompleteTask}
-                      onAddPoints={handleAddPointsGeneral}
-                      isMuted={isMuted}
-                      spinPrizes={[10, 25, 50, 15, spinMaxPrize, 30, 20, Math.round(spinMaxPrize * 0.4)]}
-                      scratchPrize={scratchPrize}
-                      earningSettings={earningSettings}
-                    />
-                  ) : (
-                    <GuestEarnView
-                      onLogin={() => triggerAuthFlow('login')}
-                      onRegister={() => triggerAuthFlow('register')}
-                      lang={lang}
-                      earningSettings={earningSettings}
-                    />
-                  )
+                  <EarnView
+                    user={currentUser}
+                    tasks={tasks}
+                    onCompleteTask={handleCompleteTask}
+                    onAddPoints={handleAddPointsGeneral}
+                    isMuted={isMuted}
+                    spinPrizes={[10, 25, 50, 15, spinMaxPrize, 30, 20, Math.round(spinMaxPrize * 0.4)]}
+                    scratchPrize={scratchPrize}
+                    earningSettings={earningSettings}
+                  />
                 )}
 
                 {activeTab === 'wallet' && (
-                  isAuthenticated ? (
-                    <WalletView
-                      user={currentUser}
-                      pointRate={pointRate}
-                      withdrawals={withdrawals}
-                      onRequestWithdrawal={handleRequestWithdrawal}
-                      onDepositClick={() => setShowDepositSheet(true)}
-                      isMuted={isMuted}
-                      minWithdrawal={minWithdrawal}
-                    />
-                  ) : (
-                    <GuestWalletView
-                      pointRate={pointRate}
-                      onLogin={() => triggerAuthFlow('login')}
-                      onRegister={() => triggerAuthFlow('register')}
-                      lang={lang}
-                    />
-                  )
+                  <WalletView
+                    user={currentUser}
+                    pointRate={pointRate}
+                    withdrawals={withdrawals}
+                    onRequestWithdrawal={handleRequestWithdrawal}
+                    onDepositClick={() => setShowDepositSheet(true)}
+                    isMuted={isMuted}
+                    minWithdrawal={minWithdrawal}
+                  />
                 )}
 
                 {activeTab === 'profile' && (
-                  isAuthenticated ? (
-                    <ProfileView
-                      user={currentUser}
-                      pointRate={pointRate}
-                      onLogout={handleLogout}
-                      onSwitchUser={handleUpdateUser}
-                      onClaimDailyBonus={handleClaimDailyBonus}
-                      isClaimedToday={isClaimedToday}
-                      isMuted={isMuted}
-                      isAuthenticated={isAuthenticated}
-                      onRequireAuth={triggerAuthPrompt}
-                      lang={lang}
-                      setShowGiftSheet={setShowGiftSheet}
-                      setShowLiveSheet={setShowLiveSheet}
-                      onOpenPersonalLive={(mode) => openPersonalLiveStudio(mode || 'audio')}
-                      activeMyLive={activeLiveStreams.find((s) => s.hostId === currentUser.id) || null}
-                      onManageMyLive={(liveId) => {
-                        setCurrentLiveStreamId(liveId);
-                        setShowLiveSheet(true);
-                      }}
-                      onEndMyLive={handleEndLive}
-                      reels={reels}
-                      onOpenReel={(r) => setFullScreenReelId(r.id)}
-                      onEditReel={(r) => setEditingReel(r)}
-                      onDeleteReel={handleDeleteReel}
-                      onOpenChatList={() => setIsChatListModalOpen(true)}
-                      onOpenFollowList={(tab) => setFollowListModal({ user: currentUser, tab })}
-                      onOpenWallet={() => setActiveTab('wallet')}
-                      minWithdrawal={minWithdrawal}
-                      earningSettings={earningSettings}
-                    />
-                  ) : (
-                    <GuestProfileView
-                      onLogin={() => triggerAuthFlow('login')}
-                      onRegister={() => triggerAuthFlow('register')}
-                      lang={lang}
-                    />
-                  )
+                  <ProfileView
+                    user={currentUser}
+                    pointRate={pointRate}
+                    onLogout={handleLogout}
+                    onSwitchUser={handleUpdateUser}
+                    onClaimDailyBonus={handleClaimDailyBonus}
+                    isClaimedToday={isClaimedToday}
+                    isMuted={isMuted}
+                    isAuthenticated={isAuthenticated}
+                    onRequireAuth={() => {}}
+                    lang={lang}
+                    setShowGiftSheet={setShowGiftSheet}
+                    setShowLiveSheet={setShowLiveSheet}
+                    onOpenPersonalLive={(mode) => openPersonalLiveStudio(mode || 'audio')}
+                    activeMyLive={activeLiveStreams.find((s) => s.hostId === currentUser.id) || null}
+                    onManageMyLive={(liveId) => {
+                      setCurrentLiveStreamId(liveId);
+                      setShowLiveSheet(true);
+                    }}
+                    onEndMyLive={handleEndLive}
+                    reels={reels}
+                    onOpenReel={(r) => setFullScreenReelId(r.id)}
+                    onEditReel={(r) => setEditingReel(r)}
+                    onDeleteReel={handleDeleteReel}
+                    onOpenChatList={() => setIsChatListModalOpen(true)}
+                    onOpenFollowList={(tab) => setFollowListModal({ user: currentUser, tab })}
+                    onOpenWallet={() => setActiveTab('wallet')}
+                    minWithdrawal={minWithdrawal}
+                    earningSettings={earningSettings}
+                    savedReelIds={savedReelIds}
+                    onToggleSave={handleToggleSave}
+                    onNavigateToHome={() => setActiveTab('home')}
+                  />
                 )}
-              </>
-            )}
+            </>
           </Suspense>
         </main>
 
-        {/* Bottom Navigation matching Screenshots 1 & 2 */}
+        {/* Bottom Navigation */}
         <BottomNav
           activeTab={activeTab}
           onChangeTab={(t) => setActiveTab(t)}
-          onOpenCreate={() => {
-            if (!isAuthenticated) {
-              triggerAuthPrompt(
-                lang === 'bn'
-                  ? 'নতুন রিল তৈরি বা আপলোড করতে লগইন বা রেজিস্ট্রেশন করুন!'
-                  : 'Login or register to create or upload reels!'
-              );
-              return;
-            }
-            setShowPlusSheet(true);
-          }}
+          onOpenCreate={() => setShowPlusSheet(true)}
           lang={lang}
-          isAdmin={currentUser.role === 'admin'}
         />
 
         {/* Modals & Sheets wrapped in Suspense */}
         <Suspense fallback={null}>
-          {/* Full-Screen Immersive Reel Player Modal matching Screenshot 2 */}
+          {/* Full-Screen Immersive Reel Player Modal */}
           {fullScreenReelId && (
             <FullScreenReelModal
               reels={reels}
@@ -2861,14 +2254,6 @@ export default function App() {
               onOpenComments={(r) => setActiveCommentReel(r)}
               onRewardEarned={handleEarnReelReward}
               onOpenGiftSheet={() => {
-                if (!isAuthenticated) {
-                  triggerAuthPrompt(
-                    lang === 'bn'
-                      ? 'উপহার পাঠাতে এবং গিফট বোনাস পেতে লগইন বা রেজিস্ট্রেশন করুন!'
-                      : 'Login or register to send gifts!'
-                  );
-                  return;
-                }
                 const targetReel = reels.find((r) => r.id === fullScreenReelId);
                 if (targetReel) {
                   setGiftTarget({ userId: targetReel.userId, creatorName: targetReel.creatorName });
@@ -2900,8 +2285,10 @@ export default function App() {
               dailyPointsLimit={dailyPointsLimit}
               onToggleFollow={handleToggleFollow}
               followingIds={currentUser.following || []}
+              savedReelIds={savedReelIds}
+              onToggleSave={handleToggleSave}
               onOpenChatWithCreator={async (creatorId) => {
-                const known = users.find((u) => u.id === creatorId) || (await getDocument('users', creatorId) as User | null);
+                const known = users.find((u) => u.id === creatorId) || (await getDocument('public_profiles', creatorId) as User | null);
                 if (known) {
                   setFullScreenReelId(null);
                   handleOpenChat(known);
@@ -2939,25 +2326,11 @@ export default function App() {
             />
           )}
 
-            {showNotifications && (
+          {showNotifications && (
             <NotificationModal
               announcement={announcement}
               personalNotifications={personalNotifications}
               onClose={() => setShowNotifications(false)}
-            />
-          )}
-
-          {/* Admin Login Modal (password: admin123) */}
-          {showAdminAuthModal && (
-            <AdminLoginModal
-              onSuccess={() => {
-                setShowAdminAuthModal(false);
-                handleAdminLoginFlow('admin123');
-              }}
-              onClose={() => setShowAdminAuthModal(false)}
-              isFirebaseSignedIn={Boolean(firebaseUser)}
-              signedInEmail={firebaseUser?.email || ''}
-              onGoogleLogin={loginWithGoogle}
             />
           )}
 
@@ -3025,14 +2398,6 @@ export default function App() {
               isOpen={showLiveSheet}
               onClose={() => setShowLiveSheet(false)}
               onOpenGift={(stream) => {
-                if (!isAuthenticated) {
-                  triggerAuthPrompt(
-                    lang === 'bn'
-                      ? 'লাইভে গিফট পাঠাতে লগইন বা রেজিস্ট্রেশন করুন!'
-                      : 'Login or register to send live gifts!'
-                  );
-                  return;
-                }
                 setGiftTarget({
                   userId: stream.hostId,
                   liveId: stream.id,
@@ -3049,16 +2414,11 @@ export default function App() {
               liveStreamId={currentLiveStreamId}
               currentUser={currentUser}
               isAuthenticated={isAuthenticated}
-              onRequireAuth={triggerAuthPrompt}
+              onRequireAuth={() => {}}
               onEndLive={handleEndLive}
               onOpenProfile={handleOpenUserProfile}
               onToggleFollow={handleToggleFollow}
-              isAdminOverride={
-                activeTab === 'admin' ||
-                isAdminSession ||
-                currentUser.role === 'admin' ||
-                firebaseUser?.email === 'mdmasudranabd80814@gmail.com'
-              }
+              isAdminOverride={false}
               isFollowingHost={Boolean(
                 (() => {
                   const activeLive = activeLiveStreams.find((s) => s.id === currentLiveStreamId);
@@ -3107,35 +2467,6 @@ export default function App() {
             lang={lang}
             onSendInChat={handleShareInChat}
             onDownloadReel={(r) => downloadReelVideo(r, lang)}
-          />
-
-          {/* Auth Page Modal Overlay */}
-          {showAuthModal && (
-            <div className="fixed inset-0 z-50 overflow-y-auto bg-black/95 flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-200">
-              <div className="w-full max-w-sm relative">
-                <AuthPage
-                  onLogin={handleLogin}
-                  onRegister={handleRegister}
-                  onAdminLogin={handleAdminLoginFlow}
-                  mode={loginMode}
-                  onClose={() => setShowAuthModal(false)}
-                  initialView={authModalView}
-                  reasonMessage={authModalReason}
-                  lang={lang}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Quick Auth Prompt Modal for Earning Actions */}
-          <AuthPromptModal
-            isOpen={showAuthPrompt}
-            onClose={() => setShowAuthPrompt(false)}
-            onOpenLogin={() => triggerAuthFlow('login')}
-            onOpenRegister={() => triggerAuthFlow('register')}
-            message={authPromptMessage}
-            lang={lang}
-            earningSettings={earningSettings}
           />
 
           {/* User Profile Modal */}

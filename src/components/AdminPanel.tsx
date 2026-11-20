@@ -114,6 +114,7 @@ export interface AdminPanelProps {
   onQuickUpdateReel?: (reelId: string, updatedData: Partial<Reel>) => void;
   onInspectLive?: (liveId: string) => void;
   onCancelLive?: (liveId: string, reason?: string) => void;
+  isAuthorizedAdmin?: boolean;
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
@@ -156,6 +157,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onQuickUpdateReel,
   onInspectLive,
   onCancelLive,
+  isAuthorizedAdmin = false,
 }) => {
   // Navigation Tabs inside Admin Panel
   const [activeAdminTab, setActiveAdminTab] = useState<'overview' | 'reels' | 'users' | 'earning' | 'live' | 'settings' | 'withdrawals' | 'deposits' | 'chats' | 'tasks'>('reels');
@@ -208,8 +210,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const isAdminFirebaseAuthed = Boolean(
     adminFirebaseUser &&
-      (adminFirebaseUser.email?.toLowerCase() === 'mdmasudranabd80814@gmail.com' ||
-        adminFirebaseUser.uid === 'system_admin')
+      adminFirebaseUser.emailVerified &&
+      (isAuthorizedAdmin ||
+        adminFirebaseUser.email?.toLowerCase() === 'mdmasudranabd80814@gmail.com')
   );
 
   const showLiveFeedback = (msg: string) => {
@@ -321,7 +324,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     return reels.filter(
       (r) =>
         r.userId === u.id ||
-        (u.id === 'usr_bd_01' && r.userId === 'usr_bd_01') ||
         (r.creatorName && u.name && r.creatorName.trim().toLowerCase() === u.name.trim().toLowerCase() && u.name !== 'নতুন ইউজার')
     );
   };
@@ -571,10 +573,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
         <button
           onClick={onExitAdmin}
-          className="px-3 py-1.5 rounded-xl bg-blue-900/70 hover:bg-blue-800 border border-blue-700/60 text-xs font-bold text-white transition flex items-center gap-1.5 cursor-pointer shadow-md"
+          className="px-3 py-1.5 rounded-xl bg-rose-950/70 hover:bg-rose-800 border border-rose-700/60 text-xs font-bold text-white transition flex items-center gap-1.5 cursor-pointer shadow-md"
         >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          <span>ইউজার মোড</span>
+          <LogOut className="w-3.5 h-3.5" />
+          <span>লগআউট</span>
         </button>
       </div>
 
@@ -3589,10 +3591,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* Exit Admin Button */}
       <button
         onClick={onExitAdmin}
-        className="w-full py-3 rounded-2xl bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-lg"
+        className="w-full py-3 rounded-2xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-800/50 text-rose-200 text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-lg"
       >
         <LogOut className="w-4 h-4" />
-        <span>এডমিন প্যানেল বন্ধ করুন ও ইউজার ভিউতে যান</span>
+        <span>এডমিন প্যানেল থেকে সাইন আউট করুন</span>
       </button>
 
       {/* Global Confirmation Modal */}

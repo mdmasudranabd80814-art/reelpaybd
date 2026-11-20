@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Search, MessageCircle, ChevronRight, Loader2, MessageSquareOff } from 'lucide-react';
 import { ChatSession, User } from '../types';
 import { useFirebase } from '../hooks/useFirebase';
-import { orderBy, where } from 'firebase/firestore';
+import { where } from 'firebase/firestore';
 
 interface ChatListModalProps {
   isOpen: boolean;
@@ -25,24 +25,61 @@ export const ChatListModal: React.FC<ChatListModalProps> = ({
 }) => {
   const { user: firebaseUser, onSnapshot, getDocument } = useFirebase();
   const [sessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [extraProfiles, setExtraProfiles] = useState<Record<string, User>>({});
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    if (!isOpen || !firebaseUser) {
+    if (!isOpen || !firebaseUser || !firebaseUser.emailVerified) {
       setLoading(false);
       return;
     }
     setLoading(true);
-    // Query sessions where currentUser.id is in participants
+    // Query only sessions where currentUser.id is a participant (enforced by Firestore rules)
     const unsub = onSnapshot('chats', (data) => {
-      const mySessions = (data as ChatSession[]).filter(s => s.participants.includes(currentUser.id));
+      const mySessions = (data as ChatSession[]).filter(s => Array.isArray(s.participants) && s.participants.includes(currentUser.id));
       setChatSessions(mySessions.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()));
       setLoading(false);
-    }, [orderBy('updatedAt', 'desc')]);
+    }, [where('participants', 'array-contains', currentUser.id)]);
 
     return unsub;
   }, [isOpen, currentUser.id, firebaseUser]);
+
+  useEffect(() => {
+    if (!isOpen || sessions.length === 0) return;
+    let cancelled = false;
+    const missingIds = Array.from(
+      new Set(
+        sessions
+          .map((s) => s.participants.find((id) => id !== currentUser.id))
+          .filter((id): id is string => Boolean(id && !users.some((u) => u.id === id) && !extraProfiles[id]))
+      )
+    );
+    if (missingIds.length === 0) return;
+
+    Promise.all(
+      missingIds.slice(0, 20).map(async (uid) => {
+        try {
+          const prof = (await getDocument('public_profiles', uid)) as User | null;
+          return prof ? [uid, prof] : null;
+        } catch {
+          return null;
+        }
+      })
+    ).then((entries) => {
+      if (cancelled) return;
+      const next: Record<string, User> = {};
+      entries.forEach((entry) => {
+        if (entry) next[entry[0] as string] = entry[1] as User;
+      });
+      if (Object.keys(next).length > 0) {
+        setExtraProfiles((prev) => ({ ...prev, ...next }));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, sessions, currentUser.id, users, getDocument]);
 
   if (!isOpen) return null;
 
@@ -110,10 +147,10 @@ export const ChatListModal: React.FC<ChatListModalProps> = ({
             <div className="space-y-1">
               {sessions.map((session) => {
                 const otherUserId = session.participants.find(id => id !== currentUser.id);
-                let otherUser = users.find(u => u.id === otherUserId);
+                let otherUser = users.find(u => u.id === otherUserId) || (otherUserId ? extraProfiles[otherUserId] : undefined);
                 
                 if (!otherUser) {
-                  const isAdminUser = otherUserId === 'admin' || otherUserId?.includes('admin') || otherUserId === 'system_admin';
+                  const isAdminUser = otherUserId === 'admin' || otherUserId?.includes('admin');
                   otherUser = {
                     id: otherUserId || 'admin',
                     name: isAdminUser ? (lang === 'bn' ? '👑 ReelPay এডমিন (অফিসিয়াল)' : '👑 ReelPay Admin') : (lang === 'bn' ? 'ব্যবহারকারী' : 'User'),
@@ -130,7 +167,11 @@ export const ChatListModal: React.FC<ChatListModalProps> = ({
                   };
                 }
 
-                const isAdminPartner = otherUser.role === 'admin' || otherUserId === 'admin' || otherUserId === 'system_admin';
+                if (searchTerm.trim() && !(otherUser.name || '').toLowerCase().includes(searchTerm.trim().toLowerCase())) {
+                  return null;
+                }
+
+                const isAdminPartner = otherUser.role === 'admin' || otherUserId === 'admin';
 
                 return (
                   <button

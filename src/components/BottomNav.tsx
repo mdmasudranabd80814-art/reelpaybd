@@ -1,13 +1,12 @@
-import { Home, Sparkles, Wallet, User as UserIcon, Plus, Settings } from 'lucide-react';
+import { Home, Sparkles, Wallet, User as UserIcon, Plus } from 'lucide-react';
 
-export type TabType = 'home' | 'earn' | 'wallet' | 'profile' | 'admin';
+export type TabType = 'home' | 'earn' | 'wallet' | 'profile';
 
 interface BottomNavProps {
   activeTab: TabType;
   onChangeTab: (tab: TabType) => void;
   onOpenCreate: () => void;
   lang?: 'bn' | 'en';
-  isAdmin?: boolean;
 }
 
 export const BottomNav: React.FC<BottomNavProps> = ({
@@ -15,7 +14,6 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   onChangeTab,
   onOpenCreate,
   lang = 'bn',
-  isAdmin = false,
 }) => {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-[#09110d]/95 backdrop-blur-md border-t border-emerald-950/60 max-w-md mx-auto">

@@ -319,6 +319,51 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "isMasterEarningEnabled", "isVideoWatchEarningEnabled", "videoWatchDurationSeconds"]
+    },
+    "PublicProfile": {
+      "title": "PublicProfile",
+      "description": "Non-PII public creator profile for discovery, follow, and chat headers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 100 },
+        "avatar": { "type": "string" },
+        "isVerified": { "type": "boolean" },
+        "referralCode": { "type": "string", "maxLength": 20 },
+        "followersCount": { "type": "number" },
+        "followingCount": { "type": "number" },
+        "followers": { "type": "array", "items": { "type": "string" }, "maxItems": 1000 },
+        "following": { "type": "array", "items": { "type": "string" }, "maxItems": 1000 },
+        "reelsWatchedCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "createdAt"]
+    },
+    "TaskItem": {
+      "title": "TaskItem",
+      "description": "Admin-managed reward task",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "maxLength": 160 },
+        "rewardPoints": { "type": "number" },
+        "category": { "type": "string", "maxLength": 60 },
+        "iconName": { "type": "string", "maxLength": 60 },
+        "completed": { "type": "boolean" },
+        "actionUrl": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "rewardPoints", "category"]
+    },
+    "AdminDoc": {
+      "title": "AdminDoc",
+      "description": "Server-managed administrator registry document",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email"]
     }
   },
   "firestore": {
@@ -328,7 +373,11 @@
     },
     "users/{userId}": {
       "schema": "User",
-      "description": "User profile documents"
+      "description": "Private user profile and PII documents (owner and verified admin only)"
+    },
+    "public_profiles/{userId}": {
+      "schema": "PublicProfile",
+      "description": "Non-PII public creator profiles for verified users"
     },
     "users/{userId}/notifications/{notificationId}": {
       "schema": "Notification",
@@ -377,6 +426,14 @@
     "chats/{sessionId}/messages/{messageId}": {
       "schema": "ChatMessage",
       "description": "Messages within a session"
+    },
+    "tasks/{taskId}": {
+      "schema": "TaskItem",
+      "description": "Reward tasks managed by verified admins"
+    },
+    "admins/{adminId}": {
+      "schema": "AdminDoc",
+      "description": "Verified administrator allowlist (read-only by self/admin)"
     }
   }
 }
