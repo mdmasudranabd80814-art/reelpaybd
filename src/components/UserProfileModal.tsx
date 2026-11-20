@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, MessageCircle, Video, ShieldCheck, Check, UserPlus, Users } from 'lucide-react';
+import { X, MessageCircle, Video, ShieldCheck, Check, UserPlus, Users, Lock } from 'lucide-react';
 import { User, Reel } from '../types';
 import { toBengaliNumber } from '../utils/bengali';
 import { getUserLevel } from '../utils/levels';
@@ -16,6 +16,7 @@ interface UserProfileModalProps {
   onToggleFollow?: (userId: string, creatorName?: string) => void;
   isFollowing?: boolean;
   onOpenFollowList?: (tab: 'followers' | 'following') => void;
+  isDirectChatEnabled?: boolean;
 }
 
 export const UserProfileModal: React.FC<UserProfileModalProps> = ({
@@ -30,6 +31,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   onToggleFollow,
   isFollowing = false,
   onOpenFollowList,
+  isDirectChatEnabled = true,
 }) => {
   const currentLevel = getUserLevel(user.reelsWatchedCount || 0);
   const userReels = allReels.filter(r => r.userId === user.id);
@@ -102,7 +104,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               )}
 
               <button
+                type="button"
+                disabled={!isDirectChatEnabled}
                 onClick={() => {
+                  if (!isDirectChatEnabled) return;
                   if (!isSelf) {
                     onOpenChat(user);
                   } else if (onOpenChatList) {
@@ -112,13 +117,19 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     onClose();
                   }
                 }}
-                className={`py-3 bg-[#132219] hover:bg-[#1a2f22] text-emerald-400 border border-emerald-500/40 font-black text-xs rounded-2xl flex items-center justify-center gap-1.5 shadow-md active:scale-95 transition cursor-pointer ${
+                className={`py-3 font-black text-xs rounded-2xl flex items-center justify-center gap-1.5 shadow-md transition ${
                   !isSelf ? 'flex-1' : 'w-full'
+                } ${
+                  isDirectChatEnabled
+                    ? 'bg-[#132219] hover:bg-[#1a2f22] text-emerald-400 border border-emerald-500/40 active:scale-95 cursor-pointer'
+                    : 'bg-neutral-900 text-neutral-500 border border-neutral-800 cursor-not-allowed'
                 }`}
               >
-                <MessageCircle className="w-4 h-4 fill-current" />
+                {isDirectChatEnabled ? <MessageCircle className="w-4 h-4 fill-current" /> : <Lock className="w-4 h-4" />}
                 <span>
-                  {!isSelf
+                  {!isDirectChatEnabled
+                    ? (lang === 'bn' ? 'চ্যাট বন্ধ রয়েছে' : 'Chat Paused')
+                    : !isSelf
                     ? (lang === 'bn' ? 'মেসেজ পাঠান' : 'Send Message')
                     : (lang === 'bn' ? 'আমার ইনবক্স' : 'My Inbox')}
                 </span>

@@ -88,6 +88,7 @@ interface LiveStreamSheetProps {
   isFollowingHost?: boolean;
   isAdminOverride?: boolean;
   initialStream?: LiveStream | null;
+  isGiftsEnabled?: boolean;
 }
 
 const RTC_CONFIG: RTCConfiguration = {
@@ -132,6 +133,7 @@ export const LiveStreamSheet: React.FC<LiveStreamSheetProps> = ({
   isFollowingHost = false,
   isAdminOverride = false,
   initialStream = null,
+  isGiftsEnabled = true,
 }) => {
   const {
     user: firebaseUser,
@@ -1890,7 +1892,7 @@ export const LiveStreamSheet: React.FC<LiveStreamSheetProps> = ({
             )}
 
             {/* QUICK GIFT TRAY */}
-            {!isHost && !isAdminView && showQuickGifts && stream && (
+            {!isHost && !isAdminView && isGiftsEnabled && showQuickGifts && stream && (
               <div className="mb-2 p-2 rounded-2xl bg-black/80 backdrop-blur-md border border-amber-500/35 flex items-center gap-2 overflow-x-auto no-scrollbar animate-in fade-in shrink-0">
                 {GIFTS_LIST.map((gift) => (
                   <button
@@ -2057,14 +2059,16 @@ export const LiveStreamSheet: React.FC<LiveStreamSheetProps> = ({
                   </>
                 ) : !isHost ? (
                   <>
-                    <button
-                      type="button"
-                      onClick={() => setShowQuickGifts((v) => !v)}
-                      className="flex-1 min-h-[46px] rounded-xl bg-gradient-to-r from-[#ff2d55] to-amber-500 hover:brightness-110 text-white text-xs font-extrabold transition flex items-center justify-center gap-1.5 shadow-lg cursor-pointer active:scale-[0.98]"
-                    >
-                      <Gift className="w-4 h-4" />
-                      <span>{lang === 'bn' ? 'গিফট পাঠান' : 'Send Gift'}</span>
-                    </button>
+                    {isGiftsEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => setShowQuickGifts((v) => !v)}
+                        className="flex-1 min-h-[46px] rounded-xl bg-gradient-to-r from-[#ff2d55] to-amber-500 hover:brightness-110 text-white text-xs font-extrabold transition flex items-center justify-center gap-1.5 shadow-lg cursor-pointer active:scale-[0.98]"
+                      >
+                        <Gift className="w-4 h-4" />
+                        <span>{lang === 'bn' ? 'গিফট পাঠান' : 'Send Gift'}</span>
+                      </button>
+                    )}
 
                     {stream && onShare && (
                       <button

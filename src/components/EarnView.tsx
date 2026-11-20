@@ -53,10 +53,16 @@ export const EarnView: React.FC<EarnViewProps> = ({
 
   // Scratch card state
   const [isScratched, setIsScratched] = useState(false);
+  const [noticeMsg, setNoticeMsg] = useState<string | null>(null);
+
+  const showNotice = (msg: string) => {
+    setNoticeMsg(msg);
+    setTimeout(() => setNoticeMsg(null), 2600);
+  };
 
   const handleSpinWheel = () => {
     if (!isSpinOn) {
-      alert('স্পিন হুইল বর্তমানে বন্ধ রয়েছে।');
+      showNotice('স্পিন হুইল বর্তমানে বন্ধ রয়েছে।');
       return;
     }
     if (spinning) return;
@@ -92,7 +98,7 @@ export const EarnView: React.FC<EarnViewProps> = ({
 
   const handleScratch = () => {
     if (!isScratchOn) {
-      alert('স্ক্র্যাচ কার্ড বর্তমানে বন্ধ রয়েছে।');
+      showNotice('স্ক্র্যাচ কার্ড বর্তমানে বন্ধ রয়েছে।');
       return;
     }
     if (isScratched) return;
@@ -120,6 +126,11 @@ export const EarnView: React.FC<EarnViewProps> = ({
 
   return (
     <div className="space-y-4 pb-20">
+      {noticeMsg && (
+        <div className="rounded-xl bg-amber-950/90 border border-amber-500/40 px-3.5 py-2 text-xs font-bold text-amber-200 text-center">
+          ⚠️ {noticeMsg}
+        </div>
+      )}
       {/* Banner */}
       <div className="rounded-2xl bg-gradient-to-r from-emerald-950 via-[#102419] to-emerald-900/60 p-4 border border-emerald-900/60 shadow-lg text-white">
         <div className="flex items-center justify-between mb-1">

@@ -23,6 +23,8 @@ interface ReelFeedCardProps {
   isDailyLimitReached?: boolean;
   isSaved?: boolean;
   onToggleSave?: (reelId: string) => void;
+  isGiftsEnabled?: boolean;
+  isCommentsEnabled?: boolean;
 }
 
 export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
@@ -43,6 +45,8 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
   isDailyLimitReached = false,
   isSaved = false,
   onToggleSave,
+  isGiftsEnabled = true,
+  isCommentsEnabled = true,
 }) => {
   const [isSpringing, setIsSpringing] = React.useState(false);
   const [isBookmarkSpringing, setIsBookmarkSpringing] = React.useState(false);
@@ -271,20 +275,22 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
         </button>
 
         {/* Comment */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpenComments(reel);
-          }}
-          className="flex flex-col items-center gap-0.5 text-slate-300 hover:text-white transition cursor-pointer"
-        >
-          <div className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-neutral-800/60 text-slate-200">
-            <MessageCircle className="w-4 h-4" />
-          </div>
-          <span className="text-[10px] font-medium text-slate-300">
-            {toBengaliNumber(reel.commentsCount, lang)}
-          </span>
-        </button>
+        {isCommentsEnabled && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenComments(reel);
+            }}
+            className="flex flex-col items-center gap-0.5 text-slate-300 hover:text-white transition cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-neutral-800/60 text-slate-200">
+              <MessageCircle className="w-4 h-4" />
+            </div>
+            <span className="text-[10px] font-medium text-slate-300">
+              {toBengaliNumber(reel.commentsCount, lang)}
+            </span>
+          </button>
+        )}
 
         {/* Bookmark / সেভ */}
         <button
@@ -336,21 +342,23 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
         </button>
 
         {/* Gift Button matching Prompt: 🎁 গিফট */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpenGift(reel);
-          }}
-          className="flex flex-col items-center gap-0.5 cursor-pointer"
-          title="গিফট পাঠান / Send Gift"
-        >
-          <div className="w-8 h-8 rounded-xl bg-[#ff2d55]/20 border border-[#ff2d55]/60 hover:bg-[#ff2d55] text-white flex items-center justify-center shadow-md transition active:scale-95 text-xs">
-            🎁
-          </div>
-          <span className="text-[9px] font-bold text-rose-300">
-            {lang === 'bn' ? 'গিফট' : 'Gift'}
-          </span>
-        </button>
+        {isGiftsEnabled && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenGift(reel);
+            }}
+            className="flex flex-col items-center gap-0.5 cursor-pointer"
+            title="গিফট পাঠান / Send Gift"
+          >
+            <div className="w-8 h-8 rounded-xl bg-[#ff2d55]/20 border border-[#ff2d55]/60 hover:bg-[#ff2d55] text-white flex items-center justify-center shadow-md transition active:scale-95 text-xs">
+              🎁
+            </div>
+            <span className="text-[9px] font-bold text-rose-300">
+              {lang === 'bn' ? 'গিফট' : 'Gift'}
+            </span>
+          </button>
+        )}
 
         {/* Action Button: + পয়েন্ট বা শুধু দেখা */}
         {isEarningActive && allowFeedClaim ? (

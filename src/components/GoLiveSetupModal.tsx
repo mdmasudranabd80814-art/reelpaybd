@@ -29,6 +29,8 @@ interface GoLiveSetupModalProps {
   initialMode?: LiveMode;
   onStartLive: (payload: StartLivePayload) => Promise<void> | void;
   lang: 'bn' | 'en';
+  allowAudioLive?: boolean;
+  allowVideoLive?: boolean;
 }
 
 const LIVE_CATEGORIES_BN = ['আড্ডা', 'গান ও গল্প', 'গেমিং', 'প্রশ্নোত্তর', 'বিনোদন'];
@@ -44,6 +46,8 @@ export const GoLiveSetupModal: React.FC<GoLiveSetupModalProps> = ({
   initialMode = 'audio',
   onStartLive,
   lang,
+  allowAudioLive = true,
+  allowVideoLive = true,
 }) => {
   const [mode, setMode] = useState<LiveMode>(initialMode);
   const [title, setTitle] = useState('');
@@ -64,10 +68,13 @@ export const GoLiveSetupModal: React.FC<GoLiveSetupModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setMode(initialMode);
+      let safeMode = initialMode;
+      if (initialMode === 'audio' && !allowAudioLive && allowVideoLive) safeMode = 'video';
+      if (initialMode === 'video' && !allowVideoLive && allowAudioLive) safeMode = 'audio';
+      setMode(safeMode);
       setErrorMsg(null);
     }
-  }, [isOpen, initialMode]);
+  }, [isOpen, initialMode, allowAudioLive, allowVideoLive]);
 
   const stopPreviewMedia = () => {
     if (animFrameRef.current) {
@@ -152,6 +159,10 @@ export const GoLiveSetupModal: React.FC<GoLiveSetupModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if ((mode === 'audio' && !allowAudioLive) || (mode === 'video' && !allowVideoLive)) {
+      setErrorMsg(lang === 'bn' ? 'এই লাইভ মোডটি বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : 'This live mode is currently disabled by Admin.');
+      return;
+    }
     const finalTitle =
       title.trim() ||
       (mode === 'audio'
@@ -227,58 +238,68 @@ export const GoLiveSetupModal: React.FC<GoLiveSetupModalProps> = ({
         <div className="grid grid-cols-2 gap-2.5 mb-4">
           <button
             type="button"
-            onClick={() => setMode('audio')}
-            className={`min-h-[82px] p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-              mode === 'audio'
-                ? 'bg-emerald-950/80 border-emerald-400 shadow-lg shadow-emerald-500/10'
-                : 'bg-[#0b130f] border-emerald-950 hover:border-emerald-800'
+            disabled={!allowAudioLive}
+            onClick={() => allowAudioLive && setMode('audio')}
+            className={`min-h-[82px] p-3.5 rounded-2xl border text-left transition-all flex flex-col justify-between ${
+              !allowAudioLive
+                ? 'bg-neutral-900/70 border-neutral-800 opacity-50 cursor-not-allowed'
+                : mode === 'audio'
+                ? 'bg-emerald-950/80 border-emerald-400 shadow-lg shadow-emerald-500/10 cursor-pointer'
+                : 'bg-[#0b130f] border-emerald-950 hover:border-emerald-800 cursor-pointer'
             }`}
           >
             <div className="flex items-center justify-between">
               <div
                 className={`w-9 h-9 rounded-xl flex items-center justify-center ${
-                  mode === 'audio' ? 'bg-emerald-500 text-black' : 'bg-neutral-900 text-emerald-400'
+                  mode === 'audio' && allowAudioLive ? 'bg-emerald-500 text-black' : 'bg-neutral-900 text-emerald-400'
                 }`}
               >
                 <Mic className="w-4 h-4" />
               </div>
-              {mode === 'audio' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+              {mode === 'audio' && allowAudioLive && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
             </div>
             <div className="mt-2">
               <div className="text-xs font-extrabold text-white">
                 {lang === 'bn' ? 'অডিও আড্ডা' : 'Audio Adda'}
               </div>
               <div className="text-[10px] text-neutral-400">
-                {lang === 'bn' ? 'ভয়েস রুম ও স্পিকার সিট' : 'Voice hangout & speakers'}
+                {!allowAudioLive
+                  ? (lang === 'bn' ? 'এডমিন কর্তৃক বন্ধ' : 'Disabled by Admin')
+                  : (lang === 'bn' ? 'ভয়েস রুম ও স্পিকার সিট' : 'Voice hangout & speakers')}
               </div>
             </div>
           </button>
 
           <button
             type="button"
-            onClick={() => setMode('video')}
-            className={`min-h-[82px] p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-              mode === 'video'
-                ? 'bg-rose-950/60 border-rose-500 shadow-lg shadow-rose-500/10'
-                : 'bg-[#0b130f] border-emerald-950 hover:border-rose-900/60'
+            disabled={!allowVideoLive}
+            onClick={() => allowVideoLive && setMode('video')}
+            className={`min-h-[82px] p-3.5 rounded-2xl border text-left transition-all flex flex-col justify-between ${
+              !allowVideoLive
+                ? 'bg-neutral-900/70 border-neutral-800 opacity-50 cursor-not-allowed'
+                : mode === 'video'
+                ? 'bg-rose-950/60 border-rose-500 shadow-lg shadow-rose-500/10 cursor-pointer'
+                : 'bg-[#0b130f] border-emerald-950 hover:border-rose-900/60 cursor-pointer'
             }`}
           >
             <div className="flex items-center justify-between">
               <div
                 className={`w-9 h-9 rounded-xl flex items-center justify-center ${
-                  mode === 'video' ? 'bg-rose-500 text-white' : 'bg-neutral-900 text-rose-400'
+                  mode === 'video' && allowVideoLive ? 'bg-rose-500 text-white' : 'bg-neutral-900 text-rose-400'
                 }`}
               >
                 <Video className="w-4 h-4" />
               </div>
-              {mode === 'video' && <CheckCircle2 className="w-4 h-4 text-rose-400" />}
+              {mode === 'video' && allowVideoLive && <CheckCircle2 className="w-4 h-4 text-rose-400" />}
             </div>
             <div className="mt-2">
               <div className="text-xs font-extrabold text-white">
                 {lang === 'bn' ? 'লাইভ ভিডিও' : 'Live Video'}
               </div>
               <div className="text-[10px] text-neutral-400">
-                {lang === 'bn' ? 'সরাসরি ক্যামেরা ব্রডকাস্ট' : 'Live camera stream'}
+                {!allowVideoLive
+                  ? (lang === 'bn' ? 'এডমিন কর্তৃক বন্ধ' : 'Disabled by Admin')
+                  : (lang === 'bn' ? 'সরাসরি ক্যামেরা ব্রডকাস্ট' : 'Live camera stream')}
               </div>
             </div>
           </button>
@@ -464,7 +485,7 @@ export const GoLiveSetupModal: React.FC<GoLiveSetupModalProps> = ({
           {/* Start Live CTA */}
           <button
             type="submit"
-            disabled={isStarting}
+            disabled={isStarting || (!allowAudioLive && !allowVideoLive)}
             className={`w-full min-h-[48px] rounded-2xl font-extrabold text-sm transition flex items-center justify-center gap-2 shadow-lg cursor-pointer active:scale-[0.98] disabled:opacity-60 ${
               mode === 'audio'
                 ? 'bg-gradient-to-r from-[#00c853] to-[#00e676] text-black shadow-emerald-500/25'

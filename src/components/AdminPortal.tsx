@@ -24,6 +24,9 @@ import {
   TaskItem,
   EarningSettings,
   DEFAULT_EARNING_SETTINGS,
+  SiteSettings,
+  DEFAULT_SITE_SETTINGS,
+  DEFAULT_PAYMENT_METHODS,
   LiveStream,
   ChatSession,
   Notification,
@@ -138,6 +141,34 @@ export const AdminPortal: React.FC = () => {
       return DEFAULT_EARNING_SETTINGS;
     }
   });
+  const [siteSettings, setSiteSettings] = useState<SiteSettings>(() => {
+    try {
+      const saved = localStorage.getItem('rt_site_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          ...DEFAULT_SITE_SETTINGS,
+          ...parsed,
+          paymentMethods:
+            Array.isArray(parsed.paymentMethods) && parsed.paymentMethods.length > 0
+              ? parsed.paymentMethods
+              : DEFAULT_PAYMENT_METHODS,
+        };
+      }
+    } catch {}
+    return {
+      ...DEFAULT_SITE_SETTINGS,
+      pointRate,
+      minWithdrawal,
+      announcement,
+      paymentMethods: DEFAULT_PAYMENT_METHODS.map((pm) => {
+        if (pm.name === 'bKash') return { ...pm, accountNumber: adminPaymentNumbers.bKash };
+        if (pm.name === 'Nagad') return { ...pm, accountNumber: adminPaymentNumbers.Nagad };
+        if (pm.name === 'Rocket') return { ...pm, accountNumber: adminPaymentNumbers.Rocket };
+        return pm;
+      }),
+    };
+  });
 
   const adminIdRef = useRef<string>('');
   adminIdRef.current = firebaseUser?.uid || '';
@@ -239,11 +270,40 @@ export const AdminPortal: React.FC = () => {
     });
 
     const unsubSettings = firebaseOnSnapshot('settings', (data) => {
-      const earningDoc = (data as any[]).find((d) => d.id === 'earning');
+      const docs = (data || []) as any[];
+      const earningDoc = docs.find((d) => d.id === 'earning');
       if (earningDoc) {
         setEarningSettings((prev) => ({ ...prev, ...earningDoc }));
+        if (typeof earningDoc.spinMaxPrize === 'number') setSpinMaxPrize(earningDoc.spinMaxPrize);
+        if (typeof earningDoc.scratchCardPrize === 'number') setScratchPrize(earningDoc.scratchCardPrize);
         try {
           localStorage.setItem('rt_earning_settings', JSON.stringify(earningDoc));
+        } catch {}
+      }
+      const siteDoc = docs.find((d) => d.id === 'site');
+      if (siteDoc) {
+        const mergedSite: SiteSettings = {
+          ...DEFAULT_SITE_SETTINGS,
+          ...siteDoc,
+          paymentMethods:
+            Array.isArray(siteDoc.paymentMethods) && siteDoc.paymentMethods.length > 0
+              ? siteDoc.paymentMethods
+              : DEFAULT_PAYMENT_METHODS,
+        };
+        setSiteSettings(mergedSite);
+        setPointRate(mergedSite.pointRate);
+        setMinWithdrawal(mergedSite.minWithdrawal);
+        setAnnouncement(mergedSite.announcement);
+        const bk = mergedSite.paymentMethods.find((m) => m.name === 'bKash')?.accountNumber || adminPaymentNumbers.bKash;
+        const ng = mergedSite.paymentMethods.find((m) => m.name === 'Nagad')?.accountNumber || adminPaymentNumbers.Nagad;
+        const rk = mergedSite.paymentMethods.find((m) => m.name === 'Rocket')?.accountNumber || adminPaymentNumbers.Rocket;
+        setAdminPaymentNumbers({ bKash: bk, Nagad: ng, Rocket: rk });
+        try {
+          localStorage.setItem('rt_site_settings', JSON.stringify(mergedSite));
+          localStorage.setItem('rt_point_rate', String(mergedSite.pointRate));
+          localStorage.setItem('rt_min_withdrawal', String(mergedSite.minWithdrawal));
+          localStorage.setItem('rt_announcement', mergedSite.announcement);
+          localStorage.setItem('rt_payment_numbers', JSON.stringify({ bKash: bk, Nagad: ng, Rocket: rk }));
         } catch {}
       }
       setSettingsLoaded(true);
@@ -638,6 +698,50 @@ export const AdminPortal: React.FC = () => {
     showToast('✅ আর্নিং ও অফার সেটিংস সফলভাবে সেভ করা হয়েছে!');
   };
 
+  const handleUpdateSiteSettings = async (nextSite: SiteSettings, customToast?: string) => {
+    const cleanSite: SiteSettings = {
+      ...DEFAULT_SITE_SETTINGS,
+      ...nextSite,
+      id: 'site',
+      updatedAt: new Date().toISOString(),
+    };
+    setSiteSettings(cleanSite);
+    setPointRate(cleanSite.pointRate);
+    setMinWithdrawal(cleanSite.minWithdrawal);
+    setAnnouncement(cleanSite.announcement);
+    const bk = cleanSite.paymentMethods.find((m) => m.name === 'bKash')?.accountNumber || adminPaymentNumbers.bKash;
+    const ng = cleanSite.paymentMethods.find((m) => m.name === 'Nagad')?.accountNumber || adminPaymentNumbers.Nagad;
+    const rk = cleanSite.paymentMethods.find((m) => m.name === 'Rocket')?.accountNumber || adminPaymentNumbers.Rocket;
+    setAdminPaymentNumbers({ bKash: bk, Nagad: ng, Rocket: rk });
+    try {
+      localStorage.setItem('rt_site_settings', JSON.stringify(cleanSite));
+      localStorage.setItem('rt_point_rate', String(cleanSite.pointRate));
+      localStorage.setItem('rt_min_withdrawal', String(cleanSite.minWithdrawal));
+      localStorage.setItem('rt_announcement', cleanSite.announcement);
+      localStorage.setItem('rt_payment_numbers', JSON.stringify({ bKash: bk, Nagad: ng, Rocket: rk }));
+    } catch {}
+
+    await setDocument('settings', 'site', cleanSite).catch((err) =>
+      console.warn('Save site settings error:', err)
+    );
+    showToast(customToast || '✅ সাইট ও ফিচার কন্ট্রোল সেটিংস সংরক্ষণ করা হয়েছে!');
+  };
+
+  const handleDeleteReelComment = async (reelId: string, commentId: string) => {
+    try {
+      await deleteDocument(`reels/${reelId}/comments`, commentId);
+      const reel = reels.find((r) => r.id === reelId);
+      if (reel) {
+        const nextCount = Math.max(0, (reel.commentsCount || 1) - 1);
+        setReels((prev) => prev.map((r) => (r.id === reelId ? { ...r, commentsCount: nextCount } : r)));
+        await updateDocument('reels', reelId, { commentsCount: nextCount }).catch(() => {});
+      }
+      showToast('🗑️ মন্তব্যটি মুছে ফেলা হয়েছে!');
+    } catch (err) {
+      console.warn('Delete comment error:', err);
+    }
+  };
+
   const handleCancelLive = async (liveId: string, reason?: string) => {
     const targetStream = activeLiveStreams.find((s) => s.id === liveId);
     const cleanReason = (reason || '').trim();
@@ -916,17 +1020,11 @@ export const AdminPortal: React.FC = () => {
           users={users}
           pointRate={pointRate}
           onUpdateRate={(r) => {
-            setPointRate(r);
-            try {
-              localStorage.setItem('rt_point_rate', String(r));
-            } catch {}
+            handleUpdateSiteSettings({ ...siteSettings, pointRate: r }, `✅ পয়েন্ট রেট ${toBengaliNumber(r)} = ৳১ সেভ করা হয়েছে!`);
           }}
           announcement={announcement}
           onUpdateAnnouncement={(text) => {
-            setAnnouncement(text);
-            try {
-              localStorage.setItem('rt_announcement', text);
-            } catch {}
+            handleUpdateSiteSettings({ ...siteSettings, announcement: text }, '📢 অ্যানাউন্সমেন্ট আপডেট করা হয়েছে!');
           }}
           withdrawals={withdrawals}
           onApproveWithdrawal={handleApproveWithdrawal}
@@ -938,6 +1036,7 @@ export const AdminPortal: React.FC = () => {
           onAddReel={handleAddNewReel}
           onEditReel={(r) => setEditingReel(r)}
           onDeleteReel={handleDeleteReel}
+          onDeleteReelComment={handleDeleteReelComment}
           onGiveUserBonus={handleGiveUserBonus}
           onUpdateUser={handleUpdateUser}
           onDeleteUser={handleDeleteUser}
@@ -945,19 +1044,17 @@ export const AdminPortal: React.FC = () => {
           currentUserUid={firebaseUser.uid}
           adminPaymentNumbers={adminPaymentNumbers}
           onUpdatePaymentNumbers={(nums) => {
-            setAdminPaymentNumbers(nums);
-            try {
-              localStorage.setItem('rt_payment_numbers', JSON.stringify(nums));
-            } catch {}
-            showToast('✅ পেমেন্ট নম্বর সংরক্ষিত হয়েছে!');
+            const updatedMethods = siteSettings.paymentMethods.map((pm) => {
+              if (pm.name === 'bKash') return { ...pm, accountNumber: nums.bKash };
+              if (pm.name === 'Nagad') return { ...pm, accountNumber: nums.Nagad };
+              if (pm.name === 'Rocket') return { ...pm, accountNumber: nums.Rocket };
+              return pm;
+            });
+            handleUpdateSiteSettings({ ...siteSettings, paymentMethods: updatedMethods }, '✅ পেমেন্ট নম্বর সংরক্ষিত হয়েছে!');
           }}
           minWithdrawal={minWithdrawal}
           onUpdateMinWithdrawal={(amt) => {
-            setMinWithdrawal(amt);
-            try {
-              localStorage.setItem('rt_min_withdrawal', String(amt));
-            } catch {}
-            showToast(`✅ সর্বনিম্ন ক্যাশআউট ৳${amt} সেভ করা হয়েছে!`);
+            handleUpdateSiteSettings({ ...siteSettings, minWithdrawal: amt }, `✅ সর্বনিম্ন ক্যাশআউট ৳${amt} সেভ করা হয়েছে!`);
           }}
           tasks={tasks}
           onAddTask={handleAddTask}
@@ -969,6 +1066,15 @@ export const AdminPortal: React.FC = () => {
             try {
               localStorage.setItem('rt_spin_max', String(val));
             } catch {}
+            const ratio = Math.max(0.1, val / 100);
+            const scaledPrizes = [10, 25, 50, 15, 100, 30, 20, 40].map((p) =>
+              p === 100 ? val : Math.max(1, Math.round(p * ratio))
+            );
+            handleUpdateEarningSettings({
+              ...earningSettings,
+              spinMaxPrize: val,
+              spinPrizes: scaledPrizes,
+            });
           }}
           scratchCardPrize={scratchPrize}
           onUpdateScratchPrize={(val) => {
@@ -976,11 +1082,17 @@ export const AdminPortal: React.FC = () => {
             try {
               localStorage.setItem('rt_scratch_prize', String(val));
             } catch {}
+            handleUpdateEarningSettings({
+              ...earningSettings,
+              scratchCardPrize: val,
+            });
           }}
           onSendNotification={handleSendDirectMessage}
           onBroadcastNotification={handleBroadcastMessage}
           earningSettings={earningSettings}
           onUpdateEarningSettings={handleUpdateEarningSettings}
+          siteSettings={siteSettings}
+          onUpdateSiteSettings={handleUpdateSiteSettings}
           onQuickUpdateReel={handleUpdateReel}
           onInspectLive={(liveId) => {
             setCurrentLiveStreamId(liveId);

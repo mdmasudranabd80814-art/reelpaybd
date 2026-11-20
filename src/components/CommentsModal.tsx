@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Send, Heart } from 'lucide-react';
+import { X, Send, Heart, Lock } from 'lucide-react';
 import { Reel, Comment, User } from '../types';
 import { toBengaliNumber } from '../utils/bengali';
 import { useFirebase } from '../hooks/useFirebase';
@@ -11,6 +11,7 @@ interface CommentsModalProps {
   onClose: () => void;
   onAddComment: (reelId: string, text: string) => void;
   onOpenProfile?: (userId: string) => void;
+  isCommentsEnabled?: boolean;
 }
 
 export const CommentsModal: React.FC<CommentsModalProps> = ({
@@ -19,6 +20,7 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
   onClose,
   onAddComment,
   onOpenProfile,
+  isCommentsEnabled = true,
 }) => {
   const [inputText, setInputText] = useState('');
   const [likedComments, setLikedComments] = useState<Record<string, boolean>>({});
@@ -124,30 +126,37 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
         </div>
 
         {/* Comment Input */}
-        <form
-          onSubmit={handleSubmit}
-          className="p-3 border-t border-emerald-950 bg-[#0d1611] flex items-center gap-2"
-        >
-          <img
-            src={currentUser.avatar}
-            alt={currentUser.name}
-            className="w-8 h-8 rounded-full object-cover border border-emerald-500"
-          />
-          <input
-            type="text"
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            placeholder="একটি সুন্দর মন্তব্য লিখুন..."
-            className="flex-1 bg-[#15231c] border border-emerald-900/60 rounded-full px-3.5 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-emerald-500"
-          />
-          <button
-            type="submit"
-            disabled={!inputText.trim()}
-            className="p-2 rounded-full bg-[#00c853] hover:bg-[#00e676] disabled:bg-neutral-800 disabled:text-neutral-500 text-black transition"
+        {isCommentsEnabled ? (
+          <form
+            onSubmit={handleSubmit}
+            className="p-3 border-t border-emerald-950 bg-[#0d1611] flex items-center gap-2"
           >
-            <Send className="w-3.5 h-3.5 fill-current" />
-          </button>
-        </form>
+            <img
+              src={currentUser.avatar}
+              alt={currentUser.name}
+              className="w-8 h-8 rounded-full object-cover border border-emerald-500"
+            />
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="একটি সুন্দর মন্তব্য লিখুন..."
+              className="flex-1 bg-[#15231c] border border-emerald-900/60 rounded-full px-3.5 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-emerald-500"
+            />
+            <button
+              type="submit"
+              disabled={!inputText.trim()}
+              className="p-2 rounded-full bg-[#00c853] hover:bg-[#00e676] disabled:bg-neutral-800 disabled:text-neutral-500 text-black transition"
+            >
+              <Send className="w-3.5 h-3.5 fill-current" />
+            </button>
+          </form>
+        ) : (
+          <div className="p-3.5 border-t border-emerald-950 bg-[#0d1611] text-center text-xs text-amber-300 font-semibold flex items-center justify-center gap-1.5">
+            <Lock className="w-3.5 h-3.5" />
+            <span>এডমিন কর্তৃক মন্তব্য করা সাময়িকভাবে বন্ধ রাখা হয়েছে।</span>
+          </div>
+        )}
       </div>
     </div>
   );

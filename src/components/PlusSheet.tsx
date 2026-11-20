@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { X, Camera, Image as ImageIcon, Radio, Rocket, Sparkles } from 'lucide-react';
+import { X, Camera, Image as ImageIcon, Radio, Rocket, Sparkles, Lock } from 'lucide-react';
 import { Reel, User } from '../types';
 import { playSuccessChime } from '../utils/audio';
 import { storeVideoInDB, fileToDataUrl, captureVideoThumbnail } from '../utils/videoStorage';
@@ -13,6 +13,9 @@ interface PlusSheetProps {
   onOpenLive: () => void;
   lang: 'bn' | 'en';
   isMuted: boolean;
+  allowUserReelUpload?: boolean;
+  defaultReelRewardPoints?: number;
+  allowUserLive?: boolean;
 }
 
 export const PlusSheet: React.FC<PlusSheetProps> = ({
@@ -23,6 +26,9 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
   onOpenLive,
   lang,
   isMuted,
+  allowUserReelUpload = true,
+  defaultReelRewardPoints = 10,
+  allowUserLive = true,
 }) => {
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null);
@@ -114,7 +120,7 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
       category,
       thumbnailUrl: finalThumbnail,
       videoUrl: finalVideoUrl,
-      pointsReward: 10,
+      pointsReward: Math.max(0, Number(defaultReelRewardPoints ?? 10)),
       audioTrack: 'Original Sound - ' + currentUser.name,
       caption: caption.trim() || `${title.trim()} #রিলতাকা #ReelTaka`,
       hashtags: ['#রিলতাকা', '#ভাইরাল', '#বাংলাদেশ'],
@@ -156,101 +162,122 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
           {lang === 'bn' ? 'একটি অপশন বেছে নিন' : 'Choose an option to share or go live'}
         </p>
 
-        {/* Option 1: Record Video */}
-        <label className="block p-3.5 rounded-2xl bg-[#1e2e25] hover:bg-[#25392e] border border-emerald-900/60 mb-2.5 cursor-pointer transition active:scale-98">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-950 flex items-center justify-center text-emerald-400 shrink-0">
-              <Camera className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <b className="text-sm block">
-                {lang === 'bn' ? '📷 ভিডিও রেকর্ড করুন / Record Video' : '📷 Record Video'}
-              </b>
-              <small className="text-neutral-400 text-xs">
-                {lang === 'bn' ? 'ক্যামেরা খুলে এখনই রেকর্ড করুন' : 'Open camera and record live video'}
-              </small>
-            </div>
-          </div>
-          <input
-            ref={recordInputRef}
-            type="file"
-            accept="video/*"
-            capture="user"
-            className="hidden"
-            onChange={handleFileChange}
-          />
-        </label>
+        {allowUserReelUpload ? (
+          <>
+            {/* Option 1: Record Video */}
+            <label className="block p-3.5 rounded-2xl bg-[#1e2e25] hover:bg-[#25392e] border border-emerald-900/60 mb-2.5 cursor-pointer transition active:scale-98">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-950 flex items-center justify-center text-emerald-400 shrink-0">
+                  <Camera className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <b className="text-sm block">
+                    {lang === 'bn' ? '📷 ভিডিও রেকর্ড করুন / Record Video' : '📷 Record Video'}
+                  </b>
+                  <small className="text-neutral-400 text-xs">
+                    {lang === 'bn' ? 'ক্যামেরা খুলে এখনই রেকর্ড করুন' : 'Open camera and record live video'}
+                  </small>
+                </div>
+              </div>
+              <input
+                ref={recordInputRef}
+                type="file"
+                accept="video/*"
+                capture="user"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+            </label>
 
-        {/* Option 2: Upload from Gallery */}
-        <label className="block p-3.5 rounded-2xl bg-[#1e2e25] hover:bg-[#25392e] border border-emerald-900/60 mb-2.5 cursor-pointer transition active:scale-98">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-950 flex items-center justify-center text-blue-400 shrink-0">
-              <ImageIcon className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <b className="text-sm block">
-                {lang === 'bn'
-                  ? '🖼️ গ্যালারি থেকে আপলোড করুন / Upload from Gallery'
-                  : '🖼️ Upload from Gallery'}
-              </b>
-              <small className="text-neutral-400 text-xs">
-                {lang === 'bn'
-                  ? 'আপনার গ্যালারি থেকে ভিডিও বা ছবি বেছে নিন'
-                  : 'Choose video file from your device'}
-              </small>
-            </div>
-          </div>
-          <input
-            ref={galleryInputRef}
-            type="file"
-            accept="video/*,image/*"
-            className="hidden"
-            onChange={handleFileChange}
-          />
-        </label>
+            {/* Option 2: Upload from Gallery */}
+            <label className="block p-3.5 rounded-2xl bg-[#1e2e25] hover:bg-[#25392e] border border-emerald-900/60 mb-2.5 cursor-pointer transition active:scale-98">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-950 flex items-center justify-center text-blue-400 shrink-0">
+                  <ImageIcon className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <b className="text-sm block">
+                    {lang === 'bn'
+                      ? '🖼️ গ্যালারি থেকে আপলোড করুন / Upload from Gallery'
+                      : '🖼️ Upload from Gallery'}
+                  </b>
+                  <small className="text-neutral-400 text-xs">
+                    {lang === 'bn'
+                      ? 'আপনার গ্যালারি থেকে ভিডিও বা ছবি বেছে নিন'
+                      : 'Choose video file from your device'}
+                  </small>
+                </div>
+              </div>
+              <input
+                ref={galleryInputRef}
+                type="file"
+                accept="video/*,image/*"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+            </label>
 
-        {/* Option 3: External URL (Persistence) */}
-        <div className="mb-3">
-          <label className="text-[10px] text-emerald-400 font-bold uppercase mb-1 block">
-            {lang === 'bn' ? 'বা ভিডিওর লিঙ্ক দিন (স্থায়ী):' : 'Or provide Video Link (Persistent):'}
-          </label>
-          <input
-            type="text"
-            value={externalVideoUrl}
-            onChange={(e) => setExternalVideoUrl(e.target.value)}
-            placeholder="https://example.com/video.mp4"
-            className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500"
-          />
-          <p className="text-[9px] text-neutral-500 mt-1">
-            {lang === 'bn' 
-              ? 'গ্যালারি থেকে আপলোড করা ভিডিও সাময়িক। স্থায়ী করতে লিঙ্ক ব্যবহার করুন।' 
-              : 'Uploaded files are temporary. Use a link for permanent videos.'}
-          </p>
-        </div>
+            {/* Option 3: External URL (Persistence) */}
+            <div className="mb-3">
+              <label className="text-[10px] text-emerald-400 font-bold uppercase mb-1 block">
+                {lang === 'bn' ? 'বা ভিডিওর লিঙ্ক দিন (স্থায়ী):' : 'Or provide Video Link (Persistent):'}
+              </label>
+              <input
+                type="text"
+                value={externalVideoUrl}
+                onChange={(e) => setExternalVideoUrl(e.target.value)}
+                placeholder="https://example.com/video.mp4"
+                className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500"
+              />
+              <p className="text-[9px] text-neutral-500 mt-1">
+                {lang === 'bn' 
+                  ? 'গ্যালারি থেকে আপলোড করা ভিডিও সাময়িক। স্থায়ী করতে লিঙ্ক ব্যবহার করুন।' 
+                  : 'Uploaded files are temporary. Use a link for permanent videos.'}
+              </p>
+            </div>
+          </>
+        ) : (
+          <div className="mb-3 p-4 rounded-2xl bg-amber-950/30 border border-amber-500/30 text-center space-y-1.5">
+            <Lock className="w-6 h-6 text-amber-400 mx-auto" />
+            <p className="text-xs font-bold text-amber-200">
+              {lang === 'bn' ? 'রিল আপলোড সাময়িকভাবে বন্ধ রয়েছে' : 'Reel upload temporarily disabled'}
+            </p>
+            <p className="text-[11px] text-neutral-400">
+              {lang === 'bn' ? 'এডমিন কর্তৃক ইউজার রিল আপলোড ফিচারটি বর্তমানে বন্ধ করা আছে।' : 'Admin has disabled user reel uploads.'}
+            </p>
+          </div>
+        )}
 
         {/* Option 4: Personal Live Studio (Audio Adda or Video Live) */}
-        <button
-          type="button"
-          onClick={() => {
-            onClose();
-            onOpenLive();
-          }}
-          className="w-full text-left p-3.5 rounded-2xl bg-[#1e2e25] hover:bg-[#25392e] border border-rose-900/60 mb-3 cursor-pointer transition active:scale-[0.98] flex items-center gap-3"
-        >
-          <div className="w-10 h-10 rounded-xl bg-rose-950 flex items-center justify-center text-rose-400 shrink-0">
-            <Radio className="w-5 h-5" />
+        {allowUserLive ? (
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              onOpenLive();
+            }}
+            className="w-full text-left p-3.5 rounded-2xl bg-[#1e2e25] hover:bg-[#25392e] border border-rose-900/60 mb-3 cursor-pointer transition active:scale-[0.98] flex items-center gap-3"
+          >
+            <div className="w-10 h-10 rounded-xl bg-rose-950 flex items-center justify-center text-rose-400 shrink-0">
+              <Radio className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <b className="text-sm block text-rose-300">
+                {lang === 'bn' ? '🎙️ / 📹 পার্সোনাল লাইভে যান' : '🎙️ / 📹 Go Personal Live'}
+              </b>
+              <small className="text-neutral-400 text-xs">
+                {lang === 'bn'
+                  ? 'অডিও আড্ডা বা লাইভ ভিডিও চালু করুন ও গিফট নিন'
+                  : 'Start Audio Adda or Live Video and receive gifts'}
+              </small>
+            </div>
+          </button>
+        ) : (
+          <div className="mb-3 p-3 rounded-2xl bg-neutral-900/80 border border-neutral-800 text-neutral-400 text-xs flex items-center gap-2">
+            <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>{lang === 'bn' ? 'পার্সোনাল লাইভ ফিচারটি এডমিন কর্তৃক বন্ধ রয়েছে।' : 'Live streaming disabled by Admin.'}</span>
           </div>
-          <div className="min-w-0">
-            <b className="text-sm block text-rose-300">
-              {lang === 'bn' ? '🎙️ / 📹 পার্সোনাল লাইভে যান' : '🎙️ / 📹 Go Personal Live'}
-            </b>
-            <small className="text-neutral-400 text-xs">
-              {lang === 'bn'
-                ? 'অডিও আড্ডা বা লাইভ ভিডিও চালু করুন ও গিফট নিন'
-                : 'Start Audio Adda or Live Video and receive gifts'}
-            </small>
-          </div>
-        </button>
+        )}
 
         {formError && (
           <div className="mb-3 p-2.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-300 text-xs font-semibold">
@@ -275,63 +302,65 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
           </div>
         )}
 
-        {/* Title, Caption, Publish Form */}
-        <form onSubmit={handlePublish} className="space-y-2.5">
-          <div>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder={
-                lang === 'bn' ? 'ভিডিওর শিরোনাম / Title...' : 'Reel Title (e.g. Dhaka Rain Vlog)...'
-              }
-              className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-emerald-500"
-              required
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value as any)}
-                className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white"
-              >
-                <option value="সকল">{lang === 'bn' ? 'সকল' : 'All'}</option>
-                <option value="ট্রেন্ডিং">{lang === 'bn' ? 'ট্রেন্ডিং' : 'Trending'}</option>
-                <option value="কমেডি">{lang === 'bn' ? 'কমেডি' : 'Comedy'}</option>
-                <option value="গেমিং">{lang === 'bn' ? 'গেমিং' : 'Gaming'}</option>
-                <option value="রান্না">{lang === 'bn' ? 'রান্না' : 'Cooking'}</option>
-                <option value="শিক্ষা">{lang === 'bn' ? 'শিক্ষা' : 'Education'}</option>
-              </select>
-            </div>
+        {/* Title, Caption, Publish Form (only when upload is enabled) */}
+        {allowUserReelUpload && (
+          <form onSubmit={handlePublish} className="space-y-2.5">
             <div>
               <input
                 type="text"
-                value={caption}
-                onChange={(e) => setCaption(e.target.value)}
-                placeholder={lang === 'bn' ? 'ক্যাপশন... #হ্যাশট্যাগ' : 'Caption... #hashtags'}
-                className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white placeholder-neutral-500"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder={
+                  lang === 'bn' ? 'ভিডিওর শিরোনাম / Title...' : 'Reel Title (e.g. Dhaka Rain Vlog)...'
+                }
+                className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-emerald-500"
+                required
               />
             </div>
-          </div>
 
-          <button
-            type="submit"
-            className="w-full py-2.5 rounded-xl bg-[#00c853] hover:bg-[#00e676] text-black font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/25 cursor-pointer"
-          >
-            <Rocket className="w-3.5 h-3.5" />
-            <span>{lang === 'bn' ? '🚀 প্রকাশ করুন / Publish' : '🚀 Publish Reel'}</span>
-          </button>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value as any)}
+                  className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white"
+                >
+                  <option value="সকল">{lang === 'bn' ? 'সকল' : 'All'}</option>
+                  <option value="ট্রেন্ডিং">{lang === 'bn' ? 'ট্রেন্ডিং' : 'Trending'}</option>
+                  <option value="কমেডি">{lang === 'bn' ? 'কমেডি' : 'Comedy'}</option>
+                  <option value="গেমিং">{lang === 'bn' ? 'গেমিং' : 'Gaming'}</option>
+                  <option value="রান্না">{lang === 'bn' ? 'রান্না' : 'Cooking'}</option>
+                  <option value="শিক্ষা">{lang === 'bn' ? 'শিক্ষা' : 'Education'}</option>
+                </select>
+              </div>
+              <div>
+                <input
+                  type="text"
+                  value={caption}
+                  onChange={(e) => setCaption(e.target.value)}
+                  placeholder={lang === 'bn' ? 'ক্যাপশন... #হ্যাশট্যাগ' : 'Caption... #hashtags'}
+                  className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white placeholder-neutral-500"
+                />
+              </div>
+            </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-full py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900 border border-rose-900/60 text-rose-300 font-bold text-xs transition cursor-pointer"
-          >
-            {lang === 'bn' ? 'বাতিল / Cancel' : 'Cancel / বাতিল'}
-          </button>
-        </form>
+            <button
+              type="submit"
+              className="w-full py-2.5 rounded-xl bg-[#00c853] hover:bg-[#00e676] text-black font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/25 cursor-pointer"
+            >
+              <Rocket className="w-3.5 h-3.5" />
+              <span>{lang === 'bn' ? '🚀 প্রকাশ করুন / Publish' : '🚀 Publish Reel'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900 border border-rose-900/60 text-rose-300 font-bold text-xs transition cursor-pointer"
+            >
+              {lang === 'bn' ? 'বাতিল / Cancel' : 'Cancel / বাতিল'}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );

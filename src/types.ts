@@ -1,11 +1,150 @@
+export type PaymentMethodCategory = 'mobile_banking' | 'bank' | 'card' | 'other';
+
+export interface PaymentMethodConfig {
+  id: string;
+  name: string;
+  nameBn: string;
+  category: PaymentMethodCategory;
+  accountNumber: string;
+  accountTitle?: string;
+  bankName?: string;
+  branchName?: string;
+  routingNumber?: string;
+  accountTypeLabel?: string;
+  instructions?: string;
+  colorHex?: string;
+  supportsDeposit: boolean;
+  supportsWithdrawal: boolean;
+  isEnabled: boolean;
+}
+
+export const DEFAULT_PAYMENT_METHODS: PaymentMethodConfig[] = [
+  {
+    id: 'pm_bkash',
+    name: 'bKash',
+    nameBn: 'বিকাশ',
+    category: 'mobile_banking',
+    accountNumber: '01700000000',
+    accountTitle: 'ReelPay BD Official',
+    accountTypeLabel: 'Personal / Agent',
+    instructions: 'সেন্ড মানি (Send Money) করে আপনার প্রেরক নম্বর ও TrxID জমা দিন।',
+    colorHex: '#e2136e',
+    supportsDeposit: true,
+    supportsWithdrawal: true,
+    isEnabled: true,
+  },
+  {
+    id: 'pm_nagad',
+    name: 'Nagad',
+    nameBn: 'নগদ',
+    category: 'mobile_banking',
+    accountNumber: '01800000000',
+    accountTitle: 'ReelPay BD Official',
+    accountTypeLabel: 'Personal / Agent',
+    instructions: 'নগদে সেন্ড মানি (Send Money) করে TrxID ও প্রেরক নম্বর লিখুন।',
+    colorHex: '#f7941d',
+    supportsDeposit: true,
+    supportsWithdrawal: true,
+    isEnabled: true,
+  },
+  {
+    id: 'pm_rocket',
+    name: 'Rocket',
+    nameBn: 'রকেট',
+    category: 'mobile_banking',
+    accountNumber: '01900000000',
+    accountTitle: 'ReelPay BD Official',
+    accountTypeLabel: 'Personal / Agent',
+    instructions: 'রকেট থেকে সেন্ড মানি করে TrxID সহ তথ্য সাবমিট করুন।',
+    colorHex: '#8c2d8c',
+    supportsDeposit: true,
+    supportsWithdrawal: true,
+    isEnabled: true,
+  },
+];
+
+export const PAYMENT_METHOD_PRESETS: Array<Omit<PaymentMethodConfig, 'id' | 'accountNumber'>> = [
+  // Mobile Banking
+  { name: 'bKash', nameBn: 'বিকাশ', category: 'mobile_banking', accountTypeLabel: 'Personal / Merchant', colorHex: '#e2136e', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  { name: 'Nagad', nameBn: 'নগদ', category: 'mobile_banking', accountTypeLabel: 'Personal / Merchant', colorHex: '#f7941d', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  { name: 'Rocket', nameBn: 'রকেট', category: 'mobile_banking', accountTypeLabel: 'Personal / Agent', colorHex: '#8c2d8c', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  { name: 'Upay', nameBn: 'উপায়', category: 'mobile_banking', accountTypeLabel: 'Personal', colorHex: '#00a6e2', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  { name: 'CellFin', nameBn: 'সেলফিন', category: 'mobile_banking', accountTypeLabel: 'IBBL CellFin', colorHex: '#059669', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  { name: 'tap', nameBn: 'ট্যাপ', category: 'mobile_banking', accountTypeLabel: 'Personal', colorHex: '#16a34a', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  { name: 'SureCash', nameBn: 'শিওরক্যাশ', category: 'mobile_banking', accountTypeLabel: 'Personal', colorHex: '#2563eb', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  { name: 'mCash', nameBn: 'এমক্যাশ', category: 'mobile_banking', accountTypeLabel: 'Personal', colorHex: '#0d9488', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  { name: 'MyCash', nameBn: 'মাইক্যাশ', category: 'mobile_banking', accountTypeLabel: 'Personal', colorHex: '#dc2626', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  { name: 'OK Wallet', nameBn: 'ওকে ওয়ালেট', category: 'mobile_banking', accountTypeLabel: 'One Bank OK Wallet', colorHex: '#ea580c', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  // Banks
+  { name: 'Dutch-Bangla Bank (DBBL)', nameBn: 'ডাচ-বাংলা ব্যাংক', category: 'bank', bankName: 'Dutch-Bangla Bank PLC', accountTypeLabel: 'Savings / Current', colorHex: '#0f766e', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  { name: 'Islami Bank (IBBL)', nameBn: 'ইসলামী ব্যাংক', category: 'bank', bankName: 'Islami Bank Bangladesh PLC', accountTypeLabel: 'Savings / Current', colorHex: '#15803d', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  { name: 'BRAC Bank', nameBn: 'ব্র্যাক ব্যাংক', category: 'bank', bankName: 'BRAC Bank PLC', accountTypeLabel: 'Savings / Current', colorHex: '#0284c7', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  { name: 'City Bank', nameBn: 'সিটি ব্যাংক', category: 'bank', bankName: 'The City Bank PLC', accountTypeLabel: 'Savings / Current', colorHex: '#b91c1c', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  { name: 'Sonali Bank', nameBn: 'সোনালী ব্যাংক', category: 'bank', bankName: 'Sonali Bank PLC', accountTypeLabel: 'Savings / Current', colorHex: '#047857', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  { name: 'Eastern Bank (EBL)', nameBn: 'ইস্টার্ন ব্যাংক', category: 'bank', bankName: 'Eastern Bank PLC', accountTypeLabel: 'Savings / Current', colorHex: '#1d4ed8', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  // Cards
+  { name: 'Visa Card', nameBn: 'ভিসা কার্ড', category: 'card', accountTypeLabel: 'Visa Debit / Credit', colorHex: '#1e40af', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  { name: 'MasterCard', nameBn: 'মাস্টারকার্ড', category: 'card', accountTypeLabel: 'MasterCard Debit / Credit', colorHex: '#c2410c', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  { name: 'NexusPay Card', nameBn: 'নেক্সাস পে কার্ড', category: 'card', accountTypeLabel: 'DBBL NexusPay', colorHex: '#0f766e', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+  { name: 'American Express', nameBn: 'অ্যামেরিকান এক্সপ্রেস', category: 'card', accountTypeLabel: 'Amex Card', colorHex: '#0369a1', supportsDeposit: true, supportsWithdrawal: true, isEnabled: true },
+];
+
+export interface SiteSettings {
+  id: 'site';
+  pointRate: number;
+  minWithdrawal: number;
+  maxWithdrawal: number;
+  minDeposit: number;
+  announcement: string;
+  paymentMethods: PaymentMethodConfig[];
+  isDepositsEnabled: boolean;
+  isWithdrawalsEnabled: boolean;
+  allowUserReelUpload: boolean;
+  defaultUserReelRewardPoints: number;
+  allowUserAudioLive: boolean;
+  allowUserVideoLive: boolean;
+  isGiftsEnabled: boolean;
+  isCommentsEnabled: boolean;
+  isDirectChatEnabled: boolean;
+  allowGuestPreviewPoints: boolean;
+  maintenanceMode: boolean;
+  maintenanceMessage?: string;
+  updatedAt?: string;
+}
+
+export const DEFAULT_SITE_SETTINGS: SiteSettings = {
+  id: 'site',
+  pointRate: 10,
+  minWithdrawal: 100,
+  maxWithdrawal: 50000,
+  minDeposit: 20,
+  announcement: '📢 আজকের স্পেশাল অফার! প্রতিটি রিল দেখলে ইনস্ট্যান্ট ১০ পয়েন্ট। বন্ধুদের ইনভাইট করে ৫০ টাকা বোনাস বুঝে নিন!',
+  paymentMethods: DEFAULT_PAYMENT_METHODS,
+  isDepositsEnabled: true,
+  isWithdrawalsEnabled: true,
+  allowUserReelUpload: true,
+  defaultUserReelRewardPoints: 10,
+  allowUserAudioLive: true,
+  allowUserVideoLive: true,
+  isGiftsEnabled: true,
+  isCommentsEnabled: true,
+  isDirectChatEnabled: true,
+  allowGuestPreviewPoints: true,
+  maintenanceMode: false,
+  maintenanceMessage: 'সিস্টেম আপগ্রেডের কাজ চলছে। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।',
+};
+
 export interface User {
   id: string;
   name: string;
   phone: string;
   email?: string;
   password?: string;
-  paymentMethod?: 'bKash' | 'Nagad' | 'Rocket';
+  paymentMethod?: string;
   paymentAccountNumber?: string;
+  paymentAccountHolder?: string;
+  paymentBankName?: string;
+  paymentBranchName?: string;
   points: number;
   role: 'user' | 'admin';
   avatar: string;
@@ -146,8 +285,14 @@ export interface WithdrawalRequest {
   userName: string;
   userPhone: string;
   accountNumber: string;
-  accountType: 'Personal' | 'Agent';
-  method: 'bKash' | 'Nagad' | 'Rocket';
+  accountType: string;
+  method: string;
+  methodCategory?: PaymentMethodCategory;
+  accountHolderName?: string;
+  bankName?: string;
+  branchName?: string;
+  routingNumber?: string;
+  accountDetails?: string;
   pointsDeducted: number;
   amountBDT: number;
   status: 'pending' | 'approved' | 'rejected';
@@ -172,11 +317,14 @@ export interface DepositRequest {
   userId: string;
   userName: string;
   userPhone: string;
-  method: 'bKash' | 'Nagad' | 'Rocket';
+  method: string;
+  methodCategory?: PaymentMethodCategory;
+  receiverAccountNumber?: string;
   amountBDT: number;
   pointsToAdd: number;
   transactionId: string;
   senderNumber: string;
+  senderDetails?: string;
   createdAt: string;
   status: 'pending' | 'approved' | 'rejected';
   notes?: string;

@@ -12,7 +12,7 @@ import {
   Sparkles,
   LogIn,
 } from 'lucide-react';
-import { User } from '../types';
+import { User, PaymentMethodConfig, DEFAULT_PAYMENT_METHODS } from '../types';
 import { formatFirebaseAuthError } from '../hooks/useFirebase';
 
 interface AuthPageProps {
@@ -28,6 +28,7 @@ interface AuthPageProps {
   initialView?: 'login' | 'register';
   reasonMessage?: string;
   lang?: 'bn' | 'en';
+  paymentMethods?: PaymentMethodConfig[];
 }
 
 type AuthView = 'login' | 'register';
@@ -41,6 +42,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   initialView = 'login',
   reasonMessage,
   lang = 'bn',
+  paymentMethods,
 }) => {
   const [view, setView] = useState<AuthView>(initialView);
   const [step, setStep] = useState<1 | 2>(1);
@@ -49,13 +51,29 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
 
+  const availableMethods = React.useMemo(() => {
+    const base = paymentMethods && paymentMethods.length > 0 ? paymentMethods : DEFAULT_PAYMENT_METHODS;
+    const filtered = base.filter((m) => m.isEnabled && m.supportsWithdrawal);
+    return filtered.length > 0 ? filtered : DEFAULT_PAYMENT_METHODS;
+  }, [paymentMethods]);
+
   // Registration State
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'bKash' | 'Nagad' | 'Rocket'>('bKash');
+  const [paymentMethod, setPaymentMethod] = useState<string>(() => availableMethods[0]?.name || 'bKash');
   const [paymentAccount, setPaymentAccount] = useState('');
+  const [paymentAccountHolder, setPaymentAccountHolder] = useState('');
+  const [paymentBankName, setPaymentBankName] = useState('');
+
+  React.useEffect(() => {
+    if (availableMethods.length > 0 && !availableMethods.some((m) => m.name === paymentMethod)) {
+      setPaymentMethod(availableMethods[0].name);
+    }
+  }, [availableMethods, paymentMethod]);
+
+  const selectedMethodObj = availableMethods.find((m) => m.name === paymentMethod) || availableMethods[0];
 
   // Login State
   const [loginEmail, setLoginEmail] = useState('');
@@ -120,6 +138,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({
           phone: phone.trim(),
           paymentMethod,
           paymentAccountNumber: paymentAccount.trim(),
+          paymentAccountHolder: paymentAccountHolder.trim() || undefined,
+          paymentBankName: (paymentBankName || selectedMethodObj?.bankName || '').trim() || undefined,
         }
       : undefined;
     const res = await onGoogleLogin(pending);
@@ -146,7 +166,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
     }
 
     if (!paymentAccount.trim()) {
-      setErrorMsg(lang === 'bn' ? 'পেমেন্ট নাম্বার দিন।' : 'Please enter payment account number.');
+      setErrorMsg(lang === 'bn' ? 'পেমেন্ট নাম্বার বা অ্যাকাউন্ট তথ্য দিন।' : 'Please enter payment account number.');
       return;
     }
 
@@ -156,6 +176,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({
       phone: phone.trim(),
       paymentMethod,
       paymentAccountNumber: paymentAccount.trim(),
+      paymentAccountHolder: paymentAccountHolder.trim() || undefined,
+      paymentBankName: (paymentBankName || selectedMethodObj?.bankName || '').trim() || undefined,
     });
     if (res.error) {
       setErrorMsg(formatFirebaseAuthError(res.error, lang));
@@ -398,28 +420,60 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                   <h3 className="text-base font-bold text-white">
                     {lang === 'bn' ? 'পেমেন্ট মেথড সেটআপ' : 'Payment Setup'}
                   </h3>
-                  <div className="grid grid-cols-3 gap-2">
-                    {(['bKash', 'Nagad', 'Rocket'] as const).map((m) => (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-40 overflow-y-auto no-scrollbar pr-0.5">
+                    {availableMethods.map((m) => (
                       <button
                         type="button"
-                        key={m}
-                        onClick={() => setPaymentMethod(m)}
-                        className={`py-2 rounded-xl text-[11px] font-bold border transition cursor-pointer ${
-                          paymentMethod === m
+                        key={m.id}
+                        onClick={() => {
+                          setPaymentMethod(m.name);
+                          if (m.bankName) setPaymentBankName(m.bankName);
+                        }}
+                        className={`py-2 px-2 rounded-xl text-[11px] font-bold border transition cursor-pointer text-center ${
+                          paymentMethod === m.name
                             ? 'bg-emerald-500 border-emerald-400 text-black shadow-lg shadow-emerald-500/20'
-                            : 'bg-emerald-900/10 border-emerald-900/40 text-neutral-400'
+                            : 'bg-emerald-900/10 border-emerald-900/40 text-neutral-300 hover:border-emerald-700'
                         }`}
                       >
-                        {m}
+                        <div className="truncate">{lang === 'bn' ? m.nameBn || m.name : m.name}</div>
+                        <div className={`text-[9px] truncate ${paymentMethod === m.name ? 'text-black/75' : 'text-neutral-500'}`}>
+                          {m.category === 'bank' ? 'ব্যাংক' : m.category === 'card' ? 'কার্ড' : m.category === 'mobile_banking' ? 'মোবাইল' : 'অন্যান্য'}
+                        </div>
                       </button>
                     ))}
                   </div>
+                  {(selectedMethodObj?.category === 'bank' || selectedMethodObj?.category === 'card') && (
+                    <div className="space-y-2">
+                      <input
+                        placeholder={
+                          selectedMethodObj?.category === 'bank'
+                            ? (lang === 'bn' ? 'ব্যাংকের নাম (যেমন: DBBL / IBBL)' : 'Bank Name')
+                            : (lang === 'bn' ? 'কার্ডের নাম (যেমন: Visa / MasterCard)' : 'Card Issuer')
+                        }
+                        className="w-full bg-[#0d1611] border border-emerald-900/40 rounded-2xl py-2.5 px-4 text-xs focus:outline-none focus:border-emerald-500 transition"
+                        value={paymentBankName}
+                        onChange={(e) => setPaymentBankName(e.target.value)}
+                      />
+                      <input
+                        placeholder={lang === 'bn' ? 'অ্যাকাউন্ট / কার্ড হোল্ডারের নাম' : 'Account / Card Holder Name'}
+                        className="w-full bg-[#0d1611] border border-emerald-900/40 rounded-2xl py-2.5 px-4 text-xs focus:outline-none focus:border-emerald-500 transition"
+                        value={paymentAccountHolder}
+                        onChange={(e) => setPaymentAccountHolder(e.target.value)}
+                      />
+                    </div>
+                  )}
                   <div className="relative group">
                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-neutral-500">
                       <Wallet className="w-4 h-4" />
                     </div>
                     <input
-                      placeholder={`${paymentMethod} ${lang === 'bn' ? 'নাম্বার দিন' : 'Account Number'}`}
+                      placeholder={
+                        selectedMethodObj?.category === 'bank'
+                          ? (lang === 'bn' ? 'ব্যাংক অ্যাকাউন্ট নম্বর দিন' : 'Bank Account Number')
+                          : selectedMethodObj?.category === 'card'
+                          ? (lang === 'bn' ? 'কার্ড নম্বর (শেষ ৪ ডিজিট বা কার্ড নং)' : 'Card Number / Last 4 digits')
+                          : `${selectedMethodObj?.nameBn || paymentMethod} ${lang === 'bn' ? 'নাম্বার দিন' : 'Account Number'}`
+                      }
                       className="w-full bg-[#0d1611] border border-emerald-900/40 rounded-2xl py-3 pl-11 pr-4 text-sm focus:outline-none focus:border-emerald-500 transition"
                       value={paymentAccount}
                       onChange={(e) => setPaymentAccount(e.target.value)}

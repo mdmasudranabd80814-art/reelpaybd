@@ -47,7 +47,8 @@ service cloud.firestore {
                'id', 'name', 'phone', 'email', 'password', 'points', 'role', 'avatar',
                'createdAt', 'totalWithdrawn', 'reelsWatchedCount', 'referralCode',
                'referredBy', 'referralBonusClaimed', 'isVerified', 'lastActive',
-               'paymentMethod', 'paymentAccountNumber', 'levelName', 'multiplier',
+               'paymentMethod', 'paymentAccountNumber', 'paymentAccountHolder',
+               'paymentBankName', 'paymentBranchName', 'levelName', 'multiplier',
                'dailyClaimedDate', 'lastPage', 'totalSessions', 'followersCount',
                'followingCount', 'followers', 'following', 'completedTaskIds',
                'dailyReelClaimDate', 'dailyReelClaimsCount', 'dailyReelPointsEarned',
@@ -60,6 +61,11 @@ service cloud.firestore {
              data.role in ['user', 'admin'] &&
              data.createdAt is string && data.createdAt.size() <= 64 &&
              (!('email' in data) || (data.email is string && data.email.size() <= 150)) &&
+             (!('paymentMethod' in data) || (data.paymentMethod is string && data.paymentMethod.size() <= 100)) &&
+             (!('paymentAccountNumber' in data) || (data.paymentAccountNumber is string && data.paymentAccountNumber.size() <= 100)) &&
+             (!('paymentAccountHolder' in data) || (data.paymentAccountHolder is string && data.paymentAccountHolder.size() <= 120)) &&
+             (!('paymentBankName' in data) || (data.paymentBankName is string && data.paymentBankName.size() <= 120)) &&
+             (!('paymentBranchName' in data) || (data.paymentBranchName is string && data.paymentBranchName.size() <= 120)) &&
              (!('completedTaskIds' in data) || (data.completedTaskIds is list && data.completedTaskIds.size() <= 500)) &&
              (!('followers' in data) || (data.followers is list && data.followers.size() <= 1000)) &&
              (!('following' in data) || (data.following is list && data.following.size() <= 1000)) &&
@@ -130,20 +136,44 @@ service cloud.firestore {
 
     function isValidWithdrawal(data) {
       return data.keys().hasAll(['userId', 'amountBDT', 'status', 'createdAt']) &&
-             data.keys().hasOnly(['userId', 'userName', 'userPhone', 'accountNumber', 'accountType', 'method', 'pointsDeducted', 'amountBDT', 'status', 'createdAt', 'transactionId', 'rejectionReason']) &&
+             data.keys().hasOnly([
+               'id', 'userId', 'userName', 'userPhone', 'accountNumber', 'accountType',
+               'method', 'methodCategory', 'accountHolderName', 'bankName', 'branchName',
+               'routingNumber', 'accountDetails', 'pointsDeducted', 'amountBDT',
+               'status', 'createdAt', 'transactionId', 'rejectionReason'
+             ]) &&
              data.userId == request.auth.uid &&
              data.amountBDT is number && data.amountBDT > 0 &&
              data.status == 'pending' &&
-             data.createdAt is string && data.createdAt.size() <= 64;
+             data.createdAt is string && data.createdAt.size() <= 64 &&
+             (!('method' in data) || (data.method is string && data.method.size() <= 100)) &&
+             (!('accountType' in data) || (data.accountType is string && data.accountType.size() <= 60)) &&
+             (!('accountNumber' in data) || (data.accountNumber is string && data.accountNumber.size() <= 100)) &&
+             (!('methodCategory' in data) || data.methodCategory in ['mobile_banking', 'bank', 'card', 'other']) &&
+             (!('accountHolderName' in data) || (data.accountHolderName is string && data.accountHolderName.size() <= 120)) &&
+             (!('bankName' in data) || (data.bankName is string && data.bankName.size() <= 120)) &&
+             (!('branchName' in data) || (data.branchName is string && data.branchName.size() <= 120)) &&
+             (!('routingNumber' in data) || (data.routingNumber is string && data.routingNumber.size() <= 60)) &&
+             (!('accountDetails' in data) || (data.accountDetails is string && data.accountDetails.size() <= 500));
     }
 
     function isValidDeposit(data) {
       return data.keys().hasAll(['userId', 'amountBDT', 'status', 'createdAt']) &&
-             data.keys().hasOnly(['userId', 'userName', 'userPhone', 'method', 'amountBDT', 'pointsToAdd', 'transactionId', 'senderNumber', 'status', 'createdAt', 'notes']) &&
+             data.keys().hasOnly([
+               'id', 'userId', 'userName', 'userPhone', 'method', 'methodCategory',
+               'receiverAccountNumber', 'amountBDT', 'pointsToAdd', 'transactionId',
+               'senderNumber', 'senderDetails', 'status', 'createdAt', 'notes'
+             ]) &&
              data.userId == request.auth.uid &&
              data.amountBDT is number && data.amountBDT > 0 &&
              data.status == 'pending' &&
-             data.createdAt is string && data.createdAt.size() <= 64;
+             data.createdAt is string && data.createdAt.size() <= 64 &&
+             (!('method' in data) || (data.method is string && data.method.size() <= 100)) &&
+             (!('methodCategory' in data) || data.methodCategory in ['mobile_banking', 'bank', 'card', 'other']) &&
+             (!('receiverAccountNumber' in data) || (data.receiverAccountNumber is string && data.receiverAccountNumber.size() <= 120)) &&
+             (!('senderNumber' in data) || (data.senderNumber is string && data.senderNumber.size() <= 100)) &&
+             (!('senderDetails' in data) || (data.senderDetails is string && data.senderDetails.size() <= 500)) &&
+             (!('transactionId' in data) || (data.transactionId is string && data.transactionId.size() <= 120));
     }
 
     function isValidChatSession(data) {
@@ -232,8 +262,8 @@ service cloud.firestore {
     }
 
     match /settings/{settingId} {
-      allow get: if isSignedIn() && isValidId(settingId);
-      allow list: if isAdmin() || isSignedIn();
+      allow get: if (request.auth == null || isSignedIn() || isAdmin()) && isValidId(settingId);
+      allow list: if request.auth == null || isSignedIn() || isAdmin();
       allow write: if isAdmin();
     }
 

@@ -61,6 +61,9 @@ interface FullScreenReelModalProps {
   onOpenChatWithCreator?: (creatorId: string) => void;
   savedReelIds?: string[];
   onToggleSave?: (reelId: string) => void;
+  isGiftsEnabled?: boolean;
+  isCommentsEnabled?: boolean;
+  isDirectChatEnabled?: boolean;
 }
 
 export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
@@ -94,6 +97,9 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   onOpenChatWithCreator,
   savedReelIds,
   onToggleSave,
+  isGiftsEnabled = true,
+  isCommentsEnabled = true,
+  isDirectChatEnabled = true,
 }) => {
   const [viewMode, setViewMode] = useState<'reels' | 'live'>('reels');
   const [activeLiveIndex, setActiveLiveIndex] = useState(0);
@@ -641,13 +647,15 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
                   <Heart className="w-4 h-4 fill-current" />
                   <span>{toBengaliNumber(activeLiveStreams[activeLiveIndex]?.likesCount || 1840, lang)}</span>
                 </button>
-                <button
-                  onClick={() => (onOpenGiftSheet ? onOpenGiftSheet() : setShowGiftModal(true))}
-                  className="px-4 py-2 rounded-2xl bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-black font-extrabold text-xs transition flex items-center gap-1.5 shadow-lg active:scale-95 cursor-pointer"
-                >
-                  <Gift className="w-4 h-4" />
-                  <span>{lang === 'bn' ? '🎁 গিফট পাঠান' : '🎁 Send Gift'}</span>
-                </button>
+                {isGiftsEnabled && (
+                  <button
+                    onClick={() => (onOpenGiftSheet ? onOpenGiftSheet() : setShowGiftModal(true))}
+                    className="px-4 py-2 rounded-2xl bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-black font-extrabold text-xs transition flex items-center gap-1.5 shadow-lg active:scale-95 cursor-pointer"
+                  >
+                    <Gift className="w-4 h-4" />
+                    <span>{lang === 'bn' ? '🎁 গিফট পাঠান' : '🎁 Send Gift'}</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -830,17 +838,19 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
           </button>
 
           {/* Comment Button */}
-          <button
-            onClick={() => onOpenComments(reel)}
-            className="flex flex-col items-center gap-0.5 cursor-pointer group"
-          >
-            <div className="w-12 h-12 rounded-2xl bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center hover:bg-black/60 transition">
-              <MessageCircle className="w-6 h-6" />
-            </div>
-            <span className="text-xs font-bold drop-shadow">
-              {toBengaliNumber(reel.commentsCount)}
-            </span>
-          </button>
+          {isCommentsEnabled && (
+            <button
+              onClick={() => onOpenComments(reel)}
+              className="flex flex-col items-center gap-0.5 cursor-pointer group"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center hover:bg-black/60 transition">
+                <MessageCircle className="w-6 h-6" />
+              </div>
+              <span className="text-xs font-bold drop-shadow">
+                {toBengaliNumber(reel.commentsCount)}
+              </span>
+            </button>
+          )}
 
           {/* Bookmark / সেভ Button */}
           <button
@@ -880,17 +890,19 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
           </button>
 
           {/* Gift / উপহার Button */}
-          <button
-            onClick={() => (onOpenGiftSheet ? onOpenGiftSheet() : setShowGiftModal(true))}
-            className="flex flex-col items-center gap-0.5 cursor-pointer group"
-          >
-            <div className="w-12 h-12 rounded-2xl bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center hover:bg-black/60 transition text-rose-400">
-              <Gift className="w-6 h-6" />
-            </div>
-            <span className="text-xs font-bold drop-shadow">
-              {lang === 'bn' ? 'উপহার' : 'Gift'}
-            </span>
-          </button>
+          {isGiftsEnabled && (
+            <button
+              onClick={() => (onOpenGiftSheet ? onOpenGiftSheet() : setShowGiftModal(true))}
+              className="flex flex-col items-center gap-0.5 cursor-pointer group"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center hover:bg-black/60 transition text-rose-400">
+                <Gift className="w-6 h-6" />
+              </div>
+              <span className="text-xs font-bold drop-shadow">
+                {lang === 'bn' ? 'উপহার' : 'Gift'}
+              </span>
+            </button>
+          )}
 
           {/* Reward Button or Entertainment Badge */}
           {isEarningActive ? (
@@ -990,7 +1002,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
             </button>
 
             {/* Quick Direct Message Button */}
-            {onOpenChatWithCreator && (
+            {onOpenChatWithCreator && isDirectChatEnabled && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();

@@ -63,10 +63,33 @@ import {
   VideoOff,
   MessageSquare,
   MessageSquareOff,
+  CreditCard,
+  Landmark,
+  Smartphone,
+  Wrench,
+  Copy,
 } from 'lucide-react';
 import { useFirebase } from '../hooks/useFirebase';
 import { orderBy, limit } from 'firebase/firestore';
-import { User, WithdrawalRequest, Reel, DepositRequest, ChatSession, ChatMessage, TaskItem, EarningSettings, DEFAULT_EARNING_SETTINGS, LiveStream } from '../types';
+import {
+  User,
+  WithdrawalRequest,
+  Reel,
+  DepositRequest,
+  ChatSession,
+  ChatMessage,
+  TaskItem,
+  EarningSettings,
+  DEFAULT_EARNING_SETTINGS,
+  SiteSettings,
+  DEFAULT_SITE_SETTINGS,
+  DEFAULT_PAYMENT_METHODS,
+  PaymentMethodConfig,
+  PaymentMethodCategory,
+  PAYMENT_METHOD_PRESETS,
+  Comment,
+  LiveStream,
+} from '../types';
 import { toBengaliNumber, formatTaka } from '../utils/bengali';
 import { playSuccessChime, playPopSound } from '../utils/audio';
 import { storeVideoInDB, fileToDataUrl, captureVideoThumbnail } from '../utils/videoStorage';
@@ -90,6 +113,7 @@ export interface AdminPanelProps {
   onAddReel: (reel: Omit<Reel, 'id' | 'likesCount' | 'commentsCount' | 'sharesCount' | 'viewsCount' | 'createdAt' | 'timeAgo'>) => void;
   onEditReel: (reel: Reel) => void;
   onDeleteReel: (reel: Reel, reason?: string) => void;
+  onDeleteReelComment?: (reelId: string, commentId: string) => void;
   onGiveUserBonus: (userId: string, points: number) => void;
   onUpdateUser: (updatedUser: User) => void;
   onDeleteUser: (userId: string, userName: string) => void;
@@ -111,6 +135,8 @@ export interface AdminPanelProps {
   onBroadcastNotification?: (title: string, message: string) => void;
   earningSettings?: EarningSettings;
   onUpdateEarningSettings?: (newSettings: EarningSettings) => void;
+  siteSettings?: SiteSettings;
+  onUpdateSiteSettings?: (nextSite: SiteSettings, customToast?: string) => void;
   onQuickUpdateReel?: (reelId: string, updatedData: Partial<Reel>) => void;
   onInspectLive?: (liveId: string) => void;
   onCancelLive?: (liveId: string, reason?: string) => void;
@@ -133,6 +159,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onAddReel,
   onEditReel,
   onDeleteReel,
+  onDeleteReelComment,
   onGiveUserBonus,
   onUpdateUser,
   onDeleteUser,
@@ -154,22 +181,78 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onBroadcastNotification,
   earningSettings = DEFAULT_EARNING_SETTINGS,
   onUpdateEarningSettings,
+  siteSettings = DEFAULT_SITE_SETTINGS,
+  onUpdateSiteSettings,
   onQuickUpdateReel,
   onInspectLive,
   onCancelLive,
   isAuthorizedAdmin = false,
 }) => {
   // Navigation Tabs inside Admin Panel
-  const [activeAdminTab, setActiveAdminTab] = useState<'overview' | 'reels' | 'users' | 'earning' | 'live' | 'settings' | 'withdrawals' | 'deposits' | 'chats' | 'tasks'>('reels');
+  const [activeAdminTab, setActiveAdminTab] = useState<'overview' | 'reels' | 'users' | 'earning' | 'live' | 'payments' | 'settings' | 'withdrawals' | 'deposits' | 'chats' | 'tasks'>('reels');
   
-  // Local Earning Settings State
+  // Local Earning & Site Settings State
   const [localEarning, setLocalEarning] = useState<EarningSettings>(() => earningSettings || DEFAULT_EARNING_SETTINGS);
+  const [localSite, setLocalSite] = useState<SiteSettings>(() => ({
+    ...DEFAULT_SITE_SETTINGS,
+    ...siteSettings,
+    paymentMethods:
+      siteSettings?.paymentMethods && siteSettings.paymentMethods.length > 0
+        ? siteSettings.paymentMethods
+        : DEFAULT_PAYMENT_METHODS,
+  }));
+  const [panelToast, setPanelToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  const showPanelToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    setPanelToast({ msg, type });
+    setTimeout(() => setPanelToast(null), 3200);
+  };
+
+  // Unlimited Payment Methods Form State
+  const [paymentCategoryFilter, setPaymentCategoryFilter] = useState<'all' | PaymentMethodCategory>('all');
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [pmForm, setPmForm] = useState<Omit<PaymentMethodConfig, 'id'>>({
+    name: '',
+    nameBn: '',
+    category: 'mobile_banking',
+    accountNumber: '',
+    accountTitle: '',
+    bankName: '',
+    branchName: '',
+    routingNumber: '',
+    accountTypeLabel: 'Personal',
+    instructions: '',
+    colorHex: '#00c853',
+    supportsDeposit: true,
+    supportsWithdrawal: true,
+    isEnabled: true,
+  });
+
+  // Reel Comments Moderation State
+  const [moderatingReel, setModeratingReel] = useState<Reel | null>(null);
+  const [moderatingComments, setModeratingComments] = useState<Comment[]>([]);
 
   useEffect(() => {
     if (earningSettings) {
       setLocalEarning(earningSettings);
     }
   }, [earningSettings]);
+
+  useEffect(() => {
+    if (siteSettings) {
+      setLocalSite({
+        ...DEFAULT_SITE_SETTINGS,
+        ...siteSettings,
+        paymentMethods:
+          siteSettings.paymentMethods && siteSettings.paymentMethods.length > 0
+            ? siteSettings.paymentMethods
+            : DEFAULT_PAYMENT_METHODS,
+      });
+      setRateInput(String(siteSettings.pointRate ?? pointRate));
+      setMinWithdrawInput(String(siteSettings.minWithdrawal ?? minWithdrawal));
+      setNoticeInput(siteSettings.announcement ?? announcement);
+    }
+  }, [siteSettings]);
 
   // Video offer filter & search state for the Earning Control Tab
   const [reelSearchTerm, setReelSearchTerm] = useState('');
@@ -252,6 +335,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setChatMessages([]);
     }
   }, [selectedChatId, isAdminFirebaseAuthed]);
+
+  // Sync comments for moderated reel
+  useEffect(() => {
+    if (moderatingReel && isAdminFirebaseAuthed) {
+      const unsub = adminOnSnapshot(`reels/${moderatingReel.id}/comments`, (data: any[]) => {
+        setModeratingComments(
+          (data as Comment[]).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+        );
+      });
+      return unsub;
+    } else {
+      setModeratingComments([]);
+    }
+  }, [moderatingReel?.id, isAdminFirebaseAuthed]);
 
   const handleToggleMessageHide = async (msg: ChatMessage) => {
     if (!selectedChatId || !isAdminFirebaseAuthed) return;
@@ -442,7 +539,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const handleCreateReelSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) {
-      alert('রিলের শিরোনাম লিখুন।');
+      showPanelToast('রিলের শিরোনাম লিখুন।', 'error');
       return;
     }
 
@@ -484,7 +581,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       }
 
       if (!finalVideoUrl) {
-        alert('অনুগ্রহ করে গ্যালারি থেকে একটি ভিডিও ফাইল সিলেক্ট করুন অথবা ভিডিও লিংক দিন।');
+        showPanelToast('অনুগ্রহ করে গ্যালারি থেকে একটি ভিডিও ফাইল সিলেক্ট করুন অথবা ভিডিও লিংক দিন।', 'error');
         setIsUploading(false);
         return;
       }
@@ -508,7 +605,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       });
 
       playSuccessChime();
-      alert('🎉 নতুন রিল সফলভাবে আপলোড ও পাবলিশ করা হয়েছে!');
+      showPanelToast('🎉 নতুন রিল সফলভাবে আপলোড ও পাবলিশ করা হয়েছে!');
 
       // Reset Form
       setNewTitle('');
@@ -523,36 +620,120 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setShowAddReel(false);
     } catch (err) {
       console.error('Reel upload failed:', err);
-      alert('রিল আপলোড করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।');
+      showPanelToast('রিল আপলোড করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।', 'error');
     } finally {
       setIsUploading(false);
     }
   };
 
-  // Save Settings
+  // Save Settings (atomically saves ALL site settings + feature controls to Firestore)
   const handleSaveAllSettings = (e: React.FormEvent) => {
     e.preventDefault();
-    const rateVal = parseInt(rateInput, 10);
-    if (rateVal && rateVal > 0) {
+    const rateVal = Math.max(1, parseInt(rateInput, 10) || localSite.pointRate || 10);
+    const minW = Math.max(10, parseInt(minWithdrawInput, 10) || localSite.minWithdrawal || 100);
+
+    const updatedMethods = (localSite.paymentMethods || []).map((pm) => {
+      if (pm.name === 'bKash') return { ...pm, accountNumber: bkashNumInput.trim() || pm.accountNumber };
+      if (pm.name === 'Nagad') return { ...pm, accountNumber: nagadNumInput.trim() || pm.accountNumber };
+      if (pm.name === 'Rocket') return { ...pm, accountNumber: rocketNumInput.trim() || pm.accountNumber };
+      return pm;
+    });
+
+    const mergedSite: SiteSettings = {
+      ...localSite,
+      pointRate: rateVal,
+      minWithdrawal: minW,
+      announcement: noticeInput.trim(),
+      paymentMethods: updatedMethods,
+    };
+
+    setLocalSite(mergedSite);
+    if (onUpdateSiteSettings) {
+      onUpdateSiteSettings(mergedSite, '✅ সাইট সেটিংস ও ইউজার প্যানেল কন্ট্রোল সফলভাবে সেভ করা হয়েছে!');
+    } else {
       onUpdateRate(rateVal);
-    }
-    onUpdateAnnouncement(noticeInput.trim());
-
-    if (onUpdatePaymentNumbers) {
-      onUpdatePaymentNumbers({
-        bKash: bkashNumInput.trim(),
-        Nagad: nagadNumInput.trim(),
-        Rocket: rocketNumInput.trim(),
-      });
-    }
-
-    const minW = parseInt(minWithdrawInput, 10);
-    if (minW && minW > 0 && onUpdateMinWithdrawal) {
-      onUpdateMinWithdrawal(minW);
+      onUpdateAnnouncement(noticeInput.trim());
+      if (onUpdatePaymentNumbers) {
+        onUpdatePaymentNumbers({
+          bKash: bkashNumInput.trim(),
+          Nagad: nagadNumInput.trim(),
+          Rocket: rocketNumInput.trim(),
+        });
+      }
+      if (onUpdateMinWithdrawal) {
+        onUpdateMinWithdrawal(minW);
+      }
     }
 
     playSuccessChime();
-    alert('✅ সাইট সেটিংস ও কাস্টমাইজেশন সফলভাবে সেভ করা হয়েছে!');
+    showPanelToast('✅ সাইট সেটিংস ও কাস্টমাইজেশন সফলভাবে সেভ করা হয়েছে!');
+  };
+
+  const handleSavePaymentMethod = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pmForm.name.trim() || !pmForm.accountNumber.trim()) {
+      showPanelToast('মেথডের নাম এবং অ্যাকাউন্ট / কার্ড / ওয়ালেট নম্বর দিন।', 'error');
+      return;
+    }
+
+    const cleanMethod: PaymentMethodConfig = {
+      id: editingPaymentId || `pm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: pmForm.name.trim(),
+      nameBn: pmForm.nameBn.trim() || pmForm.name.trim(),
+      category: pmForm.category,
+      accountNumber: pmForm.accountNumber.trim(),
+      accountTitle: pmForm.accountTitle?.trim() || '',
+      bankName: pmForm.bankName?.trim() || '',
+      branchName: pmForm.branchName?.trim() || '',
+      routingNumber: pmForm.routingNumber?.trim() || '',
+      accountTypeLabel: pmForm.accountTypeLabel?.trim() || 'Personal',
+      instructions: pmForm.instructions?.trim() || '',
+      colorHex: pmForm.colorHex || '#00c853',
+      supportsDeposit: pmForm.supportsDeposit,
+      supportsWithdrawal: pmForm.supportsWithdrawal,
+      isEnabled: pmForm.isEnabled,
+    };
+
+    const existingList = localSite.paymentMethods || [];
+    const nextList = editingPaymentId
+      ? existingList.map((m) => (m.id === editingPaymentId ? cleanMethod : m))
+      : [...existingList, cleanMethod];
+
+    const nextSite: SiteSettings = { ...localSite, paymentMethods: nextList };
+    setLocalSite(nextSite);
+    onUpdateSiteSettings?.(
+      nextSite,
+      editingPaymentId ? '✅ পেমেন্ট মেথড আপডেট করা হয়েছে!' : '✅ নতুন পেমেন্ট মেথড যোগ করা হয়েছে!'
+    );
+
+    if (cleanMethod.name === 'bKash') setBkashNumInput(cleanMethod.accountNumber);
+    if (cleanMethod.name === 'Nagad') setNagadNumInput(cleanMethod.accountNumber);
+    if (cleanMethod.name === 'Rocket') setRocketNumInput(cleanMethod.accountNumber);
+
+    setEditingPaymentId(null);
+    setShowPaymentForm(false);
+    playSuccessChime();
+    showPanelToast(editingPaymentId ? '✅ পেমেন্ট মেথড আপডেট করা হয়েছে!' : '✅ নতুন পেমেন্ট মেথড যোগ করা হয়েছে!');
+  };
+
+  const handleTogglePaymentMethodField = (
+    id: string,
+    field: 'isEnabled' | 'supportsDeposit' | 'supportsWithdrawal'
+  ) => {
+    const nextList = (localSite.paymentMethods || []).map((m) =>
+      m.id === id ? { ...m, [field]: !m[field] } : m
+    );
+    const nextSite: SiteSettings = { ...localSite, paymentMethods: nextList };
+    setLocalSite(nextSite);
+    onUpdateSiteSettings?.(nextSite, '✅ পেমেন্ট মেথড স্ট্যাটাস আপডেট হয়েছে!');
+    playPopSound();
+  };
+
+  const handleDeletePaymentMethod = (id: string) => {
+    const nextList = (localSite.paymentMethods || []).filter((m) => m.id !== id);
+    const nextSite: SiteSettings = { ...localSite, paymentMethods: nextList };
+    setLocalSite(nextSite);
+    onUpdateSiteSettings?.(nextSite, '🗑️ পেমেন্ট মেথড মুছে ফেলা হয়েছে!');
   };
 
   return (
@@ -655,6 +836,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveAdminTab('payments')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
+            activeAdminTab === 'payments'
+              ? 'bg-gradient-to-r from-cyan-400 to-emerald-400 text-black shadow-lg shadow-cyan-500/25 ring-2 ring-cyan-300/60'
+              : 'text-cyan-300 hover:text-white hover:bg-neutral-800'
+          }`}
+        >
+          <CreditCard className="w-3.5 h-3.5" />
+          <span>💳 পেমেন্ট মেথড ({toBengaliNumber((localSite.paymentMethods || []).length)})</span>
+        </button>
+
+        <button
           onClick={() => setActiveAdminTab('settings')}
           className={`px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
             activeAdminTab === 'settings'
@@ -663,7 +856,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           }`}
         >
           <Settings className="w-3.5 h-3.5" />
-          <span>সাইট সেটিংস</span>
+          <span>সাইট ও ফিচার কন্ট্রোল</span>
         </button>
 
         <button
@@ -957,6 +1150,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         <span className="hidden sm:inline">এডিট</span>
                       </button>
                       <button
+                        onClick={() => setModeratingReel(reel)}
+                        className="p-2 rounded-xl bg-cyan-950/60 hover:bg-cyan-600 hover:text-black text-cyan-300 transition cursor-pointer flex items-center gap-1 text-[11px] font-bold border border-cyan-900/40"
+                        title="মন্তব্য দেখুন ও ডিলিট করুন"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">মন্তব্য ({toBengaliNumber(reel.commentsCount || 0)})</span>
+                      </button>
+                      <button
                         onClick={() => {
                           triggerConfirm(
                             'রিল মুছে ফেলতে চান?',
@@ -1019,7 +1220,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <button
                   onClick={() => {
                     if (!broadcastMessage.trim()) {
-                      alert('মেসেজের তথ্য লিখুন।');
+                      showPanelToast('মেসেজের তথ্য লিখুন।', 'error');
                       return;
                     }
                     if (onBroadcastNotification) {
@@ -1064,11 +1265,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <button
                   onClick={() => {
                     if (!directMsgUserId) {
-                      alert('ইউজার সিলেক্ট করুন।');
+                      showPanelToast('ইউজার সিলেক্ট করুন।', 'error');
                       return;
                     }
                     if (!directMsgText.trim()) {
-                      alert('মেসেজের বিস্তারিত তথ্য লিখুন।');
+                      showPanelToast('মেসেজের বিস্তারিত তথ্য লিখুন।', 'error');
                       return;
                     }
                     if (onSendNotification) {
@@ -1356,7 +1557,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 if (onUpdateEarningSettings) {
                   onUpdateEarningSettings(localEarning);
                   playSuccessChime();
-                  alert('✅ সমস্ত আর্নিং সেটিংস ও কাস্টমাইজেশন সফলভাবে সেভ করা হয়েছে!');
+                  showPanelToast('✅ সমস্ত আর্নিং সেটিংস ও কাস্টমাইজেশন সফলভাবে সেভ করা হয়েছে!');
                 }
               }}
               className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-[#00c853] hover:from-amber-300 hover:to-[#00e676] text-black font-extrabold text-xs transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer active:scale-95"
@@ -2321,7 +2522,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 if (onUpdateEarningSettings) {
                   onUpdateEarningSettings(localEarning);
                   playSuccessChime();
-                  alert('✅ সমস্ত আর্নিং সেটিংস ও কাস্টমাইজেশন সফলভাবে সেভ করা হয়েছে!');
+                  showPanelToast('✅ সমস্ত আর্নিং সেটিংস ও কাস্টমাইজেশন সফলভাবে সেভ করা হয়েছে!');
                 }
               }}
               className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-400 via-emerald-400 to-[#00c853] hover:opacity-95 text-black font-black text-sm transition flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/20 cursor-pointer active:scale-95"
@@ -2825,20 +3026,475 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         );
       })()}
 
-      {/* TAB 3: SITE SETTINGS & CUSTOMIZATION */}
+      {/* TAB: UNLIMITED PAYMENT METHODS MANAGER */}
+      {activeAdminTab === 'payments' && (() => {
+        const allMethods = localSite.paymentMethods || [];
+        const filteredMethods =
+          paymentCategoryFilter === 'all'
+            ? allMethods
+            : allMethods.filter((m) => m.category === paymentCategoryFilter);
+
+        const getCategoryLabel = (cat: PaymentMethodCategory) => {
+          if (cat === 'mobile_banking') return '📱 মোবাইল ব্যাংকিং';
+          if (cat === 'bank') return '🏦 ব্যাংক অ্যাকাউন্ট';
+          if (cat === 'card') return '💳 কার্ড (Visa/MC)';
+          return '🔹 অন্যান্য';
+        };
+
+        return (
+          <div className="space-y-4 animate-in fade-in">
+            {/* Header & Add Button */}
+            <div className="rounded-2xl bg-gradient-to-r from-cyan-950 via-[#0e1f26] to-[#12241b] border border-cyan-500/40 p-4 shadow-xl flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm sm:text-base font-black text-white flex items-center gap-2">
+                  <CreditCard className="w-5 h-5 text-cyan-400" />
+                  <span>আনলিমিটেড পেমেন্ট মেথড কন্ট্রোল ({toBengaliNumber(allMethods.length)})</span>
+                </h3>
+                <p className="text-xs text-cyan-200/80 mt-0.5">
+                  মোবাইল ব্যাংকিং (bKash, Nagad, Rocket, Upay, CellFin), ব্যাংক অ্যাকাউন্ট ও ভিসা/মাস্টারকার্ড আনলিমিটেড যোগ ও কন্ট্রোল করুন
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingPaymentId(null);
+                  setPmForm({
+                    name: '',
+                    nameBn: '',
+                    category: 'mobile_banking',
+                    accountNumber: '',
+                    accountTitle: 'ReelPay BD Official',
+                    bankName: '',
+                    branchName: '',
+                    routingNumber: '',
+                    accountTypeLabel: 'Personal / Merchant',
+                    instructions: '',
+                    colorHex: '#00c853',
+                    supportsDeposit: true,
+                    supportsWithdrawal: true,
+                    isEnabled: true,
+                  });
+                  setShowPaymentForm((prev) => !prev);
+                }}
+                className="px-4 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-black font-black text-xs transition flex items-center gap-1.5 cursor-pointer shadow-lg"
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>{showPaymentForm ? 'ফর্ম বন্ধ করুন' : '+ কাস্টম পেমেন্ট মেথড'}</span>
+              </button>
+            </div>
+
+            {/* 1-Tap Quick Presets */}
+            <div className="rounded-2xl bg-[#141f19] border border-emerald-950 p-4 shadow-lg space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-black text-emerald-300 flex items-center gap-1.5">
+                  <Zap className="w-4 h-4 text-amber-400" />
+                  <span>১-ট্যাপ কুইক প্রিসেট (যে কোনো ব্যাংক, কার্ড বা ওয়ালেট সিলেক্ট করে যোগ করুন)</span>
+                </h4>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {PAYMENT_METHOD_PRESETS.map((preset) => (
+                  <button
+                    key={preset.name}
+                    type="button"
+                    onClick={() => {
+                      setEditingPaymentId(null);
+                      setPmForm({
+                        ...preset,
+                        accountNumber: '',
+                        accountTitle: 'ReelPay BD Official',
+                        branchName: '',
+                        routingNumber: '',
+                        instructions:
+                          preset.category === 'bank'
+                            ? `${preset.nameBn} অ্যাকাউন্টে ট্রান্সফার করে ট্রানজেকশন রেফারেন্স ও প্রেরকের তথ্য দিন।`
+                            : preset.category === 'card'
+                            ? `${preset.nameBn} দিয়ে পেমেন্ট করে ট্রানজেকশন আইডি ও শেষ ৪ ডিজিট দিন।`
+                            : `${preset.nameBn} থেকে সেন্ড মানি করে আপনার নম্বর ও TrxID জমা দিন।`,
+                      });
+                      setShowPaymentForm(true);
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl bg-[#0b140f] hover:bg-neutral-800 border border-emerald-950 text-[11px] font-bold text-white flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                      style={{ backgroundColor: preset.colorHex || '#00c853' }}
+                    />
+                    <span>+ {preset.nameBn}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Add / Edit Payment Method Form */}
+            {showPaymentForm && (
+              <form
+                onSubmit={handleSavePaymentMethod}
+                className="rounded-2xl bg-[#11201b] border border-cyan-500/40 p-4 shadow-xl space-y-3 animate-in fade-in"
+              >
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-black text-white">
+                    {editingPaymentId ? '✏️ পেমেন্ট মেথড এডিট করুন' : '➕ নতুন পেমেন্ট মেথড যোগ করুন'}
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPaymentForm(false);
+                      setEditingPaymentId(null);
+                    }}
+                    className="text-neutral-400 hover:text-white cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div>
+                    <label className="text-[11px] text-neutral-300 font-bold block mb-1">ক্যাটাগরি *:</label>
+                    <select
+                      value={pmForm.category}
+                      onChange={(e) => setPmForm((prev) => ({ ...prev, category: e.target.value as PaymentMethodCategory }))}
+                      className="w-full bg-[#09120e] border border-emerald-900 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400"
+                    >
+                      <option value="mobile_banking">📱 মোবাইল ব্যাংকিং (MFS)</option>
+                      <option value="bank">🏦 ব্যাংক অ্যাকাউন্ট (Bank)</option>
+                      <option value="card">💳 কার্ড (Visa / MasterCard / Amex)</option>
+                      <option value="other">🔹 অন্যান্য মেথড</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-neutral-300 font-bold block mb-1">মেথডের নাম (English) *:</label>
+                    <input
+                      type="text"
+                      value={pmForm.name}
+                      onChange={(e) => setPmForm((prev) => ({ ...prev, name: e.target.value }))}
+                      placeholder="যেমন: Visa Card / BRAC Bank / Upay"
+                      className="w-full bg-[#09120e] border border-emerald-900 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-neutral-300 font-bold block mb-1">বাংলা নাম:</label>
+                    <input
+                      type="text"
+                      value={pmForm.nameBn}
+                      onChange={(e) => setPmForm((prev) => ({ ...prev, nameBn: e.target.value }))}
+                      placeholder="যেমন: ভিসা কার্ড / ব্র্যাক ব্যাংক"
+                      className="w-full bg-[#09120e] border border-emerald-900 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-[11px] text-neutral-300 font-bold block mb-1">
+                      {pmForm.category === 'bank'
+                        ? 'অফিসিয়াল ব্যাংক অ্যাকাউন্ট নম্বর *:'
+                        : pmForm.category === 'card'
+                        ? 'কার্ড / মার্চেন্ট অ্যাকাউন্ট নম্বর *:'
+                        : 'অফিসিয়াল ওয়ালেট / পেমেন্ট নম্বর *:'}
+                    </label>
+                    <input
+                      type="text"
+                      value={pmForm.accountNumber}
+                      onChange={(e) => setPmForm((prev) => ({ ...prev, accountNumber: e.target.value }))}
+                      placeholder="যেমন: 017XXXXXXXX বা 2050XXXXXXXX বা 4532-XXXX-XXXX"
+                      className="w-full bg-[#09120e] border border-emerald-900 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-cyan-400"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-neutral-300 font-bold block mb-1">অ্যাকাউন্ট হোল্ডার / প্রাপকের নাম:</label>
+                    <input
+                      type="text"
+                      value={pmForm.accountTitle || ''}
+                      onChange={(e) => setPmForm((prev) => ({ ...prev, accountTitle: e.target.value }))}
+                      placeholder="যেমন: ReelPay BD Official"
+                      className="w-full bg-[#09120e] border border-emerald-900 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400"
+                    />
+                  </div>
+                </div>
+
+                {(pmForm.category === 'bank' || pmForm.category === 'card') && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div>
+                      <label className="text-[11px] text-neutral-300 font-bold block mb-1">ব্যাংক / কার্ড ইস্যুকারী:</label>
+                      <input
+                        type="text"
+                        value={pmForm.bankName || ''}
+                        onChange={(e) => setPmForm((prev) => ({ ...prev, bankName: e.target.value }))}
+                        placeholder="যেমন: Dutch-Bangla Bank PLC"
+                        className="w-full bg-[#09120e] border border-emerald-900 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-neutral-300 font-bold block mb-1">ব্রাঞ্চের নাম (ঐচ্ছিক):</label>
+                      <input
+                        type="text"
+                        value={pmForm.branchName || ''}
+                        onChange={(e) => setPmForm((prev) => ({ ...prev, branchName: e.target.value }))}
+                        placeholder="যেমন: Motijheel Branch"
+                        className="w-full bg-[#09120e] border border-emerald-900 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-neutral-300 font-bold block mb-1">রাউটিং নম্বর (ঐচ্ছিক):</label>
+                      <input
+                        type="text"
+                        value={pmForm.routingNumber || ''}
+                        onChange={(e) => setPmForm((prev) => ({ ...prev, routingNumber: e.target.value }))}
+                        placeholder="যেমন: 090270001"
+                        className="w-full bg-[#09120e] border border-emerald-900 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div>
+                    <label className="text-[11px] text-neutral-300 font-bold block mb-1">অ্যাকাউন্ট টাইপ লেবেল:</label>
+                    <input
+                      type="text"
+                      value={pmForm.accountTypeLabel || ''}
+                      onChange={(e) => setPmForm((prev) => ({ ...prev, accountTypeLabel: e.target.value }))}
+                      placeholder="Personal / Agent / Savings / Visa"
+                      className="w-full bg-[#09120e] border border-emerald-900 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-neutral-300 font-bold block mb-1">ব্যাজ কালার:</label>
+                    <div className="flex items-center gap-2 bg-[#09120e] border border-emerald-900 rounded-xl px-3 py-1.5">
+                      <input
+                        type="color"
+                        value={pmForm.colorHex || '#00c853'}
+                        onChange={(e) => setPmForm((prev) => ({ ...prev, colorHex: e.target.value }))}
+                        className="w-7 h-6 bg-transparent border-0 cursor-pointer"
+                      />
+                      <span className="text-[11px] font-mono text-neutral-300">{pmForm.colorHex}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 pt-4">
+                    <label className="flex items-center gap-1.5 text-xs font-bold text-emerald-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={pmForm.supportsDeposit}
+                        onChange={(e) => setPmForm((prev) => ({ ...prev, supportsDeposit: e.target.checked }))}
+                        className="accent-emerald-500"
+                      />
+                      <span>ডিপোজিট</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs font-bold text-amber-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={pmForm.supportsWithdrawal}
+                        onChange={(e) => setPmForm((prev) => ({ ...prev, supportsWithdrawal: e.target.checked }))}
+                        className="accent-amber-500"
+                      />
+                      <span>উইথড্রয়াল</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs font-bold text-cyan-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={pmForm.isEnabled}
+                        onChange={(e) => setPmForm((prev) => ({ ...prev, isEnabled: e.target.checked }))}
+                        className="accent-cyan-500"
+                      />
+                      <span>চালু (Active)</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] text-neutral-300 font-bold block mb-1">ইউজারের জন্য নির্দেশনা (Deposit Instructions):</label>
+                  <textarea
+                    rows={2}
+                    value={pmForm.instructions || ''}
+                    onChange={(e) => setPmForm((prev) => ({ ...prev, instructions: e.target.value }))}
+                    placeholder="যেমন: এই অ্যাকাউন্টে টাকা পাঠিয়ে TrxID এবং আপনার প্রেরক তথ্য সাবমিট করুন।"
+                    className="w-full bg-[#09120e] border border-emerald-900 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400 resize-none"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-400 to-[#00c853] hover:opacity-95 text-black font-black text-xs cursor-pointer shadow-lg"
+                >
+                  {editingPaymentId ? 'পেমেন্ট মেথড আপডেট করুন 💾' : 'পেমেন্ট মেথড যোগ ও পাবলিশ করুন 🚀'}
+                </button>
+              </form>
+            )}
+
+            {/* Configured Payment Methods List */}
+            <div className="rounded-2xl bg-[#141f19] border border-emerald-950 p-4 shadow-lg space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-sm font-black text-white flex items-center gap-2">
+                  <Landmark className="w-4 h-4 text-emerald-400" />
+                  <span>সক্রিয় ও সংরক্ষিত পেমেন্ট মেথড ({toBengaliNumber(filteredMethods.length)})</span>
+                </h4>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { id: 'all', label: 'সকল' },
+                    { id: 'mobile_banking', label: '📱 মোবাইল' },
+                    { id: 'bank', label: '🏦 ব্যাংক' },
+                    { id: 'card', label: '💳 কার্ড' },
+                    { id: 'other', label: '🔹 অন্যান্য' },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setPaymentCategoryFilter(tab.id as any)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition ${
+                        paymentCategoryFilter === tab.id
+                          ? 'bg-emerald-500 text-black'
+                          : 'bg-[#0b140f] text-neutral-300 hover:bg-neutral-800'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {filteredMethods.length === 0 ? (
+                <p className="text-center py-8 text-neutral-400 text-xs">এই ক্যাটাগরিতে কোনো পেমেন্ট মেথড নেই। উপরের "+ কাস্টম পেমেন্ট মেথড" থেকে যোগ করুন।</p>
+              ) : (
+                <div className="space-y-2.5">
+                  {filteredMethods.map((pm) => (
+                    <div
+                      key={pm.id}
+                      className={`p-3.5 rounded-2xl border transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                        pm.isEnabled ? 'bg-[#0e1712] border-emerald-900/80' : 'bg-[#171113] border-rose-900/50 opacity-75'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className="w-3 h-3 rounded-full shrink-0"
+                            style={{ backgroundColor: pm.colorHex || '#00c853' }}
+                          />
+                          <span className="font-black text-white text-xs sm:text-sm">
+                            {pm.nameBn} ({pm.name})
+                          </span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-200 font-bold">
+                            {getCategoryLabel(pm.category)}
+                          </span>
+                          {!pm.isEnabled && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-950 text-rose-300 font-bold border border-rose-800/40">
+                              বন্ধ (Disabled)
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs font-mono text-emerald-400 font-bold">
+                          নম্বর / অ্যাকাউন্ট: {pm.accountNumber}
+                          {pm.accountTitle ? ` • ${pm.accountTitle}` : ''}
+                        </div>
+                        {(pm.bankName || pm.branchName || pm.routingNumber) && (
+                          <p className="text-[11px] text-neutral-400">
+                            {[pm.bankName, pm.branchName ? `শাখা: ${pm.branchName}` : '', pm.routingNumber ? `রাউটিং: ${pm.routingNumber}` : '']
+                              .filter(Boolean)
+                              .join(' • ')}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleTogglePaymentMethodField(pm.id, 'supportsDeposit')}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer border ${
+                            pm.supportsDeposit
+                              ? 'bg-emerald-950 text-emerald-300 border-emerald-700/50'
+                              : 'bg-neutral-900 text-neutral-500 border-neutral-800'
+                          }`}
+                        >
+                          ডিপোজিট {pm.supportsDeposit ? 'ON' : 'OFF'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleTogglePaymentMethodField(pm.id, 'supportsWithdrawal')}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer border ${
+                            pm.supportsWithdrawal
+                              ? 'bg-amber-950 text-amber-300 border-amber-700/50'
+                              : 'bg-neutral-900 text-neutral-500 border-neutral-800'
+                          }`}
+                        >
+                          উইথড্র {pm.supportsWithdrawal ? 'ON' : 'OFF'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleTogglePaymentMethodField(pm.id, 'isEnabled')}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer border ${
+                            pm.isEnabled
+                              ? 'bg-cyan-950 text-cyan-300 border-cyan-700/50'
+                              : 'bg-rose-950 text-rose-300 border-rose-700/50'
+                          }`}
+                        >
+                          {pm.isEnabled ? 'সক্রিয়' : 'নিষ্ক্রিয়'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingPaymentId(pm.id);
+                            setPmForm({
+                              name: pm.name,
+                              nameBn: pm.nameBn,
+                              category: pm.category,
+                              accountNumber: pm.accountNumber,
+                              accountTitle: pm.accountTitle || '',
+                              bankName: pm.bankName || '',
+                              branchName: pm.branchName || '',
+                              routingNumber: pm.routingNumber || '',
+                              accountTypeLabel: pm.accountTypeLabel || '',
+                              instructions: pm.instructions || '',
+                              colorHex: pm.colorHex || '#00c853',
+                              supportsDeposit: pm.supportsDeposit,
+                              supportsWithdrawal: pm.supportsWithdrawal,
+                              isEnabled: pm.isEnabled,
+                            });
+                            setShowPaymentForm(true);
+                          }}
+                          className="p-1.5 rounded-lg bg-neutral-800 hover:bg-emerald-500 hover:text-black text-emerald-300 cursor-pointer"
+                          title="এডিট"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            triggerConfirm(
+                              'পেমেন্ট মেথড মুছে ফেলবেন?',
+                              `আপনি কি "${pm.nameBn}" মেথডটি তালিকা থেকে মুছে ফেলতে চান?`,
+                              () => handleDeletePaymentMethod(pm.id)
+                            )
+                          }
+                          className="p-1.5 rounded-lg bg-rose-950/70 hover:bg-rose-600 text-rose-300 hover:text-white cursor-pointer"
+                          title="ডিলিট"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* TAB 3: SITE SETTINGS & USER PANEL MASTER FEATURE CONTROLS */}
       {activeAdminTab === 'settings' && (
         <form onSubmit={handleSaveAllSettings} className="space-y-4">
-          {/* Point Rate & Minimum Withdrawal */}
+          {/* Point Rate, Withdrawal & Deposit Limits */}
           <div className="rounded-2xl bg-[#141f19] border border-emerald-950 p-4 shadow-lg space-y-3">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <Settings className="w-4 h-4 text-emerald-400" />
-              <span>⚙️ পয়েন্ট ও উইথড্রয়াল সেটিংস</span>
+              <span>⚙️ পয়েন্ট, ডিপোজিট ও উইথড্রয়াল লিমিট সেটিংস</span>
             </h3>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div>
                 <label className="text-xs text-neutral-400 block mb-1">
-                  পয়েন্ট কনভার্সন রেট (কত পয়েন্ট = ১ টাকা):
+                  পয়েন্ট রেট (কত পয়েন্ট = ৳১):
                 </label>
                 <input
                   type="number"
@@ -2852,7 +3508,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
               <div>
                 <label className="text-xs text-neutral-400 block mb-1">
-                  নূন্যতম ক্যাশআউট / উইথড্র টাকা:
+                  সর্বনিম্ন উইথড্র (৳):
                 </label>
                 <input
                   type="number"
@@ -2861,6 +3517,137 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   onChange={(e) => setMinWithdrawInput(e.target.value)}
                   className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-sm text-white font-bold focus:outline-none focus:border-emerald-500"
                   required
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-neutral-400 block mb-1">
+                  সর্বোচ্চ উইথড্র (৳) [০ = সীমাহীন]:
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={localSite.maxWithdrawal}
+                  onChange={(e) =>
+                    setLocalSite((prev) => ({
+                      ...prev,
+                      maxWithdrawal: Math.max(0, parseInt(e.target.value, 10) || 0),
+                    }))
+                  }
+                  className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-sm text-white font-bold focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-neutral-400 block mb-1">
+                  সর্বনিম্ন ডিপোজিট (৳):
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={localSite.minDeposit}
+                  onChange={(e) =>
+                    setLocalSite((prev) => ({
+                      ...prev,
+                      minDeposit: Math.max(1, parseInt(e.target.value, 10) || 10),
+                    }))
+                  }
+                  className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-sm text-white font-bold focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Complete User Panel Master Feature Controls */}
+          <div className="rounded-2xl bg-[#141f19] border border-emerald-900/80 p-4 shadow-lg space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h3 className="text-sm font-black text-white flex items-center gap-2">
+                <Wrench className="w-4 h-4 text-cyan-400" />
+                <span>🎛️ ইউজার প্যানেলের সকল ফিচার মাস্টার কন্ট্রোল (১-ট্যাপ অন/অফ)</span>
+              </h3>
+              <span className="text-[10px] text-cyan-300 bg-cyan-950/80 px-2.5 py-0.5 rounded-full border border-cyan-700/50 font-bold">
+                সব ডিভাইসে লাইভ সিঙ্ক হবে
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {[
+                { key: 'isDepositsEnabled', label: '💎 ইউজার ডিপোজিট সিস্টেম', desc: 'বন্ধ করলে ইউজার নতুন ডিপোজিট করতে পারবে না' },
+                { key: 'isWithdrawalsEnabled', label: '💸 ইউজার উইথড্রয়াল / ক্যাশআউট', desc: 'বন্ধ করলে উত্তোলন রিকোয়েস্ট সাময়িকভাবে বন্ধ থাকবে' },
+                { key: 'allowUserReelUpload', label: '🎬 ইউজার রিলস আপলোড (+ বাটন)', desc: 'বন্ধ করলে শুধু এডমিন রিলস আপলোড করতে পারবে' },
+                { key: 'allowUserAudioLive', label: '🎙️ ইউজার অডিও আড্ডা লাইভ', desc: 'বন্ধ করলে ইউজার অডিও লাইভ শুরু করতে পারবে না' },
+                { key: 'allowUserVideoLive', label: '📹 ইউজার ভিডিও লাইভ', desc: 'বন্ধ করলে ইউজার ভিডিও লাইভ শুরু করতে পারবে না' },
+                { key: 'isGiftsEnabled', label: '🎁 লাইভ ও রিলে গিফট পাঠানো', desc: 'গিফট বাটন ও গিফট শিট চালু/বন্ধ করুন' },
+                { key: 'isCommentsEnabled', label: '💬 রিলসে মন্তব্য (Comments)', desc: 'বন্ধ করলে ইউজাররা নতুন কমেন্ট করতে পারবে না' },
+                { key: 'isDirectChatEnabled', label: '✉️ ইউজার-টু-ইউজার সরাসরি চ্যাট', desc: 'বন্ধ করলে ইউজাররা প্রাইভেট চ্যাট শুরু করতে পারবে না' },
+                { key: 'allowGuestPreviewPoints', label: '👀 গেস্ট প্রিভিউ পয়েন্ট অর্জন', desc: 'লগইন ছাড়া গেস্ট অবস্থায় প্রিভিউ পয়েন্ট গণনা চালু/বন্ধ' },
+                { key: 'maintenanceMode', label: '🚧 মেইনটেন্যান্স মোড (সাইট সাময়িক বন্ধ)', desc: 'চালু করলে ইউজার প্যানেলে মেইনটেন্যান্স নোটিশ দেখাবে' },
+              ].map((item) => {
+                const enabled = Boolean((localSite as any)[item.key]);
+                const isMaint = item.key === 'maintenanceMode';
+                return (
+                  <div
+                    key={item.key}
+                    className={`p-3 rounded-xl border flex items-center justify-between gap-2 ${
+                      isMaint && enabled
+                        ? 'bg-rose-950/50 border-rose-500/60'
+                        : 'bg-[#0b140f] border-emerald-950'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-white">{item.label}</p>
+                      <p className="text-[10px] text-neutral-400 mt-0.5">{item.desc}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setLocalSite((prev) => ({ ...prev, [item.key]: !(prev as any)[item.key] }))
+                      }
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-black shrink-0 cursor-pointer transition ${
+                        enabled
+                          ? isMaint
+                            ? 'bg-rose-500 text-white'
+                            : 'bg-[#00c853] text-black'
+                          : 'bg-neutral-800 text-neutral-400'
+                      }`}
+                    >
+                      {enabled ? 'চালু (ON)' : 'বন্ধ (OFF)'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <div>
+                <label className="text-xs text-neutral-400 block mb-1">
+                  ইউজার নতুন রিল আপলোডের ডিফল্ট রিওয়ার্ড পয়েন্ট:
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={localSite.defaultUserReelRewardPoints}
+                  onChange={(e) =>
+                    setLocalSite((prev) => ({
+                      ...prev,
+                      defaultUserReelRewardPoints: Math.max(0, parseInt(e.target.value, 10) || 0),
+                    }))
+                  }
+                  className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white font-bold focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-neutral-400 block mb-1">
+                  মেইনটেন্যান্স মেসেজ (যদি মেইনটেন্যান্স মোড চালু থাকে):
+                </label>
+                <input
+                  type="text"
+                  value={localSite.maintenanceMessage || ''}
+                  onChange={(e) =>
+                    setLocalSite((prev) => ({ ...prev, maintenanceMessage: e.target.value }))
+                  }
+                  className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
                 />
               </div>
             </div>
@@ -2882,12 +3669,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             />
           </div>
 
-          {/* Official Payment Numbers */}
+          {/* Quick Official Payment Numbers + Link to Unlimited Manager */}
           <div className="rounded-2xl bg-[#141f19] border border-emerald-950 p-4 shadow-lg space-y-3">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <DollarSign className="w-4 h-4 text-emerald-400" />
-              <span>📱 অফিসিয়াল পেমেন্ট নাম্বার (ডিপোজিট ও হেল্পলাইন)</span>
-            </h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <DollarSign className="w-4 h-4 text-emerald-400" />
+                <span>📱 কুইক মোবাইল ব্যাংকিং নম্বর (সব ব্যাংক/ভিসা কার্ড ম্যানেজ করতে 💳 পেমেন্ট মেথড ট্যাবে যান)</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setActiveAdminTab('payments')}
+                className="px-3 py-1 rounded-lg bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 text-[11px] font-bold cursor-pointer hover:bg-cyan-500/30"
+              >
+                + আনলিমিটেড ব্যাংক / কার্ড / ওয়ালেট যোগ করুন ↗
+              </button>
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               <div>
@@ -2928,7 +3724,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             className="w-full py-3 rounded-2xl bg-[#00c853] hover:bg-[#00e676] text-black font-extrabold text-xs transition cursor-pointer shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-1.5"
           >
             <Check className="w-4 h-4" />
-            <span>সকল সেটিংস সেভ ও আপডেট করুন 💾</span>
+            <span>সকল সেটিংস ও ইউজার প্যানেল কন্ট্রোল সেভ করুন 💾</span>
           </button>
         </form>
       )}
@@ -2953,7 +3749,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <table className="w-full text-xs text-left">
                 <thead>
                   <tr className="border-b border-emerald-950 text-neutral-400">
-                    <th className="py-2 px-1">ইউজার</th>
+                    <th className="py-2 px-1">ইউজার ও অ্যাকাউন্ট তথ্য</th>
                     <th className="py-2 px-1">পরিমাণ</th>
                     <th className="py-2 px-1">মেথড</th>
                     <th className="py-2 px-1">অ্যাকশন</th>
@@ -2964,12 +3760,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <tr key={w.id} className="hover:bg-black/20">
                       <td className="py-2 px-1">
                         <div className="font-bold text-white">{w.userName}</div>
-                        <div className="text-[10px] text-neutral-400">{w.accountNumber}</div>
+                        <div className="text-[10px] text-emerald-300 font-mono">{w.accountNumber}</div>
+                        {(w.accountHolderName || w.bankName || w.branchName || w.routingNumber || w.accountDetails) && (
+                          <div className="text-[10px] text-neutral-400 mt-0.5 max-w-[220px]">
+                            {[w.accountHolderName, w.bankName, w.branchName, w.routingNumber ? `Routing: ${w.routingNumber}` : '', w.accountDetails]
+                              .filter(Boolean)
+                              .join(' • ')}
+                          </div>
+                        )}
                       </td>
                       <td className="py-2 px-1 font-bold text-emerald-400">
                         {formatTaka(w.amountBDT)}
                       </td>
-                      <td className="py-2 px-1 font-medium">{w.method}</td>
+                      <td className="py-2 px-1">
+                        <div className="font-bold text-white">{w.method}</div>
+                        {w.accountType && <div className="text-[10px] text-neutral-400">{w.accountType}</div>}
+                      </td>
                       <td className="py-2 px-1">
                         {w.status === 'pending' ? (
                           <div className="flex gap-1.5">
@@ -3029,7 +3835,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <tr className="border-b border-emerald-950 text-neutral-400">
                     <th className="py-2 px-1">ইউজার / ট্রানজেকশন</th>
                     <th className="py-2 px-1">পরিমাণ / পয়েন্ট</th>
-                    <th className="py-2 px-1">মেথড / নাম্বার</th>
+                    <th className="py-2 px-1">মেথড ও তথ্য</th>
                     <th className="py-2 px-1">অ্যাকশন</th>
                   </tr>
                 </thead>
@@ -3046,7 +3852,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </td>
                       <td className="py-2 px-1">
                         <div className="font-bold text-white">{d.method}</div>
-                        <div className="text-[10px] text-neutral-400">{d.senderNumber}</div>
+                        <div className="text-[10px] text-neutral-300 font-mono">{d.senderNumber}</div>
+                        {(d.receiverAccountNumber || d.senderDetails) && (
+                          <div className="text-[10px] text-neutral-400 mt-0.5 max-w-[200px]">
+                            {[d.receiverAccountNumber ? `To: ${d.receiverAccountNumber}` : '', d.senderDetails]
+                              .filter(Boolean)
+                              .join(' • ')}
+                          </div>
+                        )}
                       </td>
                       <td className="py-2 px-1">
                         {d.status === 'pending' ? (
@@ -3412,7 +4225,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (!taskTitle.trim()) {
-                    alert('টাস্কের শিরোনাম লিখুন।');
+                    showPanelToast('টাস্কের শিরোনাম লিখুন।', 'error');
                     return;
                   }
                   if (editingTask && onEditTask) {
@@ -4065,7 +4878,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         onUpdateUser(updated);
                         setSelectedUserForDetails(updated);
                         playSuccessChime();
-                        alert(`✅ ${selectedUserForDetails.name}-এর পয়েন্ট সফলভাবে ${pts}-এ সেট করা হয়েছে!`);
+                        showPanelToast(`✅ ${selectedUserForDetails.name}-এর পয়েন্ট সফলভাবে ${pts}-এ সেট করা হয়েছে!`);
                       }
                     }}
                     className="px-2.5 py-1 rounded-lg bg-[#00c853] hover:bg-[#00e676] text-black font-bold text-xs transition cursor-pointer"
@@ -4179,6 +4992,79 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               />
             </div>
           </div>
+        </div>
+      )}
+
+      {/* REEL COMMENTS MODERATION MODAL */}
+      {moderatingReel && (
+        <div className="fixed inset-0 z-[110] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-[#121c17] border border-cyan-800/60 rounded-3xl max-w-md w-full max-h-[82vh] flex flex-col overflow-hidden shadow-2xl">
+            <div className="p-4 bg-[#0a120e] border-b border-emerald-950 flex items-center justify-between">
+              <div className="min-w-0">
+                <h4 className="text-sm font-black text-white flex items-center gap-1.5">
+                  <MessageCircle className="w-4 h-4 text-cyan-400" />
+                  <span>মন্তব্য মডারেশন ({toBengaliNumber(moderatingComments.length)})</span>
+                </h4>
+                <p className="text-[11px] text-neutral-400 truncate mt-0.5">{moderatingReel.title}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModeratingReel(null)}
+                className="p-1.5 rounded-full hover:bg-neutral-800 text-neutral-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto space-y-2.5 flex-1">
+              {moderatingComments.length === 0 ? (
+                <p className="text-center py-8 text-xs text-neutral-400">এই রিলে কোনো মন্তব্য পাওয়া যায়নি।</p>
+              ) : (
+                moderatingComments.map((c) => (
+                  <div
+                    key={c.id}
+                    className="p-3 rounded-2xl bg-[#0b140f] border border-emerald-950 flex items-start justify-between gap-2.5"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white">{c.userName}</span>
+                        <span className="text-[10px] text-neutral-500 font-mono">{c.userId.slice(0, 8)}</span>
+                      </div>
+                      <p className="text-xs text-neutral-200 mt-1 break-words">{c.text}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (onDeleteReelComment) {
+                          onDeleteReelComment(moderatingReel.id, c.id);
+                        } else {
+                          await deleteDocument(`reels/${moderatingReel.id}/comments`, c.id).catch(() => {});
+                        }
+                        setModeratingComments((prev) => prev.filter((item) => item.id !== c.id));
+                        showPanelToast('🗑️ মন্তব্য মুছে ফেলা হয়েছে!');
+                      }}
+                      className="p-1.5 rounded-lg bg-rose-950/70 hover:bg-rose-600 text-rose-300 hover:text-white cursor-pointer shrink-0"
+                      title="মন্তব্য মুছুন"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Non-blocking Panel Toast Banner */}
+      {panelToast && (
+        <div
+          className={`fixed bottom-5 right-5 z-[130] px-4 py-2.5 rounded-2xl text-xs font-black shadow-2xl border flex items-center gap-2 animate-in fade-in ${
+            panelToast.type === 'error'
+              ? 'bg-rose-950 border-rose-500 text-rose-100'
+              : 'bg-[#0e1f17] border-emerald-400 text-emerald-100'
+          }`}
+        >
+          <span>{panelToast.msg}</span>
         </div>
       )}
     </div>

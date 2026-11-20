@@ -11,11 +11,11 @@ import {
   INITIAL_WITHDRAWALS,
   INITIAL_TASKS,
 } from './data/initialData';
-import { User, Reel, WithdrawalRequest, Comment, TaskItem, DepositRequest, Notification, LiveStream, LiveMode, ChatSession, ChatMessage, EarningSettings, DEFAULT_EARNING_SETTINGS } from './types';
+import { User, Reel, WithdrawalRequest, Comment, TaskItem, DepositRequest, Notification, LiveStream, LiveMode, ChatSession, ChatMessage, EarningSettings, DEFAULT_EARNING_SETTINGS, SiteSettings, DEFAULT_SITE_SETTINGS } from './types';
 import { Header } from './components/Header';
 import { ReelFeedCard } from './components/ReelFeedCard';
 import { BottomNav, TabType } from './components/BottomNav';
-import { ChevronRight, Sparkles, Radio, Mic, Video, Loader2, Headphones, Play, Users } from 'lucide-react';
+import { ChevronRight, Sparkles, Radio, Mic, Video, Loader2, Headphones, Play, Users, Wrench } from 'lucide-react';
 import type { StartLivePayload } from './components/GoLiveSetupModal';
 import { GiftItem } from './types';
 import { playCoinSound, playSuccessChime, playPopSound } from './utils/audio';
@@ -92,6 +92,14 @@ const toPublicProfile = (u: User) => ({
   reelsWatchedCount: u.reelsWatchedCount || 0,
   createdAt: u.createdAt || new Date().toISOString(),
 });
+
+const DEMO_USER_IDS = new Set<string>([
+  INITIAL_USER.id,
+  ...INITIAL_USERS_LIST.map((u) => u.id),
+]);
+
+const isRealUserId = (id?: string | null): id is string =>
+  Boolean(id && !id.startsWith('GUEST-') && !DEMO_USER_IDS.has(id));
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -342,6 +350,27 @@ function UserApp() {
     }
   });
 
+  // Global Site & Payment Settings controlled by Admin
+  const [siteSettings, setSiteSettings] = useState<SiteSettings>(() => {
+    try {
+      const saved = localStorage.getItem('rt_site_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          ...DEFAULT_SITE_SETTINGS,
+          ...parsed,
+          paymentMethods:
+            Array.isArray(parsed.paymentMethods) && parsed.paymentMethods.length > 0
+              ? parsed.paymentMethods
+              : DEFAULT_SITE_SETTINGS.paymentMethods,
+        };
+      }
+      return DEFAULT_SITE_SETTINGS;
+    } catch {
+      return DEFAULT_SITE_SETTINGS;
+    }
+  });
+
   // Send Notification Helper
   const sendNotification = async (userId: string, title: string, message: string, type: Notification['type']) => {
     try {
@@ -363,8 +392,8 @@ function UserApp() {
 
   // Auth Sync: strictly require verified email before reading/writing Firestore
   useEffect(() => {
+    let cancelled = false;
     if (firebaseUser && emailVerified) {
-      setIsAuthenticated(true);
       setShowAuthModal(false);
       setAuthPromptState({ open: false });
       const syncProfile = async () => {
@@ -373,6 +402,7 @@ function UserApp() {
             getDocument('users', firebaseUser.uid) as Promise<User | null>,
             getDocument('settings', 'earning').catch(() => null) as Promise<Partial<EarningSettings> | null>,
           ]);
+          if (cancelled) return;
 
           const liveSettings: EarningSettings = {
             ...DEFAULT_EARNING_SETTINGS,
@@ -402,18 +432,20 @@ function UserApp() {
             ) {
               const updatedUser: User = {
                 ...profile,
+                id: firebaseUser.uid,
                 points: (profile.points || 0) + offerPoints,
                 loginOfferClaimed: true,
                 loginOfferCampaignId: activeCampaignId,
               };
               setCurrentUser(updatedUser);
+              setIsAuthenticated(true);
               await Promise.all([
-                updateDocument('users', profile.id, {
+                updateDocument('users', firebaseUser.uid, {
                   points: increment(offerPoints),
                   loginOfferClaimed: true,
                   loginOfferCampaignId: activeCampaignId,
                 }),
-                setDocument('public_profiles', profile.id, toPublicProfile(updatedUser)).catch(() => {}),
+                setDocument('public_profiles', firebaseUser.uid, toPublicProfile(updatedUser)).catch(() => {}),
               ]);
               if (!isMuted) playSuccessChime();
               showToast(
@@ -422,8 +454,10 @@ function UserApp() {
                   : `🎁 Admin Login Offer! +${offerPoints} points credited!`
               );
             } else {
-              setCurrentUser(profile);
-              setDocument('public_profiles', profile.id, toPublicProfile(profile)).catch(() => {});
+              const hydratedProfile: User = { ...profile, id: firebaseUser.uid };
+              setCurrentUser(hydratedProfile);
+              setIsAuthenticated(true);
+              setDocument('public_profiles', firebaseUser.uid, toPublicProfile(hydratedProfile)).catch(() => {});
             }
           } else {
             let pendingReg: Partial<User> = {};
@@ -442,8 +476,10 @@ function UserApp() {
               phone: (pendingReg.phone || '').slice(0, 20),
               email: firebaseUser.email || '',
               avatar: firebaseUser.photoURL || INITIAL_USER.avatar,
-              paymentMethod: pendingReg.paymentMethod || 'bKash',
+              paymentMethod: pendingReg.paymentMethod || siteSettings.paymentMethods?.[0]?.name || 'bKash',
               paymentAccountNumber: pendingReg.paymentAccountNumber || '',
+              paymentAccountHolder: pendingReg.paymentAccountHolder || '',
+              paymentBankName: pendingReg.paymentBankName || '',
               points: offerPoints,
               role: 'user',
               createdAt: new Date().toISOString(),
@@ -461,6 +497,7 @@ function UserApp() {
             };
 
             setCurrentUser(newUser);
+            setIsAuthenticated(true);
             await Promise.all([
               setDocument('users', firebaseUser.uid, newUser),
               setDocument('public_profiles', firebaseUser.uid, toPublicProfile(newUser)).catch(() => {}),
@@ -495,6 +532,9 @@ function UserApp() {
         points: guestPoints,
       });
     }
+    return () => {
+      cancelled = true;
+    };
   }, [firebaseUser, emailVerified, guestId]);
 
   // Public Reels Listener (Viewable in Guest Mode & Verified Mode; paused during unverified gate)
@@ -579,7 +619,7 @@ function UserApp() {
 
   // Sync current user's private profile
   useEffect(() => {
-    if (isAuthenticated && firebaseUser && emailVerified && currentUser.id !== INITIAL_USER.id) {
+    if (isAuthenticated && firebaseUser && emailVerified && isRealUserId(currentUser.id) && currentUser.id === firebaseUser.uid) {
       const unsubUser = firebaseOnSnapshot('users', (data) => {
         const me = data.find(u => u.id === firebaseUser.uid) as User | undefined;
         if (me) {
@@ -592,7 +632,7 @@ function UserApp() {
 
   // Sync personal notifications
   useEffect(() => {
-    if (isAuthenticated && firebaseUser && emailVerified && currentUser.id !== INITIAL_USER.id) {
+    if (isAuthenticated && firebaseUser && emailVerified && isRealUserId(currentUser.id) && currentUser.id === firebaseUser.uid) {
       const unsub = firebaseOnSnapshot(`users/${firebaseUser.uid}/notifications`, (data) => {
         setPersonalNotifications(data as Notification[]);
       }, [orderBy('createdAt', 'desc')]);
@@ -625,17 +665,54 @@ function UserApp() {
     return unsubTasks;
   }, [firebaseUser?.uid, emailVerified]);
 
-  // Sync Earning Settings from Firestore
+  // Sync Earning & Global Site Settings from Firestore (accessible in Guest & Verified User modes)
   useEffect(() => {
-    if (!firebaseUser || !emailVerified) return;
+    if (firebaseUser && !emailVerified) return;
     const unsubSettings = firebaseOnSnapshot('settings', (data) => {
       if (data && data.length > 0) {
         const earningDoc = (data as any[]).find((d) => d.id === 'earning');
         if (earningDoc) {
           setEarningSettings((prev) => ({ ...prev, ...earningDoc }));
+          if (typeof earningDoc.spinMaxPrize === 'number') {
+            setSpinMaxPrize(earningDoc.spinMaxPrize);
+          }
+          if (typeof earningDoc.scratchCardPrize === 'number') {
+            setScratchPrize(earningDoc.scratchCardPrize);
+          }
           try {
             localStorage.setItem('rt_earning_settings', JSON.stringify(earningDoc));
-          } catch (e) {}
+          } catch {}
+        }
+
+        const siteDoc = (data as any[]).find((d) => d.id === 'site') as Partial<SiteSettings> | undefined;
+        if (siteDoc) {
+          setSiteSettings((prev) => {
+            const next: SiteSettings = {
+              ...DEFAULT_SITE_SETTINGS,
+              ...prev,
+              ...siteDoc,
+              paymentMethods:
+                Array.isArray(siteDoc.paymentMethods) && siteDoc.paymentMethods.length > 0
+                  ? siteDoc.paymentMethods
+                  : prev.paymentMethods,
+            };
+            try {
+              localStorage.setItem('rt_site_settings', JSON.stringify(next));
+            } catch {}
+            return next;
+          });
+          if (typeof siteDoc.pointRate === 'number' && siteDoc.pointRate > 0) {
+            setPointRate(siteDoc.pointRate);
+            try { localStorage.setItem('rt_point_rate', String(siteDoc.pointRate)); } catch {}
+          }
+          if (typeof siteDoc.minWithdrawal === 'number' && siteDoc.minWithdrawal > 0) {
+            setMinWithdrawal(siteDoc.minWithdrawal);
+            try { localStorage.setItem('rt_min_withdrawal', String(siteDoc.minWithdrawal)); } catch {}
+          }
+          if (typeof siteDoc.announcement === 'string') {
+            setAnnouncement(siteDoc.announcement);
+            try { localStorage.setItem('rt_announcement', siteDoc.announcement); } catch {}
+          }
         }
       }
     });
@@ -747,8 +824,10 @@ function UserApp() {
       localStorage.setItem('rt_pending_reg', JSON.stringify({
         name: userData.name || '',
         phone: userData.phone || '',
-        paymentMethod: userData.paymentMethod || 'bKash',
+        paymentMethod: userData.paymentMethod || siteSettings.paymentMethods?.[0]?.name || 'bKash',
         paymentAccountNumber: userData.paymentAccountNumber || '',
+        paymentAccountHolder: userData.paymentAccountHolder || '',
+        paymentBankName: userData.paymentBankName || '',
       }));
     } catch {}
     return registerWithEmail(email, pass, userData.name);
@@ -760,8 +839,10 @@ function UserApp() {
         localStorage.setItem('rt_pending_reg', JSON.stringify({
           name: pendingProfile.name || '',
           phone: pendingProfile.phone || '',
-          paymentMethod: pendingProfile.paymentMethod || 'bKash',
+          paymentMethod: pendingProfile.paymentMethod || siteSettings.paymentMethods?.[0]?.name || 'bKash',
           paymentAccountNumber: pendingProfile.paymentAccountNumber || '',
+          paymentAccountHolder: pendingProfile.paymentAccountHolder || '',
+          paymentBankName: pendingProfile.paymentBankName || '',
         }));
       } catch {}
     }
@@ -771,10 +852,18 @@ function UserApp() {
   // Activity Tracking Effect (for verified user)
   useEffect(() => {
     const updateTracking = () => {
-      if (!isAuthenticated || !firebaseUser || !emailVerified || currentUser.id === INITIAL_USER.id) return;
+      if (
+        !isAuthenticated ||
+        !firebaseUser ||
+        !emailVerified ||
+        !isRealUserId(currentUser.id) ||
+        currentUser.id !== firebaseUser.uid
+      ) {
+        return;
+      }
       const now = new Date().toISOString();
       const pageInfo = fullScreenReelId ? `Reel: ${fullScreenReelId}` : `Tab: ${activeTab}`;
-      updateDocument('users', currentUser.id, {
+      updateDocument('users', firebaseUser.uid, {
         lastActive: now,
         lastPage: pageInfo,
         totalSessions: (currentUser.totalSessions || 0) + (currentUser.lastActive ? 0 : 1),
@@ -789,7 +878,15 @@ function UserApp() {
   // Fast & Atomic Optimistic Point Mutation Helper (0ms UI response + Firestore increment)
   const applyFastUserMutation = (pointDelta: number, extraFields: Record<string, any> = {}) => {
     const activeUser = currentUserRef.current;
-    if (!isAuthenticated || activeUser.id === INITIAL_USER.id) return;
+    if (
+      !isAuthenticated ||
+      !firebaseUser ||
+      !emailVerified ||
+      !isRealUserId(activeUser.id) ||
+      activeUser.id !== firebaseUser.uid
+    ) {
+      return;
+    }
 
     const currentPts = activeUser.points || 0;
     const safeDelta = pointDelta < 0 ? -Math.min(currentPts, Math.abs(pointDelta)) : pointDelta;
@@ -909,6 +1006,14 @@ function UserApp() {
     }
 
     if (!isAuthenticated) {
+      if (!siteSettings.allowGuestPreviewPoints) {
+        showToast(
+          lang === 'bn'
+            ? '🔒 গেস্ট প্রিভিউ পয়েন্ট বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে। রিয়েল পয়েন্ট পেতে লগইন করুন!'
+            : '🔒 Guest preview points disabled by Admin. Please log in to earn!'
+        );
+        return;
+      }
       if (targetReelId && guestWatchedReelIds.includes(targetReelId)) {
         showToast(
           lang === 'bn'
@@ -952,6 +1057,9 @@ function UserApp() {
 
     // 4. Enforce Admin-controlled Daily Reel & Point Limits
     const activeUser = currentUserRef.current;
+    if (!firebaseUser || !isRealUserId(activeUser.id) || activeUser.id !== firebaseUser.uid) {
+      return;
+    }
     const sameDay = activeUser.dailyReelClaimDate === todayKey;
     const usedClaims = sameDay ? (activeUser.dailyReelClaimsCount || 0) : 0;
     const usedPoints = sameDay ? (activeUser.dailyReelPointsEarned || 0) : 0;
@@ -1125,6 +1233,14 @@ function UserApp() {
     }
 
     if (!isAuthenticated) {
+      if (!siteSettings.allowGuestPreviewPoints) {
+        showToast(
+          lang === 'bn'
+            ? '🔒 গেস্ট প্রিভিউ পয়েন্ট বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে। রিয়েল পয়েন্ট পেতে লগইন করুন!'
+            : '🔒 Guest preview points disabled by Admin. Please log in to earn!'
+        );
+        return;
+      }
       if (guestWatchedReelIds.includes(reel.id)) {
         showToast(
           lang === 'bn'
@@ -1177,6 +1293,10 @@ function UserApp() {
 
   // Add Comment
   const handleAddComment = async (reelId: string, text: string) => {
+    if (!siteSettings.isCommentsEnabled) {
+      showToast(lang === 'bn' ? '🔒 এডমিন কর্তৃক মন্তব্য করা সাময়িকভাবে বন্ধ রাখা হয়েছে।' : '🔒 Comments disabled by Admin.');
+      return;
+    }
     if (!isAuthenticated) {
       triggerAuthPrompt(
         lang === 'bn'
@@ -1208,6 +1328,20 @@ function UserApp() {
   const handleRequestWithdrawal = async (
     reqData: Omit<WithdrawalRequest, 'id' | 'createdAt' | 'status'>
   ) => {
+    if (!siteSettings.isWithdrawalsEnabled) {
+      showToast(lang === 'bn' ? '🔒 উইথড্রয়াল সিস্টেম বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : '🔒 Withdrawals are disabled by Admin.');
+      return;
+    }
+    const effectiveMin = siteSettings.minWithdrawal || minWithdrawal;
+    const effectiveMax = siteSettings.maxWithdrawal || 0;
+    if (reqData.amountBDT < effectiveMin) {
+      showToast(lang === 'bn' ? `⚠️ সর্বনিম্ন উত্তোলন ৳${effectiveMin}` : `⚠️ Minimum withdrawal is ৳${effectiveMin}`);
+      return;
+    }
+    if (effectiveMax > 0 && reqData.amountBDT > effectiveMax) {
+      showToast(lang === 'bn' ? `⚠️ সর্বোচ্চ উত্তোলন ৳${effectiveMax}` : `⚠️ Maximum withdrawal is ৳${effectiveMax}`);
+      return;
+    }
     const activeUser = currentUserRef.current;
     if ((activeUser.points || 0) < reqData.pointsDeducted) {
       showToast(lang === 'bn' ? '⚠️ আপনার অ্যাকাউন্টে পর্যাপ্ত পয়েন্ট নেই!' : '⚠️ Insufficient points!');
@@ -1231,6 +1365,14 @@ function UserApp() {
 
   // Deposit Points (Manual Request)
   const handleSubmitDepositRequest = async (req: Omit<DepositRequest, 'id' | 'createdAt' | 'status' | 'userId' | 'userName' | 'userPhone'>) => {
+    if (!siteSettings.isDepositsEnabled) {
+      showToast(lang === 'bn' ? '🔒 ডিপোজিট সিস্টেম বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : '🔒 Deposits are disabled by Admin.');
+      return;
+    }
+    if (siteSettings.minDeposit > 0 && req.amountBDT < siteSettings.minDeposit) {
+      showToast(lang === 'bn' ? `⚠️ সর্বনিম্ন ডিপোজিট ৳${siteSettings.minDeposit}` : `⚠️ Minimum deposit is ৳${siteSettings.minDeposit}`);
+      return;
+    }
     const newReq: Partial<DepositRequest> = {
       ...req,
       userId: currentUser.id,
@@ -1257,6 +1399,10 @@ function UserApp() {
     explicitLiveId?: string,
     _explicitAdminShare?: number
   ) => {
+    if (!siteSettings.isGiftsEnabled) {
+      showToast(lang === 'bn' ? '🔒 গিফট পাঠানো বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : '🔒 Gifts are disabled by Admin.');
+      return;
+    }
     if (!isAuthenticated) {
       triggerAuthPrompt(
         lang === 'bn'
@@ -1293,24 +1439,28 @@ function UserApp() {
       setUsers((prev) =>
         prev.map((u) => (u.id === resolvedTargetUserId ? { ...u, points: (u.points || 0) + creatorShare } : u))
       );
-      updateDocument('users', resolvedTargetUserId, { points: increment(creatorShare) }).catch((err) =>
-        console.warn('Gift creator credit warning:', err)
-      );
-      sendNotification(
-        resolvedTargetUserId,
-        '🎁 উপহার পেয়েছেন',
-        `অভিনন্দন! ${currentUserRef.current.name} আপনাকে ${gift.icon} ${gift.nameBn} উপহার দিয়েছেন (+${creatorShare} পয়েন্ট যুক্ত হয়েছে)।`,
-        'general'
-      );
+      if (isRealUserId(resolvedTargetUserId)) {
+        updateDocument('users', resolvedTargetUserId, { points: increment(creatorShare) }).catch((err) =>
+          console.warn('Gift creator credit warning:', err)
+        );
+        sendNotification(
+          resolvedTargetUserId,
+          '🎁 উপহার পেয়েছেন',
+          `অভিনন্দন! ${currentUserRef.current.name} আপনাকে ${gift.icon} ${gift.nameBn} উপহার দিয়েছেন (+${creatorShare} পয়েন্ট যুক্ত হয়েছে)।`,
+          'general'
+        );
+      }
     }
 
     if (adminShare > 0 && adminUid && adminUid !== currentUserRef.current.id) {
       setUsers((prev) =>
         prev.map((u) => (u.id === adminUid ? { ...u, points: (u.points || 0) + adminShare } : u))
       );
-      updateDocument('users', adminUid, { points: increment(adminShare) }).catch((err) =>
-        console.warn('Gift admin commission credit warning:', err)
-      );
+      if (isRealUserId(adminUid)) {
+        updateDocument('users', adminUid, { points: increment(adminShare) }).catch((err) =>
+          console.warn('Gift admin commission credit warning:', err)
+        );
+      }
     }
 
     if (resolvedLiveId) {
@@ -1426,46 +1576,54 @@ function UserApp() {
         : increment(1),
     };
 
-    try {
-      await Promise.all([
-        updateDocument('users', me.id, selfFollowPatch),
-        updateDocument('public_profiles', me.id, selfFollowPatch).catch(() => {}),
-      ]);
-    } catch (err) {
-      console.warn('Follow sync on self warning:', err);
+    if (isRealUserId(me.id) && firebaseUser && me.id === firebaseUser.uid) {
+      try {
+        await Promise.all([
+          updateDocument('users', me.id, selfFollowPatch),
+          updateDocument('public_profiles', me.id, selfFollowPatch).catch(() => {}),
+        ]);
+      } catch (err) {
+        console.warn('Follow sync on self warning:', err);
+      }
     }
 
-    try {
-      const targetLocal = users.find((u) => u.id === targetUserId);
-      const targetFollowersCount = targetLocal?.followersCount ?? (targetLocal?.followers?.length || 0);
-      const targetFollowPatch = {
-        followers: currentlyFollowing ? arrayRemove(me.id) : arrayUnion(me.id),
-        followersCount: currentlyFollowing
-          ? targetFollowersCount > 0 ? increment(-1) : 0
-          : increment(1),
-      };
+    if (isRealUserId(targetUserId)) {
+      try {
+        const targetLocal = users.find((u) => u.id === targetUserId);
+        const targetFollowersCount = targetLocal?.followersCount ?? (targetLocal?.followers?.length || 0);
+        const targetFollowPatch = {
+          followers: currentlyFollowing ? arrayRemove(me.id) : arrayUnion(me.id),
+          followersCount: currentlyFollowing
+            ? targetFollowersCount > 0 ? increment(-1) : 0
+            : increment(1),
+        };
 
-      await Promise.all([
-        updateDocument('users', targetUserId, targetFollowPatch).catch(() => {}),
-        updateDocument('public_profiles', targetUserId, targetFollowPatch).catch(() => {}),
-      ]);
+        await Promise.all([
+          updateDocument('users', targetUserId, targetFollowPatch).catch(() => {}),
+          updateDocument('public_profiles', targetUserId, targetFollowPatch).catch(() => {}),
+        ]);
 
-      if (!currentlyFollowing) {
-        sendNotification(
-          targetUserId,
-          lang === 'bn' ? '👥 নতুন ফলোয়ার!' : '👥 New Follower!',
-          lang === 'bn'
-            ? `${me.name} আপনাকে ফলো করা শুরু করেছেন।`
-            : `${me.name} started following you.`,
-          'general'
-        );
+        if (!currentlyFollowing) {
+          sendNotification(
+            targetUserId,
+            lang === 'bn' ? '👥 নতুন ফলোয়ার!' : '👥 New Follower!',
+            lang === 'bn'
+              ? `${me.name} আপনাকে ফলো করা শুরু করেছেন।`
+              : `${me.name} started following you.`,
+            'general'
+          );
+        }
+      } catch (err) {
+        console.warn('Follow sync on target warning:', err);
       }
-    } catch (err) {
-      console.warn('Follow sync on target warning:', err);
     }
   };
 
   const handleOpenChat = async (otherUser: User) => {
+    if (!siteSettings.isDirectChatEnabled) {
+      showToast(lang === 'bn' ? '🔒 ডিরেক্ট চ্যাট বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : '🔒 Direct chat is disabled by Admin.');
+      return;
+    }
     if (!isAuthenticated) {
       triggerAuthPrompt(
         lang === 'bn'
@@ -1499,6 +1657,10 @@ function UserApp() {
   };
 
   const handleShareInChat = (reel: Reel) => {
+    if (!siteSettings.isDirectChatEnabled) {
+      showToast(lang === 'bn' ? '🔒 ডিরেক্ট চ্যাট বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : '🔒 Direct chat is disabled by Admin.');
+      return;
+    }
     if (!isAuthenticated) {
       triggerAuthPrompt(
         lang === 'bn'
@@ -1572,7 +1734,14 @@ function UserApp() {
 
   // Task Completion (Instant 0ms + atomic increment)
   const handleCompleteTask = (taskId: string, rewardPoints: number) => {
-    if (!isAuthenticated || currentUserRef.current.id === INITIAL_USER.id) return;
+    if (
+      !isAuthenticated ||
+      !firebaseUser ||
+      !isRealUserId(currentUserRef.current.id) ||
+      currentUserRef.current.id !== firebaseUser.uid
+    ) {
+      return;
+    }
     const currentCompleted = currentUserRef.current.completedTaskIds || [];
     if (!currentCompleted.includes(taskId)) {
       const updatedCompleted = [...currentCompleted, taskId];
@@ -1590,8 +1759,13 @@ function UserApp() {
   const handleAddNewReel = async (
     newReelData: Pick<Reel, 'title' | 'userId' | 'creatorName' | 'creatorHandle' | 'creatorAvatar' | 'category' | 'thumbnailUrl' | 'videoUrl' | 'pointsReward' | 'audioTrack' | 'caption' | 'hashtags' | 'isVerified'>
   ) => {
+    if (!siteSettings.allowUserReelUpload) {
+      showToast(lang === 'bn' ? '🔒 এডমিন কর্তৃক ইউজার রিল আপলোড সাময়িকভাবে বন্ধ রয়েছে।' : '🔒 Reel upload disabled by Admin.');
+      return;
+    }
     const newReel: Reel = {
       ...newReelData,
+      pointsReward: newReelData.pointsReward ?? siteSettings.defaultUserReelRewardPoints ?? 10,
       id: `reel_${Date.now()}`,
       videoUrl: newReelData.videoUrl, // Preserve user's original video
       userId: newReelData.userId || firebaseUser?.uid || currentUser.id,
@@ -1640,6 +1814,10 @@ function UserApp() {
   };
 
   const openPersonalLiveStudio = (mode: LiveMode = 'audio') => {
+    if (!siteSettings.allowUserAudioLive && !siteSettings.allowUserVideoLive) {
+      showToast(lang === 'bn' ? '🔒 লাইভ স্ট্রিমিং বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : '🔒 Live streaming is disabled by Admin.');
+      return;
+    }
     if (!isAuthenticated) {
       triggerAuthPrompt(
         lang === 'bn'
@@ -1654,12 +1832,22 @@ function UserApp() {
       setShowLiveSheet(true);
       return;
     }
-    setGoLiveInitialMode(mode);
+    let resolvedMode = mode;
+    if (mode === 'audio' && !siteSettings.allowUserAudioLive && siteSettings.allowUserVideoLive) {
+      resolvedMode = 'video';
+    } else if (mode === 'video' && !siteSettings.allowUserVideoLive && siteSettings.allowUserAudioLive) {
+      resolvedMode = 'audio';
+    }
+    setGoLiveInitialMode(resolvedMode);
     setShowGoLiveSetupModal(true);
   };
 
   const handleStartLive = async (payload: StartLivePayload) => {
     if (!isAuthenticated) return;
+    if ((payload.mode === 'audio' && !siteSettings.allowUserAudioLive) || (payload.mode === 'video' && !siteSettings.allowUserVideoLive)) {
+      showToast(lang === 'bn' ? '🔒 এই লাইভ মোডটি এডমিন কর্তৃক বন্ধ রয়েছে।' : '🔒 This live mode is disabled by Admin.');
+      return;
+    }
 
     const hostId = firebaseUser?.uid || currentUser.id;
 
@@ -1817,13 +2005,15 @@ function UserApp() {
     if (currentUser.id === updatedUser.id) {
       setCurrentUser(updatedUser);
     }
-    try {
-      await Promise.all([
-        updateDocument('users', updatedUser.id, updatedUser),
-        updateDocument('public_profiles', updatedUser.id, toPublicProfile(updatedUser)).catch(() => {}),
-      ]);
-    } catch (err) {
-      console.warn('Firestore update user note:', err);
+    if (isRealUserId(updatedUser.id)) {
+      try {
+        await Promise.all([
+          updateDocument('users', updatedUser.id, updatedUser),
+          updateDocument('public_profiles', updatedUser.id, toPublicProfile(updatedUser)).catch(() => {}),
+        ]);
+      } catch (err) {
+        console.warn('Firestore update user note:', err);
+      }
     }
     showToast(lang === 'bn' ? '✅ প্রোফাইল সফলভাবে আপডেট করা হয়েছে!' : '✅ Profile updated!');
   };
@@ -1873,6 +2063,29 @@ function UserApp() {
         onResendEmail={resendVerificationEmail}
         onLogout={firebaseLogout}
       />
+    );
+  }
+
+  if (siteSettings.maintenanceMode) {
+    return (
+      <div className="min-h-screen bg-[#0a0f0d] text-white flex flex-col items-center justify-center p-6 text-center">
+        <div className="max-w-sm w-full bg-[#121f18] border border-amber-500/40 rounded-3xl p-6 space-y-4 shadow-2xl">
+          <div className="w-16 h-16 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center mx-auto">
+            <Wrench className="w-8 h-8" />
+          </div>
+          <h2 className="text-xl font-black text-white">মেইনটেন্যান্স চলছে</h2>
+          <p className="text-xs text-neutral-300 leading-relaxed">
+            {siteSettings.maintenanceMessage || DEFAULT_SITE_SETTINGS.maintenanceMessage}
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="w-full py-3 rounded-2xl bg-[#00c853] hover:bg-[#00e676] text-black font-bold text-xs cursor-pointer transition"
+          >
+            পুনরায় যাচাই করুন
+          </button>
+        </div>
+      </div>
     );
   }
 
@@ -2326,6 +2539,8 @@ function UserApp() {
                                   isDailyLimitReached={isDailyReelLimitReached}
                                   isSaved={savedReelIds.includes(reel.id)}
                                   onToggleSave={handleToggleSave}
+                                  isGiftsEnabled={siteSettings.isGiftsEnabled}
+                                  isCommentsEnabled={siteSettings.isCommentsEnabled}
                                 />
 
                                 {/* In-feed Live Recommendation Interstitial Card after 1st reel */}
@@ -2451,7 +2666,11 @@ function UserApp() {
                       onRequestWithdrawal={handleRequestWithdrawal}
                       onDepositClick={() => setShowDepositSheet(true)}
                       isMuted={isMuted}
-                      minWithdrawal={minWithdrawal}
+                      minWithdrawal={siteSettings.minWithdrawal || minWithdrawal}
+                      maxWithdrawal={siteSettings.maxWithdrawal}
+                      isWithdrawalsEnabled={siteSettings.isWithdrawalsEnabled}
+                      isDepositsEnabled={siteSettings.isDepositsEnabled}
+                      paymentMethods={siteSettings.paymentMethods}
                     />
                   ) : (
                     <GuestWalletView
@@ -2488,14 +2707,24 @@ function UserApp() {
                       onOpenReel={(r) => setFullScreenReelId(r.id)}
                       onEditReel={(r) => setEditingReel(r)}
                       onDeleteReel={handleDeleteReel}
-                      onOpenChatList={() => setIsChatListModalOpen(true)}
+                      onOpenChatList={() => {
+                        if (!siteSettings.isDirectChatEnabled) {
+                          showToast(lang === 'bn' ? '🔒 ডিরেক্ট চ্যাট বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : '🔒 Direct chat paused by Admin.');
+                          return;
+                        }
+                        setIsChatListModalOpen(true);
+                      }}
                       onOpenFollowList={(tab) => setFollowListModal({ user: currentUser, tab })}
                       onOpenWallet={() => setActiveTab('wallet')}
-                      minWithdrawal={minWithdrawal}
+                      minWithdrawal={siteSettings.minWithdrawal || minWithdrawal}
                       earningSettings={earningSettings}
                       savedReelIds={savedReelIds}
                       onToggleSave={handleToggleSave}
                       onNavigateToHome={() => setActiveTab('home')}
+                      paymentMethods={siteSettings.paymentMethods}
+                      allowUserAudioLive={siteSettings.allowUserAudioLive}
+                      allowUserVideoLive={siteSettings.allowUserVideoLive}
+                      isDirectChatEnabled={siteSettings.isDirectChatEnabled}
                     />
                   ) : (
                     <GuestProfileView
@@ -2591,7 +2820,14 @@ function UserApp() {
               followingIds={currentUser.following || []}
               savedReelIds={savedReelIds}
               onToggleSave={handleToggleSave}
+              isGiftsEnabled={siteSettings.isGiftsEnabled}
+              isCommentsEnabled={siteSettings.isCommentsEnabled}
+              isDirectChatEnabled={siteSettings.isDirectChatEnabled}
               onOpenChatWithCreator={async (creatorId) => {
+                if (!siteSettings.isDirectChatEnabled) {
+                  showToast(lang === 'bn' ? '🔒 ডিরেক্ট চ্যাট বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : '🔒 Direct chat paused by Admin.');
+                  return;
+                }
                 if (!isAuthenticated) {
                   triggerAuthPrompt(
                     lang === 'bn'
@@ -2635,6 +2871,7 @@ function UserApp() {
                 setActiveCommentReel(null);
                 handleOpenUserProfile(userId);
               }}
+              isCommentsEnabled={siteSettings.isCommentsEnabled}
             />
           )}
 
@@ -2656,6 +2893,9 @@ function UserApp() {
               onOpenLive={() => openPersonalLiveStudio('audio')}
               lang={lang}
               isMuted={isMuted}
+              allowUserReelUpload={siteSettings.allowUserReelUpload}
+              defaultReelRewardPoints={siteSettings.defaultUserReelRewardPoints}
+              allowUserLive={siteSettings.allowUserAudioLive || siteSettings.allowUserVideoLive}
             />
           )}
 
@@ -2668,6 +2908,8 @@ function UserApp() {
               initialMode={goLiveInitialMode}
               onStartLive={handleStartLive}
               lang={lang}
+              allowAudioLive={siteSettings.allowUserAudioLive}
+              allowVideoLive={siteSettings.allowUserVideoLive}
             />
           )}
 
@@ -2701,6 +2943,9 @@ function UserApp() {
               lang={lang}
               isMuted={isMuted}
               adminPaymentNumbers={adminPaymentNumbers}
+              paymentMethods={siteSettings.paymentMethods}
+              minDeposit={siteSettings.minDeposit}
+              isDepositsEnabled={siteSettings.isDepositsEnabled}
             />
           )}
 
@@ -2731,6 +2976,7 @@ function UserApp() {
               onOpenProfile={handleOpenUserProfile}
               onToggleFollow={handleToggleFollow}
               isAdminOverride={false}
+              isGiftsEnabled={siteSettings.isGiftsEnabled}
               isFollowingHost={Boolean(
                 (() => {
                   const activeLive = activeLiveStreams.find((s) => s.id === currentLiveStreamId);
@@ -2795,6 +3041,7 @@ function UserApp() {
                 setFullScreenReelId(r.id);
                 setIsUserProfileModalOpen(false);
               }}
+              isDirectChatEnabled={siteSettings.isDirectChatEnabled}
             />
           )}
 
@@ -2880,7 +3127,7 @@ function UserApp() {
         />
 
         {/* Dismissible Login / Registration Overlay for Guest Users */}
-        {showAuthModal && !isAuthenticated && (
+        {showAuthModal && !firebaseUser && (
           <div className="fixed inset-0 z-[80] overflow-y-auto bg-[#0a0f0d]">
             <AuthPage
               onEmailLogin={loginWithEmail}
@@ -2890,6 +3137,7 @@ function UserApp() {
               onClose={() => setShowAuthModal(false)}
               initialView={authModalView}
               lang={lang}
+              paymentMethods={siteSettings.paymentMethods}
             />
           </div>
         )}

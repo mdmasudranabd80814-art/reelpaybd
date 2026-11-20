@@ -26,8 +26,9 @@ import {
   Bookmark,
   Play,
   Sparkles,
+  Lock,
 } from 'lucide-react';
-import { User, Reel, EarningSettings, LiveStream, LiveMode } from '../types';
+import { User, Reel, EarningSettings, LiveStream, LiveMode, PaymentMethodConfig, DEFAULT_PAYMENT_METHODS } from '../types';
 import { toBengaliNumber, formatTaka } from '../utils/bengali';
 import { getUserLevel, getNextLevel, getProgressToNextLevel } from '../utils/levels';
 import { ProfileInfoModal, ProfileInfoModalMode } from './ProfileInfoModal';
@@ -61,6 +62,10 @@ interface ProfileViewProps {
   savedReelIds?: string[];
   onToggleSave?: (reelId: string) => void;
   onNavigateToHome?: () => void;
+  paymentMethods?: PaymentMethodConfig[];
+  allowUserAudioLive?: boolean;
+  allowUserVideoLive?: boolean;
+  isDirectChatEnabled?: boolean;
 }
 
 export const ProfileView: React.FC<ProfileViewProps> = ({
@@ -92,7 +97,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   savedReelIds = [],
   onToggleSave,
   onNavigateToHome,
+  paymentMethods,
+  allowUserAudioLive = true,
+  allowUserVideoLive = true,
+  isDirectChatEnabled = true,
 }) => {
+  const availablePaymentMethods = React.useMemo(() => {
+    const base = paymentMethods && paymentMethods.length > 0 ? paymentMethods : DEFAULT_PAYMENT_METHODS;
+    const enabled = base.filter((m) => m.isEnabled);
+    return enabled.length > 0 ? enabled : DEFAULT_PAYMENT_METHODS;
+  }, [paymentMethods]);
+
   const [activeMediaTab, setActiveMediaTab] = useState<'my_reels' | 'saved'>('my_reels');
   const [isEditing, setIsEditing] = useState(false);
   const [infoModalMode, setInfoModalMode] = useState<ProfileInfoModalMode | null>(null);
@@ -104,17 +119,25 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [phoneInput, setPhoneInput] = useState(user.phone);
   const [emailInput, setEmailInput] = useState(user.email || '');
   const [avatarInput, setAvatarInput] = useState(user.avatar || '');
-  const [methodInput, setMethodInput] = useState<'bKash' | 'Nagad' | 'Rocket'>(user.paymentMethod || 'bKash');
+  const [methodInput, setMethodInput] = useState<string>(user.paymentMethod || availablePaymentMethods[0]?.name || 'bKash');
   const [accNumInput, setAccNumInput] = useState(user.paymentAccountNumber || '');
+  const [accHolderInput, setAccHolderInput] = useState(user.paymentAccountHolder || '');
+  const [bankNameInput, setBankNameInput] = useState(user.paymentBankName || '');
+  const [branchNameInput, setBranchNameInput] = useState(user.paymentBranchName || '');
 
   React.useEffect(() => {
     setNameInput(user.name);
     setPhoneInput(user.phone);
     setEmailInput(user.email || '');
     setAvatarInput(user.avatar || '');
-    setMethodInput(user.paymentMethod || 'bKash');
+    setMethodInput(user.paymentMethod || availablePaymentMethods[0]?.name || 'bKash');
     setAccNumInput(user.paymentAccountNumber || '');
-  }, [user.id, user.name, user.phone, user.email, user.avatar, user.paymentMethod, user.paymentAccountNumber]);
+    setAccHolderInput(user.paymentAccountHolder || '');
+    setBankNameInput(user.paymentBankName || '');
+    setBranchNameInput(user.paymentBranchName || '');
+  }, [user.id, user.name, user.phone, user.email, user.avatar, user.paymentMethod, user.paymentAccountNumber, user.paymentAccountHolder, user.paymentBankName, user.paymentBranchName]);
+
+  const selectedMethodConfig = availablePaymentMethods.find((m) => m.name === methodInput);
 
   const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -152,6 +175,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         avatar: avatarInput.trim() || user.avatar,
         paymentMethod: methodInput,
         paymentAccountNumber: accNumInput.trim(),
+        paymentAccountHolder: accHolderInput.trim(),
+        paymentBankName: bankNameInput.trim(),
+        paymentBranchName: branchNameInput.trim(),
       });
       setIsEditing(false);
     }
@@ -262,23 +288,38 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               )}
             </div>
           </div>
+        ) : !allowUserAudioLive && !allowUserVideoLive ? (
+          <div className="p-3 rounded-xl bg-black/40 border border-neutral-800 text-center text-xs text-neutral-400 flex items-center justify-center gap-1.5">
+            <Lock className="w-3.5 h-3.5 text-amber-400" />
+            <span>{lang === 'bn' ? 'পার্সোনাল লাইভ স্টুডিও বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে' : 'Personal Live Studio is paused by Admin'}</span>
+          </div>
         ) : (
           <div className="grid grid-cols-2 gap-2.5">
             <button
               type="button"
-              onClick={() => handleLaunchPersonalLive('audio')}
-              className="min-h-[48px] px-3 py-2.5 rounded-xl bg-[#0e1a13] hover:bg-[#16291e] border border-emerald-500/40 text-emerald-300 font-bold text-xs flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer"
+              disabled={!allowUserAudioLive}
+              onClick={() => allowUserAudioLive && handleLaunchPersonalLive('audio')}
+              className={`min-h-[48px] px-3 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition ${
+                allowUserAudioLive
+                  ? 'bg-[#0e1a13] hover:bg-[#16291e] border border-emerald-500/40 text-emerald-300 active:scale-[0.98] cursor-pointer'
+                  : 'bg-neutral-900 border border-neutral-800 text-neutral-500 cursor-not-allowed opacity-60'
+              }`}
             >
-              <Mic className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>{lang === 'bn' ? 'অডিও আড্ডা' : 'Audio Adda'}</span>
+              {allowUserAudioLive ? <Mic className="w-4 h-4 text-emerald-400 shrink-0" /> : <Lock className="w-3.5 h-3.5 shrink-0" />}
+              <span>{lang === 'bn' ? (allowUserAudioLive ? 'অডিও আড্ডা' : 'অডিও বন্ধ') : 'Audio Adda'}</span>
             </button>
             <button
               type="button"
-              onClick={() => handleLaunchPersonalLive('video')}
-              className="min-h-[48px] px-3 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:brightness-110 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-rose-600/20 transition active:scale-[0.98] cursor-pointer"
+              disabled={!allowUserVideoLive}
+              onClick={() => allowUserVideoLive && handleLaunchPersonalLive('video')}
+              className={`min-h-[48px] px-3 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition ${
+                allowUserVideoLive
+                  ? 'bg-gradient-to-r from-rose-600 to-pink-600 hover:brightness-110 text-white shadow-md shadow-rose-600/20 active:scale-[0.98] cursor-pointer'
+                  : 'bg-neutral-900 border border-neutral-800 text-neutral-500 cursor-not-allowed opacity-60'
+              }`}
             >
-              <Video className="w-4 h-4 shrink-0" />
-              <span>{lang === 'bn' ? 'লাইভ ভিডিও' : 'Live Video'}</span>
+              {allowUserVideoLive ? <Video className="w-4 h-4 shrink-0" /> : <Lock className="w-3.5 h-3.5 shrink-0" />}
+              <span>{lang === 'bn' ? (allowUserVideoLive ? 'লাইভ ভিডিও' : 'ভিডিও বন্ধ') : 'Live Video'}</span>
             </button>
           </div>
         )}
@@ -321,12 +362,22 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
           {/* Quick Direct Message / Inbox Button in Header Card */}
           <button
-            onClick={onOpenChatList}
-            className="min-h-[44px] px-3 py-2 rounded-xl bg-[#00c853] hover:bg-[#00e676] text-black font-extrabold text-xs transition flex items-center gap-1.5 shadow-md active:scale-95 cursor-pointer shrink-0"
-            title={lang === 'bn' ? 'মেসেজ ইনবক্স খুলুন' : 'Open Message Inbox'}
+            type="button"
+            disabled={!isDirectChatEnabled}
+            onClick={isDirectChatEnabled ? onOpenChatList : undefined}
+            className={`min-h-[44px] px-3 py-2 rounded-xl font-extrabold text-xs transition flex items-center gap-1.5 shadow-md shrink-0 ${
+              isDirectChatEnabled
+                ? 'bg-[#00c853] hover:bg-[#00e676] text-black active:scale-95 cursor-pointer'
+                : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
+            }`}
+            title={
+              isDirectChatEnabled
+                ? (lang === 'bn' ? 'মেসেজ ইনবক্স খুলুন' : 'Open Message Inbox')
+                : (lang === 'bn' ? 'চ্যাট সাময়িকভাবে বন্ধ রয়েছে' : 'Chat paused by Admin')
+            }
           >
-            <MessageCircle className="w-4 h-4 fill-current" />
-            <span>{lang === 'bn' ? 'মেসেজ' : 'Message'}</span>
+            {isDirectChatEnabled ? <MessageCircle className="w-4 h-4 fill-current" /> : <Lock className="w-3.5 h-3.5" />}
+            <span>{lang === 'bn' ? (isDirectChatEnabled ? 'মেসেজ' : 'চ্যাট বন্ধ') : 'Message'}</span>
           </button>
         </div>
 
@@ -545,16 +596,64 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               <label className="text-xs text-neutral-400 block mb-1">পেমেন্ট মেথড:</label>
               <select
                 value={methodInput}
-                onChange={(e) => setMethodInput(e.target.value as any)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setMethodInput(val);
+                  const matched = availablePaymentMethods.find((m) => m.name === val);
+                  if (matched?.bankName) setBankNameInput(matched.bankName);
+                }}
                 className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-sm text-white"
               >
-                <option value="bKash">বিকাশ (bKash)</option>
-                <option value="Nagad">নগদ (Nagad)</option>
-                <option value="Rocket">রকেট (Rocket)</option>
+                {availablePaymentMethods.map((m) => (
+                  <option key={m.id} value={m.name}>
+                    {m.nameBn} ({m.name}) — {m.category === 'bank' ? 'ব্যাংক' : m.category === 'card' ? 'কার্ড' : m.category === 'mobile_banking' ? 'মোবাইল' : 'অন্যান্য'}
+                  </option>
+                ))}
+                {!availablePaymentMethods.some((m) => m.name === methodInput) && methodInput && (
+                  <option value={methodInput}>{methodInput}</option>
+                )}
               </select>
             </div>
+            {(selectedMethodConfig?.category === 'bank' || selectedMethodConfig?.category === 'card') && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-neutral-400 block mb-1">
+                    {selectedMethodConfig.category === 'bank' ? 'ব্যাংকের নাম:' : 'কার্ড টাইপ:'}
+                  </label>
+                  <input
+                    type="text"
+                    value={bankNameInput}
+                    onChange={(e) => setBankNameInput(e.target.value)}
+                    placeholder={selectedMethodConfig.category === 'bank' ? 'যেমন: DBBL / IBBL' : 'Visa / MasterCard'}
+                    className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-sm text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-neutral-400 block mb-1">হোল্ডারের নাম:</label>
+                  <input
+                    type="text"
+                    value={accHolderInput}
+                    onChange={(e) => setAccHolderInput(e.target.value)}
+                    placeholder="Account / Card Holder"
+                    className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-sm text-white"
+                  />
+                </div>
+                {selectedMethodConfig.category === 'bank' && (
+                  <div className="sm:col-span-2">
+                    <label className="text-xs text-neutral-400 block mb-1">শাখা (Branch):</label>
+                    <input
+                      type="text"
+                      value={branchNameInput}
+                      onChange={(e) => setBranchNameInput(e.target.value)}
+                      placeholder="শাখার নাম লিখুন..."
+                      className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-sm text-white"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
             <div>
-              <label className="text-xs text-neutral-400 block mb-1">পেমেন্ট অ্যাকাউন্ট নম্বর:</label>
+              <label className="text-xs text-neutral-400 block mb-1">পেমেন্ট অ্যাকাউন্ট / কার্ড নম্বর:</label>
               <input
                 type="text"
                 value={accNumInput}
@@ -616,87 +715,162 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </button>
       </div>
 
-      {/* My Reels Grid (TikTok Style) */}
+      {/* My Reels & Saved Reels Switcher */}
       <div className="pt-2">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="p-2 rounded-xl bg-emerald-950 text-emerald-400">
-            <Video className="w-4 h-4" />
-          </div>
-          <h3 className="font-bold text-sm">আমার প্রকাশিত রিলস ({toBengaliNumber(userReels.length)})</h3>
+        <div className="grid grid-cols-2 gap-2 mb-3 bg-[#101914] p-1 rounded-2xl border border-emerald-950/70">
+          <button
+            type="button"
+            onClick={() => setActiveMediaTab('my_reels')}
+            className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+              activeMediaTab === 'my_reels'
+                ? 'bg-[#00c853] text-black shadow-md'
+                : 'text-neutral-300 hover:text-white'
+            }`}
+          >
+            <Video className="w-3.5 h-3.5" />
+            <span>আমার রিলস ({toBengaliNumber(userReels.length, lang)})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveMediaTab('saved')}
+            className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+              activeMediaTab === 'saved'
+                ? 'bg-amber-400 text-black shadow-md'
+                : 'text-neutral-300 hover:text-white'
+            }`}
+          >
+            <Bookmark className="w-3.5 h-3.5" />
+            <span>সংরক্ষিত ({toBengaliNumber(savedReels.length, lang)})</span>
+          </button>
         </div>
 
-        {userReels.length === 0 ? (
-          <div className="bg-[#141f19] rounded-2xl p-8 border border-emerald-950 text-center">
-            <Video className="w-8 h-8 text-neutral-600 mx-auto mb-2 opacity-50" />
-            <p className="text-xs text-neutral-500">
-              {lang === 'bn' ? 'আপনি এখনো কোনো রিল পাবলিশ করেননি।' : 'You have not published any reels yet.'}
+        {activeMediaTab === 'my_reels' ? (
+          userReels.length === 0 ? (
+            <div className="bg-[#141f19] rounded-2xl p-8 border border-emerald-950 text-center">
+              <Video className="w-8 h-8 text-neutral-600 mx-auto mb-2 opacity-50" />
+              <p className="text-xs text-neutral-500">
+                {lang === 'bn' ? 'আপনি এখনো কোনো রিল পাবলিশ করেননি।' : 'You have not published any reels yet.'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              {userReels.map((reel) => (
+                <div
+                  key={reel.id}
+                  className="relative aspect-[3/4] bg-[#0d1611] rounded-2xl overflow-hidden border border-emerald-950/60 shadow-md group"
+                >
+                  <div onClick={() => onOpenReel(reel)} className="absolute inset-0 cursor-pointer">
+                    <img
+                      src={reel.thumbnailUrl}
+                      alt={reel.title}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-black/30 pointer-events-none" />
+                  </div>
+
+                  <div className="absolute top-2 right-2 flex items-center gap-1.5 z-20">
+                    {onEditReel && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEditReel(reel);
+                        }}
+                        className="w-7 h-7 rounded-full bg-black/75 hover:bg-emerald-500 hover:text-black text-emerald-400 backdrop-blur-md flex items-center justify-center transition shadow-lg cursor-pointer"
+                        title={lang === 'bn' ? 'রিল এডিট করুন' : 'Edit Reel'}
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {onDeleteReel && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setReelToDelete(reel);
+                        }}
+                        className="w-7 h-7 rounded-full bg-black/75 hover:bg-rose-500 hover:text-white text-rose-400 backdrop-blur-md flex items-center justify-center transition shadow-lg cursor-pointer"
+                        title={lang === 'bn' ? 'রিল মুছুন' : 'Delete Reel'}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div
+                    onClick={() => onOpenReel(reel)}
+                    className="absolute bottom-2 left-2 right-2 z-10 pointer-events-none cursor-pointer"
+                  >
+                    <p className="text-xs font-bold text-white truncate drop-shadow-sm mb-0.5">
+                      {reel.title}
+                    </p>
+                    <div className="flex items-center justify-between text-[10px] text-emerald-400">
+                      <span className="flex items-center gap-1">
+                        <Video className="w-3 h-3" />
+                        <span>{toBengaliNumber(reel.viewsCount || 0, lang)}</span>
+                      </span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-black/60 text-emerald-300 border border-emerald-500/20">
+                        {reel.category}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : savedReels.length === 0 ? (
+          <div className="bg-[#141f19] rounded-2xl p-8 border border-emerald-950 text-center space-y-2.5">
+            <Bookmark className="w-8 h-8 text-amber-400/60 mx-auto" />
+            <p className="text-xs text-neutral-400">
+              {lang === 'bn' ? 'আপনি এখনো কোনো রিল সেভ করেননি।' : 'No saved reels yet.'}
             </p>
+            {onNavigateToHome && (
+              <button
+                type="button"
+                onClick={onNavigateToHome}
+                className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-black text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{lang === 'bn' ? 'হোম ফিড থেকে রিল দেখুন' : 'Explore Reels'}</span>
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-            {userReels.map((reel) => (
-              <div 
-                key={reel.id} 
-                className="relative aspect-[3/4] bg-[#0d1611] rounded-2xl overflow-hidden border border-emerald-950/60 shadow-md group"
+            {savedReels.map((reel) => (
+              <div
+                key={reel.id}
+                className="relative aspect-[3/4] bg-[#0d1611] rounded-2xl overflow-hidden border border-amber-500/30 shadow-md group"
               >
-                {/* Clickable Image to view */}
-                <div 
-                  onClick={() => onOpenReel(reel)}
-                  className="absolute inset-0 cursor-pointer"
-                >
-                  <img 
-                    src={reel.thumbnailUrl} 
+                <div onClick={() => onOpenReel(reel)} className="absolute inset-0 cursor-pointer">
+                  <img
+                    src={reel.thumbnailUrl}
                     alt={reel.title}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-black/30 pointer-events-none" />
+                  <div className="absolute inset-0 flex items-center justify-center opacity-80 group-hover:opacity-100 pointer-events-none">
+                    <div className="w-9 h-9 rounded-full bg-black/50 border border-amber-400/70 flex items-center justify-center text-amber-300">
+                      <Play className="w-4 h-4 fill-current ml-0.5" />
+                    </div>
+                  </div>
                 </div>
-
-                {/* Top Action Buttons: Edit ✏️ & Delete 🗑️ */}
-                <div className="absolute top-2 right-2 flex items-center gap-1.5 z-20">
-                  {onEditReel && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onEditReel(reel);
-                      }}
-                      className="w-7 h-7 rounded-full bg-black/75 hover:bg-emerald-500 hover:text-black text-emerald-400 backdrop-blur-md flex items-center justify-center transition shadow-lg cursor-pointer"
-                      title={lang === 'bn' ? 'রিল এডিট করুন' : 'Edit Reel'}
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                  {onDeleteReel && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setReelToDelete(reel);
-                      }}
-                      className="w-7 h-7 rounded-full bg-black/75 hover:bg-rose-500 hover:text-white text-rose-400 backdrop-blur-md flex items-center justify-center transition shadow-lg cursor-pointer"
-                      title={lang === 'bn' ? 'রিল মুছুন' : 'Delete Reel'}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-
-                {/* Bottom title & views */}
-                <div 
-                  onClick={() => onOpenReel(reel)}
-                  className="absolute bottom-2 left-2 right-2 z-10 pointer-events-none cursor-pointer"
-                >
-                  <p className="text-xs font-bold text-white truncate drop-shadow-sm mb-0.5">
+                {onToggleSave && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleSave(reel.id);
+                    }}
+                    className="absolute top-2 right-2 z-20 w-7 h-7 rounded-full bg-black/75 hover:bg-rose-500 text-amber-400 hover:text-white flex items-center justify-center shadow-lg cursor-pointer"
+                    title={lang === 'bn' ? 'সেভ থেকে সরান' : 'Remove bookmark'}
+                  >
+                    <Bookmark className="w-3.5 h-3.5 fill-current" />
+                  </button>
+                )}
+                <div className="absolute bottom-2 left-2 right-2 z-10 pointer-events-none">
+                  <p className="text-xs font-bold text-white truncate drop-shadow-sm">
                     {reel.title}
                   </p>
-                  <div className="flex items-center justify-between text-[10px] text-emerald-400">
-                    <span className="flex items-center gap-1">
-                      <Video className="w-3 h-3" />
-                      <span>{toBengaliNumber(reel.viewsCount || 0, lang)}</span>
-                    </span>
-                    <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-black/60 text-emerald-300 border border-emerald-500/20">
-                      {reel.category}
-                    </span>
-                  </div>
+                  <p className="text-[10px] text-amber-300 truncate">{reel.creatorName}</p>
                 </div>
               </div>
             ))}
