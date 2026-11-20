@@ -23,6 +23,9 @@ import {
   Check,
   Camera,
   ChevronRight,
+  Bookmark,
+  Play,
+  Sparkles,
 } from 'lucide-react';
 import { User, Reel, EarningSettings, LiveStream, LiveMode } from '../types';
 import { toBengaliNumber, formatTaka } from '../utils/bengali';
@@ -55,6 +58,9 @@ interface ProfileViewProps {
   onOpenWallet?: () => void;
   minWithdrawal?: number;
   earningSettings?: EarningSettings;
+  savedReelIds?: string[];
+  onToggleSave?: (reelId: string) => void;
+  onNavigateToHome?: () => void;
 }
 
 export const ProfileView: React.FC<ProfileViewProps> = ({
@@ -83,7 +89,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onOpenWallet,
   minWithdrawal = 100,
   earningSettings,
+  savedReelIds = [],
+  onToggleSave,
+  onNavigateToHome,
 }) => {
+  const [activeMediaTab, setActiveMediaTab] = useState<'my_reels' | 'saved'>('my_reels');
   const [isEditing, setIsEditing] = useState(false);
   const [infoModalMode, setInfoModalMode] = useState<ProfileInfoModalMode | null>(null);
   const [reelToDelete, setReelToDelete] = useState<Reel | null>(null);
@@ -157,6 +167,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     if (r.creatorName && user.name && r.creatorName.trim().toLowerCase() === user.name.trim().toLowerCase() && user.name !== 'নতুন ইউজার') return true;
     return false;
   });
+
+  // Saved reels (local list)
+  const savedReels = (savedReelIds || [])
+    .map((id) => reels.find((r) => r.id === id))
+    .filter((r): r is Reel => Boolean(r));
 
   const handleLaunchPersonalLive = (mode: LiveMode) => {
     if (onOpenPersonalLive) {

@@ -21,6 +21,7 @@ import {
   Flame,
   Eye,
   UserPlus,
+  Bookmark,
 } from 'lucide-react';
 import { Reel, LiveStream, EarningSettings } from '../types';
 import { toBengaliNumber } from '../utils/bengali';
@@ -58,6 +59,8 @@ interface FullScreenReelModalProps {
   isFollowingCreator?: boolean;
   followingIds?: string[];
   onOpenChatWithCreator?: (creatorId: string) => void;
+  savedReelIds?: string[];
+  onToggleSave?: (reelId: string) => void;
 }
 
 export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
@@ -89,6 +92,8 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   isFollowingCreator = false,
   followingIds,
   onOpenChatWithCreator,
+  savedReelIds,
+  onToggleSave,
 }) => {
   const [viewMode, setViewMode] = useState<'reels' | 'live'>('reels');
   const [activeLiveIndex, setActiveLiveIndex] = useState(0);
@@ -179,7 +184,12 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
     : (isFollowingCreator || isFollowing);
   const [showGiftModal, setShowGiftModal] = useState(false);
   const [floatingHearts, setFloatingHearts] = useState<{ id: number; x: number }[]>([]);
+  const [isSpringing, setIsSpringing] = useState(false);
+  const [showIncrement, setShowIncrement] = useState(false);
+  const [incrementKey, setIncrementKey] = useState(0);
+  const [centerHeartAnim, setCenterHeartAnim] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const lastTapRef = useRef<number>(0);
 
   const showModalNotice = (msg: string) => {
     setModalNotice(msg);
@@ -203,6 +213,13 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
       goNext();
     } else if (diff < -50) {
       goPrev();
+    } else if (Math.abs(diff) < 15) {
+      // Tap detected - check for double tap
+      const now = Date.now();
+      if (now - lastTapRef.current < 320) {
+        handleDoubleTapLike();
+      }
+      lastTapRef.current = now;
     }
   };
 
@@ -298,14 +315,53 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
 
   const handleLike = () => {
     if (!isMuted) playPopSound();
-    onToggleLike(reel.id);
 
-    // Spawn floating heart
-    const newHeart = { id: Date.now(), x: Math.random() * 40 - 20 };
-    setFloatingHearts((prev) => [...prev, newHeart]);
-    setTimeout(() => {
-      setFloatingHearts((prev) => prev.filter((h) => h.id !== newHeart.id));
-    }, 1200);
+    const willBeLiked = !isLiked;
+
+    // Reset and trigger spring animation
+    setIsSpringing(false);
+    requestAnimationFrame(() => {
+      setIsSpringing(true);
+      setTimeout(() => setIsSpringing(false), 650);
+    });
+
+    if (willBeLiked) {
+      setShowIncrement(true);
+      setIncrementKey((prev) => prev + 1);
+      setTimeout(() => setShowIncrement(false), 850);
+
+      // Spawn floating heart
+      const newHeart = { id: Date.now(), x: Math.random() * 40 - 20 };
+      setFloatingHearts((prev) => [...prev, newHeart]);
+      setTimeout(() => {
+        setFloatingHearts((prev) => prev.filter((h) => h.id !== newHeart.id));
+      }, 1200);
+    } else {
+      setShowIncrement(false);
+    }
+
+    onToggleLike(reel.id);
+  };
+
+  const handleDoubleTapLike = () => {
+    setCenterHeartAnim(true);
+    setTimeout(() => setCenterHeartAnim(false), 850);
+
+    if (!isLiked) {
+      handleLike();
+    } else {
+      if (!isMuted) playPopSound();
+      setIsSpringing(false);
+      requestAnimationFrame(() => {
+        setIsSpringing(true);
+        setTimeout(() => setIsSpringing(false), 650);
+      });
+      const newHeart = { id: Date.now(), x: Math.random() * 40 - 20 };
+      setFloatingHearts((prev) => [...prev, newHeart]);
+      setTimeout(() => {
+        setFloatingHearts((prev) => prev.filter((h) => h.id !== newHeart.id));
+      }, 1200);
+    }
   };
 
   const handleShare = () => {
@@ -340,6 +396,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
         className="relative w-full h-full max-w-md bg-neutral-950 flex flex-col justify-between overflow-hidden shadow-2xl"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
+        onDoubleClick={handleDoubleTapLike}
       >
         {/* Background Visual (Video, YouTube Embed, or Image preview) */}
         <div className="absolute inset-0 z-0" style={reel.filter ? { filter: reel.filter } : {}}>
@@ -438,6 +495,13 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
           {/* Gradients matching Screenshot 2 */}
           <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-transparent to-black/90 pointer-events-none" />
         </div>
+
+        {/* Center Heart Pop for double tap */}
+        {centerHeartAnim && (
+          <div className="absolute inset-0 z-30 pointer-events-none flex items-center justify-center">
+            <Heart className="w-28 h-28 fill-rose-500 text-rose-500 drop-shadow-[0_0_35px_rgba(244,63,94,0.95)] animate-center-heart" />
+          </div>
+        )}
 
         {/* Floating Heart Animations */}
         {floatingHearts.map((h) => (
@@ -713,17 +777,55 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
           {/* Like Button */}
           <button
             onClick={handleLike}
-            className="flex flex-col items-center gap-0.5 cursor-pointer group"
+            className="relative flex flex-col items-center gap-0.5 cursor-pointer group select-none"
+            aria-label={isLiked ? (lang === 'bn' ? 'আনলাইক করুন' : 'Unlike') : (lang === 'bn' ? 'লাইক করুন' : 'Like')}
           >
-            <div
-              className={`w-12 h-12 rounded-2xl bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center transition-all ${
-                isLiked ? 'text-rose-500 scale-105' : 'text-white'
-              }`}
-            >
-              <Heart className={`w-6 h-6 ${isLiked ? 'fill-rose-500 text-rose-500' : ''}`} />
+            {/* Animated floating number increment badge (+1 / +১) */}
+            {showIncrement && (
+              <div
+                key={incrementKey}
+                className="absolute -top-4 pointer-events-none z-30 flex items-center justify-center animate-increment-float select-none"
+              >
+                <span className="px-2 py-0.5 rounded-full text-xs font-black bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-xl shadow-rose-500/60 flex items-center gap-0.5 tabular-nums ring-1 ring-white/30 drop-shadow">
+                  <span>+</span>
+                  <span>{toBengaliNumber(1, lang)}</span>
+                </span>
+              </div>
+            )}
+
+            <div className="relative w-12 h-12 flex items-center justify-center">
+              {/* Burst shockwave ring & sparkles when springing */}
+              {isSpringing && isLiked && (
+                <>
+                  <span className="absolute inset-0 rounded-2xl border-2 border-rose-500/90 pointer-events-none animate-heart-burst" />
+                  <span className="absolute -top-1 w-1.5 h-1.5 rounded-full bg-rose-400 pointer-events-none animate-ping" />
+                  <span className="absolute -right-1 w-1.5 h-1.5 rounded-full bg-pink-400 pointer-events-none animate-ping" />
+                  <span className="absolute -bottom-1 w-1.5 h-1.5 rounded-full bg-rose-400 pointer-events-none animate-ping" />
+                  <span className="absolute -left-1 w-1.5 h-1.5 rounded-full bg-pink-400 pointer-events-none animate-ping" />
+                </>
+              )}
+
+              <div
+                className={`w-12 h-12 rounded-2xl bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center transition-all ${
+                  isLiked
+                    ? 'text-rose-500 drop-shadow-[0_0_12px_rgba(244,63,94,0.7)]'
+                    : 'text-white hover:bg-black/60'
+                } ${isSpringing ? 'animate-heart-spring' : ''}`}
+              >
+                <Heart
+                  className={`w-6 h-6 transition-transform duration-150 ${
+                    isLiked ? 'fill-rose-500 text-rose-500 scale-110' : ''
+                  }`}
+                />
+              </div>
             </div>
-            <span className="text-xs font-bold drop-shadow">
-              {toBengaliNumber(likesDisplay)}
+
+            <span
+              className={`text-xs font-bold drop-shadow tabular-nums transition-colors duration-200 ${
+                isLiked ? 'text-rose-400' : 'text-white'
+              } ${showIncrement ? 'animate-number-bump' : ''}`}
+            >
+              {toBengaliNumber(likesDisplay, lang)}
             </span>
           </button>
 
@@ -737,6 +839,30 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
             </div>
             <span className="text-xs font-bold drop-shadow">
               {toBengaliNumber(reel.commentsCount)}
+            </span>
+          </button>
+
+          {/* Bookmark / সেভ Button */}
+          <button
+            onClick={() => {
+              if (!isMuted) playPopSound();
+              if (onToggleSave && reel) onToggleSave(reel.id);
+            }}
+            className={`flex flex-col items-center gap-0.5 cursor-pointer group select-none transition ${
+              savedReelIds?.includes(reel?.id) ? 'text-amber-400' : 'text-white'
+            }`}
+            aria-label={savedReelIds?.includes(reel?.id) ? (lang === 'bn' ? 'আনসেভ করুন' : 'Remove Bookmark') : (lang === 'bn' ? 'সেভ করুন' : 'Bookmark')}
+            title={savedReelIds?.includes(reel?.id) ? (lang === 'bn' ? 'সংরক্ষিত থেকে সরান' : 'Remove from saved') : (lang === 'bn' ? 'ফেভারিট সেভ করুন' : 'Save to favorites')}
+          >
+            <div className={`w-12 h-12 rounded-2xl backdrop-blur-md border flex items-center justify-center transition-all ${
+              savedReelIds?.includes(reel?.id)
+                ? 'bg-amber-500/20 border-amber-400/50 text-amber-400 drop-shadow-[0_0_12px_rgba(245,158,11,0.7)]'
+                : 'bg-black/40 border-white/10 text-white hover:bg-black/60'
+            }`}>
+              <Bookmark className={`w-6 h-6 transition-transform duration-150 ${savedReelIds?.includes(reel?.id) ? 'fill-amber-400 text-amber-400 scale-110' : ''}`} />
+            </div>
+            <span className={`text-xs font-bold drop-shadow ${savedReelIds?.includes(reel?.id) ? 'text-amber-300 font-extrabold' : 'text-white'}`}>
+              {lang === 'bn' ? (savedReelIds?.includes(reel?.id) ? 'সংরক্ষিত' : 'সেভ') : (savedReelIds?.includes(reel?.id) ? 'Saved' : 'Save')}
             </span>
           </button>
 

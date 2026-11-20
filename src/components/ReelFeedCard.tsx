@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Heart, MessageCircle, Share2, Check, Sparkles, Flame, Eye } from 'lucide-react';
+import { Play, Heart, MessageCircle, Share2, Check, Sparkles, Flame, Eye, Bookmark } from 'lucide-react';
 import { Reel, EarningSettings } from '../types';
 import { toBengaliNumber } from '../utils/bengali';
 import { playPopSound } from '../utils/audio';
@@ -21,6 +21,8 @@ interface ReelFeedCardProps {
   levelProgress: number;
   earningSettings?: EarningSettings;
   isDailyLimitReached?: boolean;
+  isSaved?: boolean;
+  onToggleSave?: (reelId: string) => void;
 }
 
 export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
@@ -39,8 +41,13 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
   levelProgress,
   earningSettings,
   isDailyLimitReached = false,
+  isSaved = false,
+  onToggleSave,
 }) => {
-  const [likeAnim, setLikeAnim] = React.useState(false);
+  const [isSpringing, setIsSpringing] = React.useState(false);
+  const [isBookmarkSpringing, setIsBookmarkSpringing] = React.useState(false);
+  const [showIncrement, setShowIncrement] = React.useState(false);
+  const [incrementKey, setIncrementKey] = React.useState(0);
   const [imgLoaded, setImgLoaded] = React.useState(false);
 
   const masterEarningOn = earningSettings ? earningSettings.isMasterEarningEnabled : true;
@@ -58,14 +65,45 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
   const handleLike = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!isMuted) playPopSound();
-    setLikeAnim(true);
-    setTimeout(() => setLikeAnim(false), 300);
+
+    const willBeLiked = !isLiked;
+
+    // Reset and trigger spring animation
+    setIsSpringing(false);
+    requestAnimationFrame(() => {
+      setIsSpringing(true);
+      setTimeout(() => setIsSpringing(false), 650);
+    });
+
+    if (willBeLiked) {
+      setShowIncrement(true);
+      setIncrementKey((prev) => prev + 1);
+      setTimeout(() => setShowIncrement(false), 850);
+    } else {
+      setShowIncrement(false);
+    }
+
     onLikeToggle(reel.id);
   };
 
   const handleShare = (e: React.MouseEvent) => {
     e.stopPropagation();
     onShare(reel);
+  };
+
+  const handleBookmark = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isMuted) playPopSound();
+
+    setIsBookmarkSpringing(false);
+    requestAnimationFrame(() => {
+      setIsBookmarkSpringing(true);
+      setTimeout(() => setIsBookmarkSpringing(false), 650);
+    });
+
+    if (onToggleSave) {
+      onToggleSave(reel.id);
+    }
   };
 
   const likesDisplay = isLiked ? reel.likesCount + 1 : reel.likesCount;
@@ -79,7 +117,7 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
       {/* Video Preview Container */}
       <div
         onClick={() => onOpenReel(reel)}
-        className="relative flex-1 h-60 sm:h-68 rounded-2xl overflow-hidden bg-[#101914] border border-emerald-950/60 cursor-pointer group shadow-lg"
+        className="relative flex-1 h-64 sm:h-72 rounded-2xl overflow-hidden bg-[#101914] border border-emerald-950/60 cursor-pointer group shadow-lg"
       >
         {/* Skeleton State */}
         {!imgLoaded && (
@@ -177,19 +215,57 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
 
       {/* Right Side Vertical Action Dock matching Screenshot 1 + Prompt features */}
       <div className="flex flex-col items-center gap-2 shrink-0 py-1">
-        {/* Heart / Like */}
+        {/* Heart / Like with spring animation and animated number increment */}
         <button
           onClick={handleLike}
-          className="flex flex-col items-center gap-0.5 text-slate-300 hover:text-white transition group cursor-pointer"
+          className="relative flex flex-col items-center gap-0.5 text-slate-300 hover:text-white transition group cursor-pointer select-none"
+          aria-label={isLiked ? (lang === 'bn' ? 'আনলাইক করুন' : 'Unlike') : (lang === 'bn' ? 'লাইক করুন' : 'Like')}
         >
-          <div
-            className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
-              isLiked ? 'text-rose-500 scale-110' : 'text-slate-200 hover:bg-neutral-800/60'
-            } ${likeAnim ? 'scale-125' : ''}`}
-          >
-            <Heart className={`w-4 h-4 ${isLiked ? 'fill-current text-rose-500' : ''}`} />
+          {/* Animated floating number increment badge (+1 / +১) */}
+          {showIncrement && (
+            <div
+              key={incrementKey}
+              className="absolute -top-3.5 pointer-events-none z-20 flex items-center justify-center animate-increment-float select-none"
+            >
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md shadow-rose-500/50 flex items-center gap-0.5 tabular-nums ring-1 ring-white/30 drop-shadow-sm">
+                <span>+</span>
+                <span>{toBengaliNumber(1, lang)}</span>
+              </span>
+            </div>
+          )}
+
+          <div className="relative w-8 h-8 flex items-center justify-center">
+            {/* Burst shockwave ring & sparkles when springing */}
+            {isSpringing && isLiked && (
+              <>
+                <span className="absolute inset-0 rounded-full border-2 border-rose-500/80 pointer-events-none animate-heart-burst" />
+                <span className="absolute -top-1 w-1 h-1 rounded-full bg-rose-400 pointer-events-none animate-ping" />
+                <span className="absolute -right-1 w-1 h-1 rounded-full bg-pink-400 pointer-events-none animate-ping" />
+                <span className="absolute -bottom-1 w-1 h-1 rounded-full bg-rose-400 pointer-events-none animate-ping" />
+                <span className="absolute -left-1 w-1 h-1 rounded-full bg-pink-400 pointer-events-none animate-ping" />
+              </>
+            )}
+
+            <div
+              className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
+                isLiked
+                  ? 'text-rose-500 drop-shadow-[0_0_8px_rgba(244,63,94,0.6)]'
+                  : 'text-slate-200 hover:bg-neutral-800/60'
+              } ${isSpringing ? 'animate-heart-spring' : ''}`}
+            >
+              <Heart
+                className={`w-4 h-4 transition-transform duration-150 ${
+                  isLiked ? 'fill-current text-rose-500 scale-105' : ''
+                }`}
+              />
+            </div>
           </div>
-          <span className="text-[10px] font-medium text-slate-300">
+
+          <span
+            className={`text-[10px] font-semibold tabular-nums transition-colors duration-200 ${
+              isLiked ? 'text-rose-400 font-bold' : 'text-slate-300'
+            } ${showIncrement ? 'animate-number-bump' : ''}`}
+          >
             {toBengaliNumber(likesDisplay, lang)}
           </span>
         </button>
@@ -207,6 +283,42 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
           </div>
           <span className="text-[10px] font-medium text-slate-300">
             {toBengaliNumber(reel.commentsCount, lang)}
+          </span>
+        </button>
+
+        {/* Bookmark / সেভ */}
+        <button
+          onClick={handleBookmark}
+          className={`relative flex flex-col items-center gap-0.5 transition group cursor-pointer select-none ${
+            isSaved ? 'text-amber-400' : 'text-slate-300 hover:text-white'
+          }`}
+          aria-label={isSaved ? (lang === 'bn' ? 'আনসেভ করুন' : 'Remove Bookmark') : (lang === 'bn' ? 'সেভ করুন' : 'Bookmark')}
+          title={isSaved ? (lang === 'bn' ? 'সংরক্ষিত থেকে সরান' : 'Remove from saved') : (lang === 'bn' ? 'ফেভারিট সেভ করুন' : 'Save to favorites')}
+        >
+          <div className="relative w-8 h-8 flex items-center justify-center">
+            {isBookmarkSpringing && isSaved && (
+              <span className="absolute inset-0 rounded-full border-2 border-amber-400/80 pointer-events-none animate-ping" />
+            )}
+            <div
+              className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
+                isSaved
+                  ? 'bg-amber-500/20 text-amber-400 drop-shadow-[0_0_8px_rgba(245,158,11,0.6)]'
+                  : 'text-slate-200 hover:bg-neutral-800/60'
+              } ${isBookmarkSpringing ? 'scale-125' : ''}`}
+            >
+              <Bookmark
+                className={`w-4 h-4 transition-transform duration-150 ${
+                  isSaved ? 'fill-current text-amber-400 scale-105' : ''
+                }`}
+              />
+            </div>
+          </div>
+          <span
+            className={`text-[10px] font-medium tabular-nums transition-colors duration-200 ${
+              isSaved ? 'text-amber-300 font-bold' : 'text-slate-300'
+            }`}
+          >
+            {lang === 'bn' ? (isSaved ? 'সংরক্ষিত' : 'সেভ') : (isSaved ? 'Saved' : 'Save')}
           </span>
         </button>
 

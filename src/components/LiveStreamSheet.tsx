@@ -87,6 +87,7 @@ interface LiveStreamSheetProps {
   onToggleFollow?: (userId: string, creatorName?: string) => void;
   isFollowingHost?: boolean;
   isAdminOverride?: boolean;
+  initialStream?: LiveStream | null;
 }
 
 const RTC_CONFIG: RTCConfiguration = {
@@ -130,6 +131,7 @@ export const LiveStreamSheet: React.FC<LiveStreamSheetProps> = ({
   onToggleFollow,
   isFollowingHost = false,
   isAdminOverride = false,
+  initialStream = null,
 }) => {
   const {
     user: firebaseUser,
@@ -232,7 +234,9 @@ export const LiveStreamSheet: React.FC<LiveStreamSheetProps> = ({
   // 1. Sync Stream Metadata
   useEffect(() => {
     if (!isOpen || !liveStreamId) return;
-    setStream(null);
+    if (initialStream && initialStream.id === liveStreamId) {
+      setStream(initialStream);
+    }
     setConfirmEndStep(false);
     setAdminCancelReason('');
     const unsub = onSnapshot(
@@ -242,11 +246,10 @@ export const LiveStreamSheet: React.FC<LiveStreamSheetProps> = ({
         if (found) {
           setStream(found);
         }
-      },
-      [where('id', '==', liveStreamId)]
+      }
     );
     return unsub;
-  }, [isOpen, liveStreamId]);
+  }, [isOpen, liveStreamId, initialStream]);
 
   useEffect(() => {
     if (stream) {
@@ -646,7 +649,7 @@ export const LiveStreamSheet: React.FC<LiveStreamSheetProps> = ({
 
   // 6B. VIEWER / ADMIN WebRTC Receiver + Live Preview Subscriber
   useEffect(() => {
-    if (!isOpen || isHost || !isAuthenticated || !isFirebaseSignedIn || !liveStreamId || !stream || stream.status !== 'active') {
+    if (!isOpen || isHost || !liveStreamId || !stream || stream.status !== 'active') {
       closeViewerPeer();
       setLivePreviewFrame(null);
       setRemoteHostAudioLevel(0);
@@ -656,7 +659,7 @@ export const LiveStreamSheet: React.FC<LiveStreamSheetProps> = ({
     let cancelled = false;
     setRtcStatus('connecting');
 
-    if (isAuthenticated && currentUser.id && currentUser.id !== 'guest') {
+    if (isAuthenticated && isFirebaseSignedIn && currentUser.id && currentUser.id !== 'guest') {
       setDocument(`live_streams/${liveStreamId}/rtc`, currentUser.id, {
         id: currentUser.id,
         type: 'peer',

@@ -17,7 +17,7 @@ import { Header } from './components/Header';
 import { DailyBonusCard } from './components/DailyBonusCard';
 import { ReelFeedCard } from './components/ReelFeedCard';
 import { BottomNav, TabType } from './components/BottomNav';
-import { ChevronRight, Sparkles, AlertCircle, Radio, Mic, Video, Loader2 } from 'lucide-react';
+import { ChevronRight, Sparkles, AlertCircle, Radio, Mic, Video, Loader2, Headphones, Play, Users, X } from 'lucide-react';
 import type { StartLivePayload } from './components/GoLiveSetupModal';
 import { GiftItem } from './types';
 import { playCoinSound, playSuccessChime, playPopSound } from './utils/audio';
@@ -65,8 +65,9 @@ const LoadingSpinner = () => (
   </div>
 );
 
-const CATEGORIES: ('সকল' | 'ট্রেন্ডিং' | 'কমেডি' | 'গেমিং' | 'রান্না' | 'শিক্ষা')[] = [
+const CATEGORIES: ('সকল' | '🔴 লাইভ' | 'ট্রেন্ডিং' | 'কমেডি' | 'গেমিং' | 'রান্না' | 'শিক্ষা')[] = [
   'সকল',
+  '🔴 লাইভ',
   'ট্রেন্ডিং',
   'কমেডি',
   'গেমিং',
@@ -475,11 +476,14 @@ export default function App() {
     }
   }, [isAuthenticated, currentUser.id, firebaseUser?.uid]);
 
-  // Sync active live streams (avoid composite index requirement by filtering client-side)
+  // Sync active live streams (query collection directly and sort client-side to avoid index requirements)
   useEffect(() => {
     const unsub = firebaseOnSnapshot('live_streams', (data) => {
-      setActiveLiveStreams((data as LiveStream[]).filter(s => s.status === 'active'));
-    }, [orderBy('createdAt', 'desc'), limit(40)]);
+      const active = (data as LiveStream[])
+        .filter((s) => s && s.status === 'active')
+        .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      setActiveLiveStreams(active);
+    });
     return unsub;
   }, []);
 
@@ -539,7 +543,7 @@ export default function App() {
 
   // UI Navigation & View State
   const [selectedCategory, setSelectedCategory] = useState<
-    'সকল' | 'ট্রেন্ডিং' | 'কমেডি' | 'গেমিং' | 'রান্না' | 'শিক্ষা'
+    'সকল' | '🔴 লাইভ' | 'ট্রেন্ডিং' | 'কমেডি' | 'গেমিং' | 'রান্না' | 'শিক্ষা'
   >('সকল');
   const [sortBy, setSortBy] = useState<'newest' | 'most_watched' | 'popular'>('newest');
   const [isMuted, setIsMuted] = useState<boolean>(false);
@@ -557,6 +561,34 @@ export default function App() {
       return next;
     });
   };
+
+  // Track newly started live streams and alert other users in real-time
+  const prevLiveIdsRef = useRef<Set<string>>(new Set());
+  const initialLiveLoadRef = useRef<boolean>(true);
+
+  useEffect(() => {
+    if (initialLiveLoadRef.current) {
+      if (activeLiveStreams.length > 0) {
+        prevLiveIdsRef.current = new Set(activeLiveStreams.map((s) => s.id));
+      }
+      initialLiveLoadRef.current = false;
+      return;
+    }
+
+    const currentIds = new Set(activeLiveStreams.map((s) => s.id));
+    for (const live of activeLiveStreams) {
+      if (!prevLiveIdsRef.current.has(live.id) && live.hostId !== currentUser.id) {
+        showToast(
+          lang === 'bn'
+            ? `🔴 ${live.hostName} লাইভ শুরু করেছেন! এখনই যোগ দিন।`
+            : `🔴 ${live.hostName} is now LIVE! Tap to join.`
+        );
+        if (!isMuted) playPopSound();
+        break;
+      }
+    }
+    prevLiveIdsRef.current = currentIds;
+  }, [activeLiveStreams, currentUser.id, isMuted, lang]);
 
   // Modal Dialogs & Sheets
   const [fullScreenReelId, setFullScreenReelId] = useState<string | null>(null);
@@ -1652,10 +1684,21 @@ export default function App() {
   };
 
   const handleStartLive = async (payload: StartLivePayload) => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated) {
+      triggerAuthPrompt(
+        lang === 'bn'
+          ? 'লাইভ শুরু করতে আগে লগইন বা রেজিস্ট্রেশন করুন!'
+          : 'Please login or register to start live!'
+      );
+      return;
+    }
+
+    const hostId = firebaseUser?.uid || currentUser.id;
 
     // Close any lingering active stream from the same user cleanly
-    const existingStreams = activeLiveStreams.filter((s) => s.hostId === currentUser.id);
+    const existingStreams = activeLiveStreams.filter(
+      (s) => s.hostId === hostId || s.hostId === currentUser.id
+    );
     for (const prev of existingStreams) {
       updateDocument('live_streams', prev.id, {
         status: 'ended',
@@ -1664,23 +1707,26 @@ export default function App() {
     }
 
     const liveId = `live_${Date.now()}`;
+    const cleanTitle = (
+      payload.title.trim() ||
+      (payload.mode === 'audio'
+        ? `${currentUser.name}-এর অডিও আড্ডা`
+        : `${currentUser.name}-এর লাইভ ভিডিও`)
+    ).slice(0, 140);
+
     const newLive: LiveStream = {
       id: liveId,
-      hostId: currentUser.id,
-      hostName: currentUser.name,
-      hostAvatar: currentUser.avatar,
-      title:
-        payload.title.trim() ||
-        (payload.mode === 'audio'
-          ? `${currentUser.name}-এর অডিও আড্ডা`
-          : `${currentUser.name}-এর লাইভ ভিডিও`),
+      hostId,
+      hostName: currentUser.name || 'ইউজার',
+      hostAvatar: currentUser.avatar || INITIAL_USER.avatar,
+      title: cleanTitle,
       mode: payload.mode,
-      category: payload.category || 'আড্ডা',
-      pinnedNotice: payload.pinnedNotice || '',
+      category: (payload.category || 'আড্ডা').slice(0, 50),
+      pinnedNotice: (payload.pinnedNotice || '').slice(0, 240),
       isMicMuted: false,
       isCameraOn: payload.mode === 'video',
-      chatEnabled: payload.chatEnabled,
-      allowSpeakerRequests: payload.allowSpeakerRequests,
+      chatEnabled: payload.chatEnabled !== false,
+      allowSpeakerRequests: payload.allowSpeakerRequests !== false,
       viewersCount: 1,
       likesCount: 0,
       giftsTotalPoints: 0,
@@ -1692,8 +1738,10 @@ export default function App() {
 
     try {
       await setDocument('live_streams', liveId, newLive);
+      setActiveLiveStreams((prev) => [newLive, ...prev.filter((s) => s.id !== liveId)]);
       setCurrentLiveStreamId(liveId);
       setShowLiveSheet(true);
+      if (!isMuted) playSuccessChime();
       showToast(
         payload.mode === 'audio'
           ? lang === 'bn'
@@ -1705,6 +1753,11 @@ export default function App() {
       );
     } catch (err) {
       console.error('Failed to start live:', err);
+      showToast(
+        lang === 'bn'
+          ? '⚠️ লাইভ শুরু করা যায়নি! ইন্টারনেট বা লগইন চেক করুন।'
+          : '⚠️ Failed to start live! Check connection.'
+      );
       throw err;
     }
   };
@@ -2069,6 +2122,9 @@ export default function App() {
 
   // Filtered and Sorted Reels
   const filteredReels = (() => {
+    if (selectedCategory === '🔴 লাইভ') {
+      return [];
+    }
     let result = selectedCategory === 'সকল'
       ? reels
       : reels.filter((r) => r.category === selectedCategory);
@@ -2183,26 +2239,83 @@ export default function App() {
               <>
                 {activeTab === 'home' && (
                   <div className="space-y-3.5 pb-20">
-                    {/* Active Live Streams Horizontal List (Audio Adda & Video Live) */}
-                    {activeLiveStreams.length > 0 && (
-                      <div className="space-y-2 pb-1">
-                        <div className="flex items-center justify-between px-1">
-                          <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-rose-600 animate-pulse" />
-                            <span>{lang === 'bn' ? 'সরাসরি লাইভ' : 'Active Live'}</span>
+                    {/* TOP STORIES / LIVE STREAMERS BAR (Always visible for fast live discovery) */}
+                    <div className="space-y-2 pb-1 bg-[#0d1611]/80 -mx-1 px-3 py-2.5 rounded-3xl border border-emerald-950/60 shadow-lg">
+                      <div className="flex items-center justify-between px-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-ping shrink-0" />
+                          <h3 className="text-xs font-black text-white flex items-center gap-1.5 tracking-wide">
+                            <span>{lang === 'bn' ? 'সরাসরি লাইভ আড্ডা' : 'Live Streams'}</span>
+                            {activeLiveStreams.length > 0 && (
+                              <span className="bg-rose-600/90 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full uppercase">
+                                {toBengaliNumber(activeLiveStreams.length, lang)} {lang === 'bn' ? 'চলমান' : 'LIVE'}
+                              </span>
+                            )}
                           </h3>
-                          <button
-                            type="button"
-                            onClick={() => openPersonalLiveStudio('audio')}
-                            className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 cursor-pointer"
-                          >
-                            {lang === 'bn' ? '+ লাইভে যান' : '+ Go Live'}
-                          </button>
                         </div>
-                        <div className="flex gap-3 overflow-x-auto no-scrollbar py-1">
-                          {activeLiveStreams.map((live) => (
+                        <button
+                          type="button"
+                          onClick={() => openPersonalLiveStudio('audio')}
+                          className="text-[11px] font-black text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition active:scale-95 cursor-pointer bg-emerald-950/80 px-2.5 py-1 rounded-xl border border-emerald-500/40"
+                        >
+                          <Radio className="w-3 h-3 text-rose-400 animate-pulse" />
+                          <span>{lang === 'bn' ? '+ লাইভে যান' : '+ Go Live'}</span>
+                        </button>
+                      </div>
+
+                      {/* Stories Horizontal Reel */}
+                      <div className="flex gap-3 overflow-x-auto no-scrollbar py-1">
+                        {/* 1. Host's Personal Live Tile */}
+                        {(() => {
+                          const myLive = activeLiveStreams.find(
+                            (s) => s.hostId === currentUser.id || (firebaseUser && s.hostId === firebaseUser.uid)
+                          );
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (myLive) {
+                                  setCurrentLiveStreamId(myLive.id);
+                                  setShowLiveSheet(true);
+                                } else {
+                                  openPersonalLiveStudio('audio');
+                                }
+                              }}
+                              className="flex flex-col items-center gap-1.5 shrink-0 group transition active:scale-95 cursor-pointer"
+                            >
+                              <div className="relative">
+                                <div className={`w-15 h-15 rounded-2xl p-[2.5px] overflow-hidden ${
+                                  myLive
+                                    ? 'bg-gradient-to-tr from-rose-500 via-amber-400 to-rose-600 animate-pulse ring-2 ring-rose-500/50'
+                                    : 'bg-gradient-to-tr from-emerald-500 to-teal-400'
+                                }`}>
+                                  <img
+                                    src={currentUser.avatar || INITIAL_USER.avatar}
+                                    alt={currentUser.name}
+                                    className="w-full h-full object-cover rounded-[13px] bg-black"
+                                  />
+                                </div>
+                                <span className={`absolute -bottom-1 -right-1 text-[8px] font-black text-white px-1.5 py-0.5 rounded-md border border-black flex items-center gap-0.5 ${
+                                  myLive ? 'bg-rose-600 animate-pulse' : 'bg-emerald-600'
+                                }`}>
+                                  {myLive ? <Radio className="w-2.5 h-2.5" /> : '+'}
+                                  <span>{myLive ? (lang === 'bn' ? 'আমার' : 'MY LIVE') : (lang === 'bn' ? 'লাইভ' : 'GO')}</span>
+                                </span>
+                              </div>
+                              <span className="text-[10px] font-bold text-neutral-200 truncate max-w-[68px]">
+                                {myLive ? (lang === 'bn' ? 'আমার লাইভ 🔴' : 'My Live') : (lang === 'bn' ? 'লাইভে যান' : 'Go Live')}
+                              </span>
+                            </button>
+                          );
+                        })()}
+
+                        {/* 2. All Active Live Streams from Other Users */}
+                        {activeLiveStreams
+                          .filter((live) => live.hostId !== currentUser.id && (!firebaseUser || live.hostId !== firebaseUser.uid))
+                          .map((live) => (
                             <button
                               key={live.id}
+                              type="button"
                               onClick={() => {
                                 setCurrentLiveStreamId(live.id);
                                 setShowLiveSheet(true);
@@ -2210,130 +2323,377 @@ export default function App() {
                               className="flex flex-col items-center gap-1.5 shrink-0 group transition active:scale-95 cursor-pointer"
                             >
                               <div className="relative">
-                                <div className={`w-16 h-16 rounded-2xl p-0.5 overflow-hidden shadow-lg ${
+                                <div className={`w-15 h-15 rounded-2xl p-[2.5px] overflow-hidden shadow-lg ${
                                   live.mode === 'audio'
-                                    ? 'bg-gradient-to-tr from-emerald-500 to-cyan-400'
-                                    : 'bg-gradient-to-tr from-rose-600 to-amber-500'
+                                    ? 'bg-gradient-to-tr from-emerald-500 via-cyan-400 to-teal-400 ring-2 ring-emerald-500/40'
+                                    : 'bg-gradient-to-tr from-rose-600 via-amber-500 to-rose-400 animate-pulse ring-2 ring-rose-500/50'
                                 }`}>
                                   <img
-                                    src={live.hostAvatar}
+                                    src={live.hostAvatar || INITIAL_USER.avatar}
                                     alt={live.hostName}
-                                    className="w-full h-full object-cover rounded-[14px] border-2 border-black/20"
+                                    className="w-full h-full object-cover rounded-[13px] border border-black/30 bg-neutral-900"
                                   />
                                 </div>
-                                <span className={`absolute -bottom-1 -right-1 text-[9px] font-black text-white px-1.5 py-0.5 rounded-md border border-black flex items-center gap-0.5 ${
+                                {/* Top Viewers Badge */}
+                                <span className="absolute -top-1 -right-1 bg-black/80 text-[8px] font-black text-rose-300 px-1 py-0.5 rounded-md border border-rose-500/40 flex items-center gap-0.5">
+                                  <Users className="w-2 h-2 text-rose-400" />
+                                  <span>{toBengaliNumber(live.viewersCount || 1, lang)}</span>
+                                </span>
+                                {/* Bottom Mode Badge */}
+                                <span className={`absolute -bottom-1 -left-1 text-[8px] font-black text-white px-1 py-0.5 rounded-md border border-black flex items-center gap-0.5 ${
                                   live.mode === 'audio' ? 'bg-emerald-600' : 'bg-rose-600'
                                 }`}>
-                                  {live.mode === 'audio' ? <Mic className="w-2.5 h-2.5" /> : <Video className="w-2.5 h-2.5" />}
+                                  {live.mode === 'audio' ? <Mic className="w-2 h-2" /> : <Video className="w-2 h-2" />}
                                   <span>{live.mode === 'audio' ? 'অডিও' : 'LIVE'}</span>
                                 </span>
                               </div>
-                              <span className="text-[10px] font-bold text-neutral-300 truncate max-w-[68px]">{live.hostName}</span>
+                              <span className="text-[10px] font-bold text-neutral-200 truncate max-w-[68px]">
+                                {live.hostName}
+                              </span>
                             </button>
                           ))}
+
+                        {/* If no other lives, show friendly invite pill */}
+                        {activeLiveStreams.filter((l) => l.hostId !== currentUser.id && (!firebaseUser || l.hostId !== firebaseUser.uid)).length === 0 && (
+                          <div className="flex items-center gap-2 px-3 py-2 rounded-2xl bg-[#122018]/60 border border-emerald-950/60 text-neutral-400 text-[11px] shrink-0">
+                            <Headphones className="w-4 h-4 text-emerald-400 shrink-0" />
+                            <span>{lang === 'bn' ? 'বন্ধুরা লাইভের অপেক্ষায় • আপনিই প্রথম শুরু করুন!' : 'No live active. Start your personal live!'}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* HERO FEATURED LIVE BROADCAST BANNER (When any live is active) */}
+                    {activeLiveStreams.length > 0 && (
+                      <div className="relative overflow-hidden rounded-3xl p-3.5 bg-gradient-to-br from-[#1a080c] via-[#121c16] to-[#0a150f] border-2 border-rose-500/60 shadow-xl shadow-rose-950/30 text-white animate-in zoom-in-95">
+                        <div className="flex items-center justify-between mb-2.5">
+                          <div className="flex items-center gap-2">
+                            <span className="relative flex h-2.5 w-2.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-600" />
+                            </span>
+                            <span className="bg-rose-600 text-white text-[9px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider shadow">
+                              🔴 {activeLiveStreams[0].mode === 'audio' ? 'সরাসরি অডিও আড্ডা' : 'সরাসরি লাইভ ভিডিও'}
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-bold text-rose-300 flex items-center gap-1 bg-black/40 px-2 py-0.5 rounded-full border border-rose-900/40">
+                            <Users className="w-3 h-3 text-rose-400" />
+                            <span>{toBengaliNumber(activeLiveStreams[0].viewersCount || 1, lang)} {lang === 'bn' ? 'জন সরাসরি যুক্ত' : 'watching'}</span>
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div className="relative shrink-0">
+                            <div className={`w-14 h-14 rounded-2xl p-[2px] ${
+                              activeLiveStreams[0].mode === 'audio'
+                                ? 'bg-gradient-to-tr from-emerald-500 to-cyan-400'
+                                : 'bg-gradient-to-tr from-rose-500 to-amber-400'
+                            }`}>
+                              <img
+                                src={activeLiveStreams[0].hostAvatar || INITIAL_USER.avatar}
+                                alt={activeLiveStreams[0].hostName}
+                                className="w-full h-full object-cover rounded-[13px] bg-neutral-900"
+                              />
+                            </div>
+                            {/* Animated Equalizer Visualizer */}
+                            <div className="absolute -bottom-1 -right-1 bg-black/90 px-1 py-0.5 rounded flex items-end gap-0.5 border border-rose-500/50">
+                              <span className="w-0.5 h-2 bg-emerald-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                              <span className="w-0.5 h-3.5 bg-rose-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                              <span className="w-0.5 h-2.5 bg-amber-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+                            </div>
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <h4 className="text-xs font-black text-white truncate">
+                                {activeLiveStreams[0].hostName}
+                              </h4>
+                              <span className="text-[10px] text-emerald-400 font-bold shrink-0">✓</span>
+                              <span className="text-[9px] text-neutral-400 font-semibold px-1.5 py-0.2 rounded bg-white/5 shrink-0">
+                                {activeLiveStreams[0].category || 'আড্ডা'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] font-extrabold text-neutral-100 truncate mt-0.5">
+                              {activeLiveStreams[0].title || (lang === 'bn' ? 'বন্ধুদের সাথে আড্ডা ও সরাসরি কথোপকথন' : 'Live conversation')}
+                            </p>
+                            {activeLiveStreams[0].pinnedNotice && (
+                              <p className="text-[10px] text-amber-300/90 truncate mt-0.5">
+                                📌 {activeLiveStreams[0].pinnedNotice}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Direct Watch Button */}
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCurrentLiveStreamId(activeLiveStreams[0].id);
+                              setShowLiveSheet(true);
+                            }}
+                            className="flex-1 min-h-[38px] rounded-2xl bg-gradient-to-r from-rose-600 via-rose-500 to-amber-500 hover:brightness-110 font-black text-xs text-white shadow-lg shadow-rose-900/40 flex items-center justify-center gap-2 transition active:scale-95 cursor-pointer"
+                          >
+                            <Play className="w-3.5 h-3.5 fill-current" />
+                            <span>{lang === 'bn' ? 'সরাসরি যুক্ত হন ও দেখুন' : 'Watch Live Now'}</span>
+                          </button>
+                          {activeLiveStreams.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCategory('🔴 লাইভ')}
+                              className="px-3 min-h-[38px] rounded-2xl bg-white/10 hover:bg-white/15 text-[11px] font-bold text-neutral-200 border border-white/10 shrink-0 cursor-pointer"
+                            >
+                              +{toBengaliNumber(activeLiveStreams.length - 1, lang)} {lang === 'bn' ? 'অন্যান্য' : 'more'}
+                            </button>
+                          )}
                         </div>
                       </div>
                     )}
 
-                    {/* Removed GuestBanner as requested */}
-
-                    {/* Daily Bonus Card matching Screenshot 1 - moved to ProfileView */}
-                    {/*
-                    <DailyBonusCard
-                      onClaim={handleClaimDailyBonus}
-                      isClaimedToday={isClaimedToday}
-                      isMuted={isMuted}
-                      isAuthenticated={isAuthenticated}
-                      onRequireAuth={() =>
-                        triggerAuthPrompt(
-                          lang === 'bn'
-                            ? 'দৈনিক বোনাস এবং টাকা আর্ন করতে লগইন বা রেজিস্ট্রেশন করুন!'
-                            : 'Login or register to claim daily bonus!'
-                        )
-                      }
-                    />
                     {/* Category Pills */}
                     <div className="flex gap-2 overflow-x-auto no-scrollbar py-1">
                       {CATEGORIES.map((cat) => (
                         <button
                           key={cat}
                           onClick={() => setSelectedCategory(cat)}
-                          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1 ${
                             selectedCategory === cat
-                              ? 'bg-[#00c853] text-black shadow-md shadow-emerald-500/25'
+                              ? cat === '🔴 লাইভ'
+                                ? 'bg-rose-600 text-white shadow-md shadow-rose-500/25'
+                                : 'bg-[#00c853] text-black shadow-md shadow-emerald-500/25'
+                              : cat === '🔴 লাইভ' && activeLiveStreams.length > 0
+                              ? 'bg-rose-950/60 text-rose-300 border border-rose-500/40 animate-pulse'
                               : 'bg-[#15231c] text-neutral-300 hover:text-white border border-emerald-950'
                           }`}
                         >
-                          {cat}
+                          <span>{cat}</span>
+                          {cat === '🔴 লাইভ' && activeLiveStreams.length > 0 && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping" />
+                          )}
                         </button>
                       ))}
                     </div>
 
-                    {/* Section Title Header */}
-                    <div className="flex items-center justify-between pt-1">
-                      <h2 className="text-base font-extrabold text-white tracking-tight flex items-center gap-1.5">
-                        <span>{lang === 'bn' ? 'ReelPay BD' : "ReelPay BD"}</span>
-                      </h2>
-                      <div className="flex items-center gap-3">
-                        <select
-                          value={sortBy}
-                          onChange={(e) => setSortBy(e.target.value as any)}
-                          className="bg-[#15231c] text-[10px] font-bold text-emerald-400 border border-emerald-950/60 rounded-lg px-2 py-1 outline-none cursor-pointer hover:bg-[#1a2b22] transition-colors"
-                        >
-                          <option value="newest">{lang === 'bn' ? 'নতুন' : 'Newest'}</option>
-                          <option value="most_watched">{lang === 'bn' ? 'বেশি দেখা' : 'Most Watched'}</option>
-                          <option value="popular">{lang === 'bn' ? 'জনপ্রিয়' : 'Popular'}</option>
-                        </select>
-                        <button
-                          onClick={() => setSelectedCategory('সকল')}
-                          className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-0.5 cursor-pointer"
-                        >
-                          <span>{lang === 'bn' ? 'আরও দেখুন' : 'See more'}</span>
-                          <ChevronRight className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Feed List of Reels matching Screenshot 1 + Download + Gift */}
-                    <div className="space-y-1">
-                      {filteredReels.length === 0 ? (
-                        <div className="text-center py-12 text-neutral-400 text-xs">
-                          {lang === 'bn' ? 'এই ক্যাটাগরিতে কোনো রিল পাওয়া যায়নি।' : 'No reels in this category.'}
+                    {/* DEDICATED LIVE STREAMS FEED WHEN '🔴 লাইভ' CATEGORY IS SELECTED */}
+                    {selectedCategory === '🔴 লাইভ' ? (
+                      <div className="space-y-3 pt-1">
+                        <div className="flex items-center justify-between px-1">
+                          <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-pulse" />
+                            <span>{lang === 'bn' ? 'সকল সরাসরি লাইভ স্ট্রিম' : 'All Active Live Streams'}</span>
+                          </h3>
+                          <span className="text-[11px] text-neutral-400 font-bold">
+                            {toBengaliNumber(activeLiveStreams.length, lang)} {lang === 'bn' ? 'টি সক্রিয়' : 'active'}
+                          </span>
                         </div>
-                      ) : (
-                        filteredReels.map((reel) => (
-                          <ReelFeedCard
-                            key={reel.id}
-                            reel={reel}
-                            isLiked={likedReelIds.includes(reel.id)}
-                            hasWatched={watchedReelIds.includes(reel.id)}
-                            onLikeToggle={handleToggleLike}
-                            onOpenReel={(r) => setFullScreenReelId(r.id)}
-                            onOpenComments={(r) => setActiveCommentReel(r)}
-                            onClaimDirect={handleClaimDirect}
-                            onOpenGift={() => {
-                              if (!isAuthenticated) {
-                                triggerAuthPrompt(
-                                  lang === 'bn'
-                                    ? 'উপহার পাঠাতে এবং গিফট বোনাস পেতে লগইন বা রেজিস্ট্রেশন করুন!'
-                                    : 'Login or register to send gifts!'
-                                );
-                                return;
-                              }
-                              setGiftTarget({ userId: reel.userId, creatorName: reel.creatorName });
-                              setShowGiftSheet(true);
-                            }}
-                            onOpenCreatorProfile={(userId) => handleOpenUserProfile(userId)}
-                            onShare={handleOpenShare}
-                            lang={lang}
-                            isMuted={isMuted}
-                            levelProgress={levelProgress}
-                            earningSettings={earningSettings}
-                            isDailyLimitReached={isDailyReelLimitReached}
-                          />
-                        ))
-                      )}
-                    </div>
+
+                        {activeLiveStreams.length === 0 ? (
+                          <div className="p-8 rounded-3xl bg-[#0f1913] border border-emerald-950/60 text-center space-y-3">
+                            <div className="w-16 h-16 rounded-full bg-rose-950/50 border border-rose-500/40 flex items-center justify-center mx-auto text-rose-400">
+                              <Radio className="w-8 h-8" />
+                            </div>
+                            <h4 className="font-extrabold text-sm text-white">
+                              {lang === 'bn' ? 'বর্তমানে কোনো লাইভ সক্রিয় নেই' : 'No active live streams'}
+                            </h4>
+                            <p className="text-xs text-neutral-400 max-w-xs mx-auto">
+                              {lang === 'bn'
+                                ? 'আপনি কি বন্ধুদের সাথে অডিও আড্ডা বা ভিডিও লাইভ শুরু করতে চান? এখনই প্রথম লাইভ শুরু করুন!'
+                                : 'Start your audio adda or video live and interact with your followers!'}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => openPersonalLiveStudio('audio')}
+                              className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-cyan-400 text-black font-black text-xs shadow-lg shadow-emerald-500/20 hover:brightness-110 cursor-pointer"
+                            >
+                              🎙️ {lang === 'bn' ? 'নিজেই প্রথম লাইভ শুরু করুন' : 'Start First Live'}
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 gap-3">
+                            {activeLiveStreams.map((live) => (
+                              <div
+                                key={live.id}
+                                className="p-4 rounded-3xl bg-[#111c15] border border-emerald-900/40 shadow-xl space-y-3 text-white"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2.5">
+                                    <img
+                                      src={live.hostAvatar || INITIAL_USER.avatar}
+                                      alt={live.hostName}
+                                      className="w-11 h-11 rounded-2xl object-cover border border-emerald-500/40"
+                                    />
+                                    <div>
+                                      <h4 className="text-xs font-black flex items-center gap-1">
+                                        <span>{live.hostName}</span>
+                                        <span className="text-[10px] text-emerald-400 font-bold">✓</span>
+                                      </h4>
+                                      <span className="text-[10px] text-neutral-400 font-semibold">
+                                        {live.category || 'আড্ডা'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border flex items-center gap-1 ${
+                                    live.mode === 'audio'
+                                      ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+                                      : 'bg-rose-950/80 text-rose-300 border-rose-500/40'
+                                  }`}>
+                                    {live.mode === 'audio' ? <Mic className="w-3 h-3" /> : <Video className="w-3 h-3" />}
+                                    <span>{live.mode === 'audio' ? 'অডিও আড্ডা' : 'ভিডিও লাইভ'}</span>
+                                  </span>
+                                </div>
+
+                                <div>
+                                  <h3 className="text-sm font-extrabold text-neutral-100">
+                                    {live.title}
+                                  </h3>
+                                  {live.pinnedNotice && (
+                                    <p className="text-xs text-amber-300/80 mt-0.5">
+                                      📌 {live.pinnedNotice}
+                                    </p>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center justify-between pt-1 border-t border-emerald-950">
+                                  <div className="flex items-center gap-3 text-xs text-neutral-400">
+                                    <span className="flex items-center gap-1 text-rose-400 font-bold">
+                                      <Users className="w-3.5 h-3.5" />
+                                      <span>{toBengaliNumber(live.viewersCount || 1, lang)} জন দেখছেন</span>
+                                    </span>
+                                    <span>•</span>
+                                    <span className="text-emerald-400 font-bold">
+                                      ❤️ {toBengaliNumber(live.likesCount || 0, lang)}
+                                    </span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setCurrentLiveStreamId(live.id);
+                                      setShowLiveSheet(true);
+                                    }}
+                                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-amber-500 hover:brightness-110 font-black text-xs text-white shadow-md flex items-center gap-1.5 cursor-pointer"
+                                  >
+                                    <Play className="w-3 h-3 fill-current" />
+                                    <span>{lang === 'bn' ? 'সরাসরি যুক্ত হন' : 'Join Live'}</span>
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                        {/* Section Title Header */}
+                        <div className="flex items-center justify-between pt-1">
+                          <h2 className="text-base font-extrabold text-white tracking-tight flex items-center gap-1.5">
+                            <span>{lang === 'bn' ? 'ReelPay BD' : "ReelPay BD"}</span>
+                          </h2>
+                          <div className="flex items-center gap-3">
+                            <select
+                              value={sortBy}
+                              onChange={(e) => setSortBy(e.target.value as any)}
+                              className="bg-[#15231c] text-[10px] font-bold text-emerald-400 border border-emerald-950/60 rounded-lg px-2 py-1 outline-none cursor-pointer hover:bg-[#1a2b22] transition-colors"
+                            >
+                              <option value="newest">{lang === 'bn' ? 'নতুন' : 'Newest'}</option>
+                              <option value="most_watched">{lang === 'bn' ? 'বেশি দেখা' : 'Most Watched'}</option>
+                              <option value="popular">{lang === 'bn' ? 'জনপ্রিয়' : 'Popular'}</option>
+                            </select>
+                            <button
+                              onClick={() => setSelectedCategory('সকল')}
+                              className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-0.5 cursor-pointer"
+                            >
+                              <span>{lang === 'bn' ? 'আরও দেখুন' : 'See more'}</span>
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Feed List of Reels matching Screenshot 1 + Download + Gift */}
+                        <div className="space-y-1">
+                          {filteredReels.length === 0 ? (
+                            <div className="text-center py-12 text-neutral-400 text-xs">
+                              {lang === 'bn' ? 'এই ক্যাটাগরিতে কোনো রিল পাওয়া যায়নি।' : 'No reels in this category.'}
+                            </div>
+                          ) : (
+                            filteredReels.map((reel, rIdx) => (
+                              <React.Fragment key={reel.id}>
+                                <ReelFeedCard
+                                  reel={reel}
+                                  isLiked={likedReelIds.includes(reel.id)}
+                                  hasWatched={watchedReelIds.includes(reel.id)}
+                                  onLikeToggle={handleToggleLike}
+                                  onOpenReel={(r) => setFullScreenReelId(r.id)}
+                                  onOpenComments={(r) => setActiveCommentReel(r)}
+                                  onClaimDirect={handleClaimDirect}
+                                  onOpenGift={() => {
+                                    if (!isAuthenticated) {
+                                      triggerAuthPrompt(
+                                        lang === 'bn'
+                                          ? 'উপহার পাঠাতে এবং গিফট বোনাস পেতে লগইন বা রেজিস্ট্রেশন করুন!'
+                                          : 'Login or register to send gifts!'
+                                      );
+                                      return;
+                                    }
+                                    setGiftTarget({ userId: reel.userId, creatorName: reel.creatorName });
+                                    setShowGiftSheet(true);
+                                  }}
+                                  onOpenCreatorProfile={(userId) => handleOpenUserProfile(userId)}
+                                  onShare={handleOpenShare}
+                                  lang={lang}
+                                  isMuted={isMuted}
+                                  levelProgress={levelProgress}
+                                  earningSettings={earningSettings}
+                                  isDailyLimitReached={isDailyReelLimitReached}
+                                />
+
+                                {/* In-feed Live Recommendation Interstitial Card after 1st reel */}
+                                {rIdx === 0 && activeLiveStreams.length > 0 && (
+                                  <div
+                                    onClick={() => {
+                                      setCurrentLiveStreamId(activeLiveStreams[0].id);
+                                      setShowLiveSheet(true);
+                                    }}
+                                    className="my-2 p-3.5 rounded-3xl bg-gradient-to-r from-rose-950/60 via-[#13221a] to-[#0d1611] border border-rose-500/40 shadow-lg flex items-center justify-between cursor-pointer hover:border-rose-400/60 transition group"
+                                  >
+                                    <div className="flex items-center gap-3 min-w-0">
+                                      <div className="relative shrink-0">
+                                        <img
+                                          src={activeLiveStreams[0].hostAvatar || INITIAL_USER.avatar}
+                                          alt={activeLiveStreams[0].hostName}
+                                          className="w-12 h-12 rounded-2xl object-cover ring-2 ring-rose-500 animate-pulse"
+                                        />
+                                        <span className="absolute -bottom-1 -right-1 bg-rose-600 text-[8px] font-black text-white px-1 py-0.2 rounded border border-black">
+                                          LIVE
+                                        </span>
+                                      </div>
+                                      <div className="min-w-0">
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="text-[10px] font-black text-rose-400 uppercase tracking-wider flex items-center gap-1">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping" />
+                                            <span>{activeLiveStreams[0].mode === 'audio' ? 'অডিও আড্ডা' : 'লাইভ ভিডিও'}</span>
+                                          </span>
+                                          <span className="text-[10px] text-neutral-400">• {toBengaliNumber(activeLiveStreams[0].viewersCount || 1, lang)} জন যুক্ত</span>
+                                        </div>
+                                        <h4 className="text-xs font-black text-white truncate mt-0.5">
+                                          {activeLiveStreams[0].hostName}: {activeLiveStreams[0].title}
+                                        </h4>
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      className="px-3 py-1.5 rounded-xl bg-rose-600 group-hover:bg-rose-500 text-white font-black text-[11px] shrink-0 shadow flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <Play className="w-3 h-3 fill-current" />
+                                      <span>দেখুন</span>
+                                    </button>
+                                  </div>
+                                )}
+                              </React.Fragment>
+                            ))
+                          )}
+                        </div>
+                      </>
+                    )}
 
                     {/* LIVE STREAM HIGHLIGHT CARD matching prompt - moved to ProfileView */}
                     {/*
@@ -2705,12 +3065,33 @@ export default function App() {
                   return activeLive && (currentUser.following || []).includes(activeLive.hostId);
                 })()
               )}
+              initialStream={activeLiveStreams.find((s) => s.id === currentLiveStreamId) || null}
               onShare={(stream) => {
                 setSharingReel(null);
                 setSharingLiveStream(stream);
                 setShowShareSheet(true);
               }}
             />
+          )}
+
+          {/* Floating Live Stream Ticker (When live stream is active and user is browsing feed) */}
+          {activeLiveStreams.length > 0 && !showLiveSheet && (
+            <button
+              type="button"
+              onClick={() => {
+                setCurrentLiveStreamId(activeLiveStreams[0].id);
+                setShowLiveSheet(true);
+              }}
+              className="fixed bottom-20 right-3 z-40 bg-gradient-to-r from-rose-600 via-rose-500 to-amber-500 text-white px-3.5 py-2 rounded-full shadow-2xl border-2 border-black/40 flex items-center gap-2 cursor-pointer hover:scale-105 transition active:scale-95 animate-pulse"
+            >
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
+              </span>
+              <span className="text-xs font-black">
+                🔴 {activeLiveStreams[0].hostName} {lang === 'bn' ? 'লাইভে আছেন ▶' : 'is LIVE ▶'}
+              </span>
+            </button>
           )}
 
           {/* Share Sheet */}
