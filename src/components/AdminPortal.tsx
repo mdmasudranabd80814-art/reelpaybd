@@ -41,6 +41,7 @@ export const AdminPortal: React.FC = () => {
     user: firebaseUser,
     emailVerified,
     loading: authLoading,
+    authError: redirectAuthError,
     loginWithGoogle,
     loginWithEmail,
     registerWithEmail,
@@ -63,6 +64,12 @@ export const AdminPortal: React.FC = () => {
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authInfo, setAuthInfo] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (redirectAuthError) {
+      setAuthError(formatFirebaseAuthError(redirectAuthError, 'bn'));
+    }
+  }, [redirectAuthError]);
 
   const [checkingAdmin, setCheckingAdmin] = useState(false);
   const [isAuthorizedAdmin, setIsAuthorizedAdmin] = useState(false);
@@ -356,10 +363,15 @@ export const AdminPortal: React.FC = () => {
   };
 
   const handleAdminGoogleLogin = async () => {
+    if (authSubmitting) return;
     setAuthError(null);
     setAuthInfo(null);
     setAuthSubmitting(true);
     const res = await loginWithGoogle();
+    if (res.redirecting) {
+      setAuthInfo('Google সাইন-ইন পেজে নিয়ে যাওয়া হচ্ছে...');
+      return;
+    }
     if (res.error) {
       setAuthError(formatFirebaseAuthError(res.error, 'bn'));
     }

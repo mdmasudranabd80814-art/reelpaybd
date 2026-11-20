@@ -3,6 +3,8 @@ import {
   onIdTokenChanged,
   User as FirebaseUser,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -77,15 +79,26 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 
 export function formatFirebaseAuthError(error: unknown, lang: 'bn' | 'en' = 'bn'): string {
   const code = (error as { code?: string })?.code || '';
+  const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
   if (code === 'auth/operation-not-allowed' || code === 'auth/admin-restricted-operation') {
     return lang === 'bn'
-      ? 'Firebase Console-এ Email/Password Sign-in চালু নেই। Authentication → Sign-in method থেকে Email/Password Enable করুন, অথবা নিচের Google Sign-in ব্যবহার করুন।'
-      : 'Email/Password sign-in is not enabled in Firebase Console (Authentication → Sign-in method). Please enable it or use Google Sign-in.';
+      ? 'Firebase Console → Authentication → Sign-in method থেকে নির্বাচিত লগইন পদ্ধতি (Google / Email) চালু করা নেই।'
+      : 'This sign-in provider is not enabled in Firebase Console (Authentication → Sign-in method).';
   }
   if (code === 'auth/email-already-in-use') {
     return lang === 'bn'
       ? 'এই ইমেইল দিয়ে ইতিমধ্যে অ্যাকাউন্ট খোলা আছে। অনুগ্রহ করে লগইন করুন।'
       : 'An account with this email already exists. Please log in.';
+  }
+  if (code === 'auth/account-exists-with-different-credential') {
+    return lang === 'bn'
+      ? 'এই ইমেইল দিয়ে ইতিমধ্যে অন্য পদ্ধতিতে অ্যাকাউন্ট রয়েছে। পূর্বের পদ্ধতিতে (ইমেইল/পাসওয়ার্ড) লগইন করুন।'
+      : 'An account already exists with the same email using a different sign-in method.';
+  }
+  if (code === 'auth/user-disabled') {
+    return lang === 'bn'
+      ? 'নিরাপত্তাজনিত কারণে এই অ্যাকাউন্টটি সাময়িকভাবে বন্ধ করা হয়েছে।'
+      : 'This account has been disabled.';
   }
   if (code === 'auth/invalid-email') {
     return lang === 'bn' ? 'সঠিক ইমেইল ঠিকানা লিখুন।' : 'Please enter a valid email address.';
@@ -109,16 +122,28 @@ export function formatFirebaseAuthError(error: unknown, lang: 'bn' | 'en' = 'bn'
   }
   if (code === 'auth/popup-blocked') {
     return lang === 'bn'
-      ? 'ব্রাউজার সাইন-ইন পপআপ ব্লক করেছে। পপআপ Allow করুন অথবা লিংকটি নতুন ট্যাবে খুলে লগইন করুন।'
-      : 'Sign-in popup was blocked by your browser. Allow popups or open the link in a new tab.';
+      ? 'ব্রাউজার Google সাইন-ইন পপআপ ব্লক করেছে। ব্রাউজারের Popup Allow করুন অথবা লিংকটি Chrome/Safari-তে সরাসরি ওপেন করে চেষ্টা করুন।'
+      : 'Sign-in popup was blocked by your browser. Allow popups or open the app link directly in Chrome/Safari.';
+  }
+  if (code === 'auth/cancelled-popup-request') {
+    return lang === 'bn'
+      ? 'আগের সাইন-ইন পপআপটি বাতিল হয়েছে। দয়া করে আবার বাটনে চাপ দিন।'
+      : 'Previous sign-in popup was cancelled. Please try again.';
   }
   if (code === 'auth/popup-closed-by-user') {
-    return lang === 'bn' ? 'সাইন-ইন পপআপ বন্ধ করা হয়েছে।' : 'Sign-in popup was closed.';
+    return lang === 'bn'
+      ? 'Google সাইন-ইন পপআপ সম্পন্ন হওয়ার আগেই বন্ধ হয়েছে। আবার চেষ্টা করুন।'
+      : 'Sign-in popup was closed before completion. Please try again.';
+  }
+  if (code === 'auth/operation-not-supported-in-this-environment') {
+    return lang === 'bn'
+      ? 'এই ইন-অ্যাপ ব্রাউজারে Google পপআপ সাপোর্ট করছে না। অনুগ্রহ করে Chrome বা Safari ব্রাউজারে লিংকটি ওপেন করুন।'
+      : 'Google popup sign-in is not supported in this browser environment. Open in Chrome or Safari.';
   }
   if (code === 'auth/unauthorized-domain') {
     return lang === 'bn'
-      ? 'এই ডোমেইনটি Firebase Authentication Authorized Domains-এ যুক্ত নেই। Firebase Console → Authentication → Settings → Authorized domains-এ ডোমেইনটি যোগ করুন।'
-      : 'This domain is not in Firebase Authentication Authorized Domains.';
+      ? `এই ডোমেইনটি (${hostname || 'current domain'}) Firebase Authentication Authorized Domains-এ যুক্ত নেই। Firebase Console → Authentication → Settings → Authorized domains-এ "${hostname || 'this domain'}" যোগ করুন।`
+      : `Domain "${hostname || 'current domain'}" is not in Firebase Authentication Authorized Domains.`;
   }
   if (code === 'auth/network-request-failed') {
     return lang === 'bn'
@@ -132,31 +157,79 @@ export function formatFirebaseAuthError(error: unknown, lang: 'bn' | 'en' = 'bn'
     : 'Authentication failed.';
 }
 
+const isUserEmailVerified = (u: FirebaseUser | null): boolean => {
+  if (!u) return false;
+  return Boolean(u.emailVerified);
+};
+
 export function useFirebase() {
   const [user, setUser] = useState<FirebaseUser | null>(auth.currentUser);
-  const [emailVerified, setEmailVerified] = useState<boolean>(Boolean(auth.currentUser?.emailVerified));
+  const [emailVerified, setEmailVerified] = useState<boolean>(isUserEmailVerified(auth.currentUser));
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<unknown>(null);
 
   useEffect(() => {
+    let active = true;
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (!active || !result?.user) return;
+        await result.user.reload().catch(() => {});
+        await result.user.getIdToken(true).catch(() => {});
+        if (!active) return;
+        setUser(result.user);
+        setEmailVerified(isUserEmailVerified(result.user));
+      })
+      .catch((err) => {
+        if (active) {
+          console.error('Google redirect login error:', err);
+          setAuthError(err);
+        }
+      });
+
     const unsubscribe = onIdTokenChanged(auth, (u) => {
+      if (!active) return;
       setUser(u);
-      setEmailVerified(Boolean(u?.emailVerified));
+      setEmailVerified(isUserEmailVerified(u));
       setLoading(false);
     });
-    return unsubscribe;
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
   const loginWithGoogle = useCallback(async () => {
+    setAuthError(null);
     const provider = new GoogleAuthProvider();
+    provider.addScope('email');
+    provider.addScope('profile');
     provider.setCustomParameters({ prompt: 'select_account' });
     try {
       const cred = await signInWithPopup(auth, provider);
+      await cred.user.reload().catch(() => {});
+      await cred.user.getIdToken(true).catch(() => {});
       setUser(cred.user);
-      setEmailVerified(Boolean(cred.user.emailVerified));
-      return { user: cred.user, error: null as unknown };
+      setEmailVerified(isUserEmailVerified(cred.user));
+      return { user: cred.user, redirecting: false, error: null as unknown };
     } catch (error) {
+      const code = (error as { code?: string })?.code || '';
+      const isInIframe = typeof window !== 'undefined' && window.self !== window.top;
+      if (
+        !isInIframe &&
+        (code === 'auth/popup-blocked' ||
+          code === 'auth/operation-not-supported-in-this-environment' ||
+          code === 'auth/cancelled-popup-request')
+      ) {
+        try {
+          await signInWithRedirect(auth, provider);
+          return { user: null, redirecting: true, error: null as unknown };
+        } catch (redirectError) {
+          console.error('Google redirect fallback failed:', redirectError);
+          return { user: null, redirecting: false, error: redirectError };
+        }
+      }
       console.error('Google login failed:', error);
-      return { user: null, error };
+      return { user: null, redirecting: false, error };
     }
   }, []);
 
@@ -305,6 +378,22 @@ export function useFirebase() {
     []
   );
 
+  const subscribeDocument = useCallback(
+    (colPath: string, id: string, callback: (data: any | null) => void) => {
+      const docRef = doc(db, colPath, id);
+      return onSnapshot(
+        docRef,
+        (docSnap) => {
+          callback(docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null);
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, `${colPath}/${id}`);
+        }
+      );
+    },
+    []
+  );
+
   const verifyAdminAccess = useCallback(async (): Promise<boolean> => {
     if (!auth.currentUser || !auth.currentUser.emailVerified) {
       return false;
@@ -321,6 +410,7 @@ export function useFirebase() {
     user,
     emailVerified,
     loading,
+    authError,
     loginWithGoogle,
     loginWithEmail,
     registerWithEmail,
@@ -336,5 +426,6 @@ export function useFirebase() {
     deleteDocument,
     addDocument,
     onSnapshot: subscribeSnapshot,
+    onDocumentSnapshot: subscribeDocument,
   };
 }

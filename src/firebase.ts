@@ -6,7 +6,7 @@ import { INITIAL_REELS, INITIAL_TASKS } from './data/initialData';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-export const auth = getAuth();
+export const auth = getAuth(app);
 
 // Validate connection to Firestore
 async function testConnection() {

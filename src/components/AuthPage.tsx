@@ -22,11 +22,12 @@ interface AuthPageProps {
     password: string,
     userData: Partial<User>
   ) => Promise<{ user: unknown; verificationSent: boolean; error: unknown }>;
-  onGoogleLogin: (pendingProfile?: Partial<User>) => Promise<{ user: unknown; error: unknown }>;
+  onGoogleLogin: (pendingProfile?: Partial<User>) => Promise<{ user: unknown; redirecting?: boolean; error: unknown }>;
   onResetPassword?: (email: string) => Promise<{ ok: boolean; error: unknown }>;
   onClose?: () => void;
   initialView?: 'login' | 'register';
   reasonMessage?: string;
+  externalError?: string | null;
   lang?: 'bn' | 'en';
   paymentMethods?: PaymentMethodConfig[];
 }
@@ -41,6 +42,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   onClose,
   initialView = 'login',
   reasonMessage,
+  externalError,
   lang = 'bn',
   paymentMethods,
 }) => {
@@ -50,6 +52,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
+  const [copiedUrl, setCopiedUrl] = useState(false);
 
   const availableMethods = React.useMemo(() => {
     const base = paymentMethods && paymentMethods.length > 0 ? paymentMethods : DEFAULT_PAYMENT_METHODS;
@@ -129,6 +132,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   };
 
   const handleGoogleAuth = async (withPendingProfile = false) => {
+    if (loading) return;
     setErrorMsg(null);
     setInfoMsg(null);
     setLoading(true);
@@ -143,10 +147,31 @@ export const AuthPage: React.FC<AuthPageProps> = ({
         }
       : undefined;
     const res = await onGoogleLogin(pending);
+    if (res.redirecting) {
+      setInfoMsg(
+        lang === 'bn'
+          ? 'Google ভেরিফাইড সাইন-ইন পেজে নিয়ে যাওয়া হচ্ছে...'
+          : 'Redirecting to Google verified sign-in...'
+      );
+      return;
+    }
     if (res.error) {
       setErrorMsg(formatFirebaseAuthError(res.error, lang));
     }
     setLoading(false);
+  };
+
+  const activeError = errorMsg || externalError || null;
+  const showCopyLinkHelper = Boolean(
+    activeError && (activeError.includes('পপআপ') || activeError.toLowerCase().includes('popup') || activeError.includes('Chrome'))
+  );
+
+  const handleCopyCurrentUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopiedUrl(true);
+      setTimeout(() => setCopiedUrl(false), 2500);
+    } catch {}
   };
 
   const handleNextStep = async () => {
@@ -234,9 +259,20 @@ export const AuthPage: React.FC<AuthPageProps> = ({
             </span>
           </div>
 
-          {errorMsg && (
-            <div className="bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold px-3.5 py-2.5 rounded-2xl leading-relaxed">
-              ⚠️ {errorMsg}
+          {activeError && (
+            <div className="bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold px-3.5 py-2.5 rounded-2xl leading-relaxed space-y-2">
+              <div>⚠️ {activeError}</div>
+              {showCopyLinkHelper && (
+                <button
+                  type="button"
+                  onClick={handleCopyCurrentUrl}
+                  className="w-full py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white text-[11px] font-bold transition cursor-pointer"
+                >
+                  {copiedUrl
+                    ? (lang === 'bn' ? '✓ লিংক কপি হয়েছে! Chrome/Safari-তে পেস্ট করুন' : '✓ Link Copied! Open in Chrome/Safari')
+                    : (lang === 'bn' ? '🔗 অ্যাপের লিংক কপি করুন (Chrome-এ খোলার জন্য)' : '🔗 Copy App Link to Open in Chrome')}
+                </button>
+              )}
             </div>
           )}
 

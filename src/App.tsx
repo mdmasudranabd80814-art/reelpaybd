@@ -51,7 +51,7 @@ import { GuestEarnView } from './components/GuestEarnView';
 import { GuestWalletView } from './components/GuestWalletView';
 import { GuestProfileView } from './components/GuestProfileView';
 import { AuthPromptModal } from './components/AuthPromptModal';
-import { useFirebase } from './hooks/useFirebase';
+import { useFirebase, formatFirebaseAuthError } from './hooks/useFirebase';
 import { where, orderBy, increment, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { normalizeVideoUrl } from './utils/video';
 import { downloadReelVideo } from './utils/videoDownload';
@@ -189,6 +189,7 @@ function UserApp() {
     user: firebaseUser,
     emailVerified,
     loading: authLoading,
+    authError,
     loginWithGoogle,
     loginWithEmail,
     registerWithEmail,
@@ -203,7 +204,12 @@ function UserApp() {
     deleteDocument,
     addDocument,
     onSnapshot: firebaseOnSnapshot,
+    onDocumentSnapshot,
   } = useFirebase();
+
+  const [profileSyncing, setProfileSyncing] = useState<boolean>(false);
+  const [authSyncError, setAuthSyncError] = useState<string | null>(null);
+  const [syncRetryNonce, setSyncRetryNonce] = useState<number>(0);
 
   // Persistent State
   const [users, setUsers] = useState<User[]>(INITIAL_USERS_LIST);
@@ -390,18 +396,43 @@ function UserApp() {
   const currentUserRef = useRef<User>(currentUser);
   currentUserRef.current = currentUser;
 
+  useEffect(() => {
+    if (authError && !firebaseUser) {
+      setShowAuthModal(true);
+    }
+  }, [authError, firebaseUser]);
+
   // Auth Sync: strictly require verified email before reading/writing Firestore
   useEffect(() => {
     let cancelled = false;
     if (firebaseUser && emailVerified) {
       setShowAuthModal(false);
       setAuthPromptState({ open: false });
+      setAuthSyncError(null);
+      setProfileSyncing(true);
       const syncProfile = async () => {
         try {
-          const [profile, remoteSettings] = await Promise.all([
-            getDocument('users', firebaseUser.uid) as Promise<User | null>,
-            getDocument('settings', 'earning').catch(() => null) as Promise<Partial<EarningSettings> | null>,
-          ]);
+          // Ensure auth ID token carries latest email_verified claim before Firestore access
+          await firebaseUser.getIdToken(true).catch(() => {});
+
+          const resolvedEmail = (
+            firebaseUser.email ||
+            firebaseUser.providerData?.find((p) => p.email)?.email ||
+            ''
+          ).slice(0, 150);
+
+          let profile: User | null = null;
+          try {
+            profile = (await getDocument('users', firebaseUser.uid)) as User | null;
+          } catch (firstErr) {
+            await firebaseUser.getIdToken(true).catch(() => {});
+            profile = (await getDocument('users', firebaseUser.uid)) as User | null;
+            if (!profile && firstErr) {
+              console.warn('Retried profile fetch:', firstErr);
+            }
+          }
+
+          const remoteSettings = (await getDocument('settings', 'earning').catch(() => null)) as Partial<EarningSettings> | null;
           if (cancelled) return;
 
           const liveSettings: EarningSettings = {
@@ -433,6 +464,8 @@ function UserApp() {
               const updatedUser: User = {
                 ...profile,
                 id: firebaseUser.uid,
+                email: (profile.email || resolvedEmail).slice(0, 150),
+                isVerified: true,
                 points: (profile.points || 0) + offerPoints,
                 loginOfferClaimed: true,
                 loginOfferCampaignId: activeCampaignId,
@@ -444,7 +477,7 @@ function UserApp() {
                   points: increment(offerPoints),
                   loginOfferClaimed: true,
                   loginOfferCampaignId: activeCampaignId,
-                }),
+                }).catch((err) => console.warn('Login offer credit sync warning:', err)),
                 setDocument('public_profiles', firebaseUser.uid, toPublicProfile(updatedUser)).catch(() => {}),
               ]);
               if (!isMuted) playSuccessChime();
@@ -454,7 +487,12 @@ function UserApp() {
                   : `🎁 Admin Login Offer! +${offerPoints} points credited!`
               );
             } else {
-              const hydratedProfile: User = { ...profile, id: firebaseUser.uid };
+              const hydratedProfile: User = {
+                ...profile,
+                id: firebaseUser.uid,
+                email: (profile.email || resolvedEmail).slice(0, 150),
+                isVerified: true,
+              };
               setCurrentUser(hydratedProfile);
               setIsAuthenticated(true);
               setDocument('public_profiles', firebaseUser.uid, toPublicProfile(hydratedProfile)).catch(() => {});
@@ -469,17 +507,24 @@ function UserApp() {
               }
             } catch {}
 
+            const safeName = (
+              pendingReg.name ||
+              firebaseUser.displayName ||
+              (resolvedEmail ? resolvedEmail.split('@')[0] : '') ||
+              'User'
+            ).trim().slice(0, 100);
+
             const newUser: User = {
               ...INITIAL_USER,
               id: firebaseUser.uid,
-              name: (pendingReg.name || firebaseUser.displayName || 'User').slice(0, 100),
-              phone: (pendingReg.phone || '').slice(0, 20),
-              email: firebaseUser.email || '',
+              name: safeName || 'User',
+              phone: (pendingReg.phone || '').trim().slice(0, 20),
+              email: resolvedEmail,
               avatar: firebaseUser.photoURL || INITIAL_USER.avatar,
-              paymentMethod: pendingReg.paymentMethod || siteSettings.paymentMethods?.[0]?.name || 'bKash',
-              paymentAccountNumber: pendingReg.paymentAccountNumber || '',
-              paymentAccountHolder: pendingReg.paymentAccountHolder || '',
-              paymentBankName: pendingReg.paymentBankName || '',
+              paymentMethod: (pendingReg.paymentMethod || siteSettings.paymentMethods?.[0]?.name || 'bKash').slice(0, 100),
+              paymentAccountNumber: (pendingReg.paymentAccountNumber || '').slice(0, 100),
+              paymentAccountHolder: (pendingReg.paymentAccountHolder || '').slice(0, 120),
+              paymentBankName: (pendingReg.paymentBankName || '').slice(0, 120),
               points: offerPoints,
               role: 'user',
               createdAt: new Date().toISOString(),
@@ -496,12 +541,13 @@ function UserApp() {
               loginOfferCampaignId: activeCampaignId,
             };
 
+            // Persist user document BEFORE activating authenticated listeners/tracking
+            await setDocument('users', firebaseUser.uid, newUser);
+            if (cancelled) return;
+
             setCurrentUser(newUser);
             setIsAuthenticated(true);
-            await Promise.all([
-              setDocument('users', firebaseUser.uid, newUser),
-              setDocument('public_profiles', firebaseUser.uid, toPublicProfile(newUser)).catch(() => {}),
-            ]);
+            setDocument('public_profiles', firebaseUser.uid, toPublicProfile(newUser)).catch(() => {});
 
             if (offerPoints > 0) {
               if (!isMuted) playSuccessChime();
@@ -513,17 +559,31 @@ function UserApp() {
             } else {
               showToast(
                 lang === 'bn'
-                  ? '✅ অ্যাকাউন্ট তৈরি হয়েছে (০ পয়েন্ট)! রিল দেখে ও টাস্ক করে আর্ন শুরু করুন।'
-                  : '✅ Account created with 0 points! Start earning now.'
+                  ? '✅ Google ভেরিফাইড লগইন সম্পন্ন হয়েছে! রিল দেখে ও টাস্ক করে আর্ন শুরু করুন।'
+                  : '✅ Verified Google sign-in successful! Start earning now.'
               );
             }
           }
         } catch (err) {
           console.error('Auth sync error:', err);
+          if (!cancelled) {
+            const msg = err instanceof Error ? err.message : String(err);
+            setAuthSyncError(
+              lang === 'bn'
+                ? `আপনার ভেরিফাইড অ্যাকাউন্টটি প্রোফাইলের সাথে সিঙ্ক করতে সমস্যা হয়েছে (${msg.slice(0, 120)})`
+                : `Failed to sync your verified profile (${msg.slice(0, 120)})`
+            );
+          }
+        } finally {
+          if (!cancelled) {
+            setProfileSyncing(false);
+          }
         }
       };
       syncProfile();
     } else {
+      setProfileSyncing(false);
+      setAuthSyncError(null);
       setIsAuthenticated(false);
       setCurrentUser({
         ...INITIAL_USER,
@@ -535,7 +595,7 @@ function UserApp() {
     return () => {
       cancelled = true;
     };
-  }, [firebaseUser, emailVerified, guestId]);
+  }, [firebaseUser, emailVerified, guestId, syncRetryNonce]);
 
   // Public Reels Listener (Viewable in Guest Mode & Verified Mode; paused during unverified gate)
   useEffect(() => {
@@ -596,14 +656,20 @@ function UserApp() {
       }
     });
 
-    // User-specific financial listeners (Owner only)
+    // User-specific financial listeners (Owner only - client-side sort avoids composite index requirement)
     const unsubUserWithdrawals = firebaseOnSnapshot('withdrawals', (data) => {
-      setWithdrawals(data as WithdrawalRequest[]);
-    }, [where('userId', '==', firebaseUser.uid), orderBy('createdAt', 'desc')]);
+      const sorted = (data as WithdrawalRequest[]).sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+      setWithdrawals(sorted);
+    }, [where('userId', '==', firebaseUser.uid)]);
 
     const unsubUserDeposits = firebaseOnSnapshot('deposits', (data) => {
-      setDepositRequests(data as DepositRequest[]);
-    }, [where('userId', '==', firebaseUser.uid), orderBy('createdAt', 'desc')]);
+      const sorted = (data as DepositRequest[]).sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+      setDepositRequests(sorted);
+    }, [where('userId', '==', firebaseUser.uid)]);
 
     return () => {
       unsubPublicProfiles();
@@ -617,18 +683,17 @@ function UserApp() {
     return saved === 'earn' || saved === 'wallet' || saved === 'profile' ? saved : 'home';
   });
 
-  // Sync current user's private profile
+  // Sync current user's private profile via direct document listener (uses allow get directly)
   useEffect(() => {
     if (isAuthenticated && firebaseUser && emailVerified && isRealUserId(currentUser.id) && currentUser.id === firebaseUser.uid) {
-      const unsubUser = firebaseOnSnapshot('users', (data) => {
-        const me = data.find(u => u.id === firebaseUser.uid) as User | undefined;
+      const unsubUser = onDocumentSnapshot('users', firebaseUser.uid, (me) => {
         if (me) {
-          setCurrentUser(me);
+          setCurrentUser(me as User);
         }
-      }, [where('id', '==', firebaseUser.uid)]);
+      });
       return unsubUser;
     }
-  }, [isAuthenticated, currentUser.id, firebaseUser?.uid, emailVerified]);
+  }, [isAuthenticated, currentUser.id, firebaseUser?.uid, emailVerified, onDocumentSnapshot]);
 
   // Sync personal notifications
   useEffect(() => {
@@ -2054,15 +2119,52 @@ function UserApp() {
   }
 
   if (firebaseUser && !emailVerified) {
+    const resolvedGateEmail =
+      firebaseUser.email ||
+      firebaseUser.providerData?.find((p) => p.email)?.email ||
+      '';
     return (
       <EmailVerificationGate
-        email={firebaseUser.email || ''}
+        email={resolvedGateEmail}
         portal="user"
         lang={lang}
         onRefreshStatus={refreshVerificationStatus}
         onResendEmail={resendVerificationEmail}
         onLogout={firebaseLogout}
       />
+    );
+  }
+
+  if (firebaseUser && emailVerified && !isAuthenticated && profileSyncing) {
+    return <FullPageLoader />;
+  }
+
+  if (firebaseUser && emailVerified && !isAuthenticated && authSyncError) {
+    return (
+      <div className="min-h-screen bg-[#0a0f0d] text-white flex flex-col items-center justify-center p-6 text-center">
+        <div className="max-w-sm w-full bg-[#121f18] border border-rose-500/40 rounded-3xl p-6 space-y-4 shadow-2xl">
+          <h2 className="text-lg font-black text-rose-400">
+            {lang === 'bn' ? 'প্রোফাইল সিঙ্ক সমস্যা' : 'Profile Sync Error'}
+          </h2>
+          <p className="text-xs text-neutral-300 leading-relaxed break-words">{authSyncError}</p>
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => setSyncRetryNonce((n) => n + 1)}
+              className="w-full py-3 rounded-2xl bg-[#00c853] hover:bg-[#00e676] text-black font-black text-xs cursor-pointer transition"
+            >
+              {lang === 'bn' ? 'পুনরায় চেষ্টা করুন' : 'Retry Sync'}
+            </button>
+            <button
+              type="button"
+              onClick={() => firebaseLogout()}
+              className="w-full py-2.5 rounded-2xl bg-white/10 hover:bg-white/15 text-neutral-200 font-bold text-xs cursor-pointer transition"
+            >
+              {lang === 'bn' ? 'সাইন-আউট করুন' : 'Sign Out'}
+            </button>
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -3136,6 +3238,7 @@ function UserApp() {
               onResetPassword={resetPassword}
               onClose={() => setShowAuthModal(false)}
               initialView={authModalView}
+              externalError={authError ? formatFirebaseAuthError(authError, lang) : null}
               lang={lang}
               paymentMethods={siteSettings.paymentMethods}
             />
