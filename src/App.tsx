@@ -51,6 +51,7 @@ import { GuestEarnView } from './components/GuestEarnView';
 import { GuestWalletView } from './components/GuestWalletView';
 import { GuestProfileView } from './components/GuestProfileView';
 import { AuthPromptModal } from './components/AuthPromptModal';
+import { TopEarnersLeaderboard } from './components/TopEarnersLeaderboard';
 import { useFirebase, formatFirebaseAuthError } from './hooks/useFirebase';
 import { where, orderBy, increment, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { normalizeVideoUrl } from './utils/video';
@@ -1821,6 +1822,24 @@ function UserApp() {
     showToast(`🎉 ${reason}: +${pts} পয়েন্ট ওয়ালেটে যুক্ত হয়েছে!`);
   };
 
+  const handleRecordSpin = () => {
+    const todayStr = new Date().toDateString();
+    const currentCount = currentUser.dailySpinClaimDate === todayStr ? (currentUser.dailySpinClaimsCount || 0) : 0;
+    const updatedCount = currentCount + 1;
+    const updatedUser: User = {
+      ...currentUser,
+      dailySpinClaimDate: todayStr,
+      dailySpinClaimsCount: updatedCount,
+    };
+    setCurrentUser(updatedUser);
+    if (isAuthenticated && firebaseUser && isRealUserId(currentUser.id) && currentUser.id === firebaseUser.uid) {
+      updateDocument('users', currentUser.id, {
+        dailySpinClaimDate: todayStr,
+        dailySpinClaimsCount: updatedCount,
+      }).catch((err) => console.warn('Record spin sync error:', err));
+    }
+  };
+
   const handleAddNewReel = async (
     newReelData: Pick<Reel, 'title' | 'userId' | 'creatorName' | 'creatorHandle' | 'creatorAvatar' | 'category' | 'thumbnailUrl' | 'videoUrl' | 'pointsReward' | 'audioTrack' | 'caption' | 'hashtags' | 'isVerified'>
   ) => {
@@ -2578,6 +2597,16 @@ function UserApp() {
                       </div>
                     ) : (
                       <>
+                        {/* Top Earners Leaderboard Widget */}
+                        <div className="py-1">
+                          <TopEarnersLeaderboard
+                            users={users}
+                            currentUser={currentUser}
+                            lang={lang}
+                            onOpenUserProfile={handleOpenUserProfile}
+                          />
+                        </div>
+
                         {/* Section Title Header */}
                         <div className="flex items-center justify-between pt-1">
                           <h2 className="text-base font-extrabold text-white tracking-tight flex items-center gap-1.5">
@@ -2748,6 +2777,9 @@ function UserApp() {
                       spinPrizes={[10, 25, 50, 15, spinMaxPrize, 30, 20, Math.round(spinMaxPrize * 0.4)]}
                       scratchPrize={scratchPrize}
                       earningSettings={earningSettings}
+                      users={users}
+                      lang={lang}
+                      onRecordSpin={handleRecordSpin}
                     />
                   ) : (
                     <GuestEarnView
@@ -2982,6 +3014,7 @@ function UserApp() {
               announcement={announcement}
               personalNotifications={personalNotifications}
               onClose={() => setShowNotifications(false)}
+              lang={lang}
             />
           )}
 

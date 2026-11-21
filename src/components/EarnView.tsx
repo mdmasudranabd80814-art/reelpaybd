@@ -14,6 +14,7 @@ import { User, TaskItem, EarningSettings } from '../types';
 import { toBengaliNumber } from '../utils/bengali';
 import { playCoinSound, playSuccessChime } from '../utils/audio';
 import confetti from 'canvas-confetti';
+import { TopReferrersLeaderboard } from './TopReferrersLeaderboard';
 
 interface EarnViewProps {
   user: User;
@@ -24,6 +25,9 @@ interface EarnViewProps {
   spinPrizes?: number[];
   scratchPrize?: number;
   earningSettings?: EarningSettings;
+  users?: User[];
+  lang?: 'bn' | 'en';
+  onRecordSpin?: () => void;
 }
 
 export const EarnView: React.FC<EarnViewProps> = ({
@@ -35,6 +39,9 @@ export const EarnView: React.FC<EarnViewProps> = ({
   spinPrizes = [10, 25, 50, 15, 100, 30, 20, 40],
   scratchPrize = 35,
   earningSettings,
+  users = [],
+  lang = 'bn',
+  onRecordSpin,
 }) => {
   const isMasterOn = earningSettings ? earningSettings.isMasterEarningEnabled : true;
   const isSpinOn = isMasterOn && (earningSettings ? earningSettings.isSpinWheelEnabled : true);
@@ -45,6 +52,17 @@ export const EarnView: React.FC<EarnViewProps> = ({
   const effectiveSpinPrizes = earningSettings?.spinPrizes?.length ? earningSettings.spinPrizes : spinPrizes;
   const effectiveScratchPrize = earningSettings?.scratchCardPrize || scratchPrize;
   const effectiveReferralPoints = earningSettings?.referralRewardPoints || 50;
+  const limitMode = earningSettings?.spinLimitMode || 'video_based';
+  const videosRequired = earningSettings?.spinVideosRequired || 2;
+  const watchedToday = user.dailyReelClaimsCount || 0;
+
+  const totalAllowedSpins = limitMode === 'video_based'
+    ? Math.floor(watchedToday / videosRequired)
+    : (earningSettings?.dailyMaxSpins ?? 5);
+
+  const todayStr = new Date().toDateString();
+  const spinsToday = user.dailySpinClaimDate === todayStr ? (user.dailySpinClaimsCount || 0) : 0;
+  const remainingSpins = Math.max(0, totalAllowedSpins - spinsToday);
 
   const [copied, setCopied] = useState(false);
   const [spinning, setSpinning] = useState(false);
@@ -65,6 +83,14 @@ export const EarnView: React.FC<EarnViewProps> = ({
       showNotice('স্পিন হুইল বর্তমানে বন্ধ রয়েছে।');
       return;
     }
+    if (spinsToday >= totalAllowedSpins) {
+      if (limitMode === 'video_based') {
+        showNotice(`আরও স্পিন পেতে আরও ${toBengaliNumber(videosRequired - (watchedToday % videosRequired))}টি রিল দেখুন!`);
+      } else {
+        showNotice(`আজকের স্পিন লিমিট শেষ (${toBengaliNumber(totalAllowedSpins)} বার)। আগামীকাল আবার চেষ্টা করুন।`);
+      }
+      return;
+    }
     if (spinning) return;
     setSpinning(true);
     setLastSpinPrize(null);
@@ -81,6 +107,7 @@ export const EarnView: React.FC<EarnViewProps> = ({
       setSpinning(false);
       setLastSpinPrize(prize);
       onAddPoints(prize, 'লাকি স্পিন হুইল');
+      if (onRecordSpin) onRecordSpin();
       if (!isMuted) playSuccessChime();
 
       try {
@@ -166,12 +193,19 @@ export const EarnView: React.FC<EarnViewProps> = ({
           <RotateCw className="w-4 h-4 text-emerald-400" />
           <span>ভাগ্য চাকা (Lucky Spin Wheel)</span>
         </h3>
-        <p className="text-xs text-neutral-400 mb-4">
-          {!isSpinOn ? 'স্পিন হুইল বর্তমানে বন্ধ আছে' : 'স্পিন করে জিতে নিন আকর্ষণীয় পয়েন্ট!'}
+        <p className="text-xs text-neutral-400 mb-0.5">
+          {!isSpinOn ? 'স্পিন হুইল বর্তমানে বন্ধ আছে' : (limitMode === 'video_based' ? `প্রতি ${toBengaliNumber(videosRequired)}টি রিল দেখলে ১টি স্পিন!` : 'স্পিন করে জিতে নিন আকর্ষণীয় পয়েন্ট!')}
+        </p>
+        <p className="text-[11px] text-emerald-400 font-semibold mb-4">
+          {isSpinOn && (
+            limitMode === 'video_based'
+              ? `দেখা রিল: ${toBengaliNumber(watchedToday)} টি | মোট স্পিন: ${toBengaliNumber(totalAllowedSpins)} | বাকি: ${toBengaliNumber(remainingSpins)}`
+              : `আজকের বাকি স্পিন: ${toBengaliNumber(remainingSpins)} / ${toBengaliNumber(totalAllowedSpins)}`
+          )}
         </p>
 
         {/* Wheel Container */}
-        <div className={`relative w-48 h-48 mx-auto my-3 flex items-center justify-center ${!isSpinOn ? 'opacity-50 grayscale' : ''}`}>
+        <div className={`relative w-48 h-48 mx-auto my-3 flex items-center justify-center ${!isSpinOn || remainingSpins <= 0 ? 'opacity-50 grayscale' : ''}`}>
           {/* Wheel Pointer Pin */}
           <div className="absolute -top-3 z-20 w-0 h-0 border-l-[10px] border-l-transparent border-r-[10px] border-r-transparent border-t-[18px] border-t-rose-500 drop-shadow" />
 
@@ -214,16 +248,22 @@ export const EarnView: React.FC<EarnViewProps> = ({
 
         <button
           onClick={handleSpinWheel}
-          disabled={spinning || !isSpinOn}
+          disabled={spinning || !isSpinOn || remainingSpins <= 0}
           className={`mt-2 px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition shadow-lg ${
-            !isSpinOn
+            !isSpinOn || remainingSpins <= 0
               ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed border border-neutral-700/50'
               : spinning
               ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
               : 'bg-[#00c853] hover:bg-[#00e676] active:scale-95 text-black shadow-emerald-500/30'
           }`}
         >
-          {!isSpinOn ? 'স্পিন স্থগিত 🔒' : spinning ? 'চাকা ঘুরছে...' : 'এখনই স্পিন করুন 🎯'}
+          {!isSpinOn
+            ? 'স্পিন স্থগিত 🔒'
+            : remainingSpins <= 0
+            ? (limitMode === 'video_based' ? 'রিল দেখে স্পিন আনলক করুন 🎬' : 'আজকের লিমিট শেষ ⏰')
+            : spinning
+            ? 'চাকা ঘুরছে...'
+            : 'এখনই স্পিন করুন 🎯'}
         </button>
       </div>
 
@@ -326,6 +366,14 @@ export const EarnView: React.FC<EarnViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Top Referrers Leaderboard Widget */}
+      <TopReferrersLeaderboard
+        users={users}
+        currentUser={user}
+        lang={lang}
+        referralRewardPoints={effectiveReferralPoints}
+      />
 
       {/* Tasks List */}
       <div className="rounded-2xl bg-[#141f19] border border-emerald-950/80 p-4 shadow-lg text-white relative">

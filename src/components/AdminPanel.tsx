@@ -2380,16 +2380,55 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </span>
                   </label>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-neutral-400">সর্বোচ্চ পুরস্কার পয়েন্ট:</span>
-                  <input
-                    type="number"
-                    min="10"
-                    value={localEarning.spinMaxPrize}
-                    onChange={(e) => setLocalEarning(prev => ({ ...prev, spinMaxPrize: parseInt(e.target.value, 10) || 100 }))}
-                    className="w-24 bg-[#14231b] border border-emerald-900 rounded-lg px-2.5 py-1 text-xs text-white font-bold text-center focus:border-emerald-500"
-                  />
-                  <span className="text-xs text-neutral-400">পয়েন্ট</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-neutral-400">সর্বোচ্চ পুরস্কার পয়েন্ট:</span>
+                    <input
+                      type="number"
+                      min="10"
+                      value={localEarning.spinMaxPrize}
+                      onChange={(e) => setLocalEarning(prev => ({ ...prev, spinMaxPrize: parseInt(e.target.value, 10) || 100 }))}
+                      className="w-24 bg-[#14231b] border border-emerald-900 rounded-lg px-2.5 py-1 text-xs text-white font-bold text-center focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2 pt-2 border-t border-emerald-950/80">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-neutral-300 font-semibold">স্পিন লিমিট পদ্ধতি:</span>
+                    <select
+                      value={localEarning.spinLimitMode || 'video_based'}
+                      onChange={(e) => setLocalEarning(prev => ({ ...prev, spinLimitMode: e.target.value as 'fixed' | 'video_based' }))}
+                      className="bg-[#14231b] border border-emerald-900 rounded-lg px-2.5 py-1 text-xs text-white font-bold focus:border-emerald-500"
+                    >
+                      <option value="video_based">ভিডিও দেখার ওপর ভিত্তি করে (Video Based)</option>
+                      <option value="fixed">নির্দিষ্ট দৈনিক লিমিট (Fixed Daily)</option>
+                    </select>
+                  </div>
+
+                  {localEarning.spinLimitMode === 'video_based' ? (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-neutral-400">প্রতি কয়টি রিল দেখলে ১ স্পিন:</span>
+                      <input
+                        type="number"
+                        min="1"
+                        value={localEarning.spinVideosRequired ?? 2}
+                        onChange={(e) => setLocalEarning(prev => ({ ...prev, spinVideosRequired: parseInt(e.target.value, 10) || 2 }))}
+                        className="w-24 bg-[#14231b] border border-emerald-900 rounded-lg px-2.5 py-1 text-xs text-white font-bold text-center focus:border-emerald-500"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-neutral-400">দৈনিক সর্বোচ্চ স্পিন:</span>
+                      <input
+                        type="number"
+                        min="1"
+                        value={localEarning.dailyMaxSpins ?? 5}
+                        onChange={(e) => setLocalEarning(prev => ({ ...prev, dailyMaxSpins: parseInt(e.target.value, 10) || 5 }))}
+                        className="w-24 bg-[#14231b] border border-emerald-900 rounded-lg px-2.5 py-1 text-xs text-white font-bold text-center focus:border-emerald-500"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
 

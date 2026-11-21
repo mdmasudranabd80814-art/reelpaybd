@@ -167,6 +167,8 @@ export interface User {
   dailyReelPointsEarned?: number;
   loginOfferClaimed?: boolean;
   loginOfferCampaignId?: string;
+  dailySpinClaimDate?: string;
+  dailySpinClaimsCount?: number;
   followersCount?: number;
   followingCount?: number;
   followers?: string[];
@@ -221,6 +223,9 @@ export interface EarningSettings {
   isSpinWheelEnabled: boolean;
   spinMaxPrize: number;
   spinPrizes: number[];
+  dailyMaxSpins: number;
+  spinLimitMode: 'fixed' | 'video_based';
+  spinVideosRequired: number;
   isScratchCardEnabled: boolean;
   scratchCardPrize: number;
   isReferralEnabled: boolean;
@@ -254,6 +259,9 @@ export const DEFAULT_EARNING_SETTINGS: EarningSettings = {
   isSpinWheelEnabled: true,
   spinMaxPrize: 100,
   spinPrizes: [10, 25, 50, 15, 100, 30, 20, 40],
+  dailyMaxSpins: 5,
+  spinLimitMode: 'video_based',
+  spinVideosRequired: 2,
   isScratchCardEnabled: true,
   scratchCardPrize: 35,
   isReferralEnabled: true,

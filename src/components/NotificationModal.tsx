@@ -6,12 +6,14 @@ interface NotificationModalProps {
   announcement: string;
   personalNotifications: Notification[];
   onClose: () => void;
+  lang?: 'bn' | 'en';
 }
 
 export const NotificationModal: React.FC<NotificationModalProps> = ({
   announcement,
   personalNotifications,
   onClose,
+  lang = 'bn',
 }) => {
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex justify-center items-center p-4">
@@ -44,7 +46,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
           </div>
 
           {/* Personal Notifications List */}
-          {personalNotifications.length > 0 && (
+          {personalNotifications.length > 0 ? (
             <div className="space-y-2">
               <h4 className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest px-1">আপনার জন্য নোটিফিকেশন</h4>
               {personalNotifications.map((notif) => (
@@ -70,6 +72,23 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                   </div>
                 </div>
               ))}
+            </div>
+          ) : (
+            <div className="py-6 px-4 rounded-2xl bg-[#0c1410] border border-emerald-950/50 text-center flex flex-col items-center justify-center relative overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-t from-emerald-500/5 to-transparent pointer-events-none" />
+              <div className="relative w-14 h-14 bg-emerald-900/20 rounded-2xl flex items-center justify-center mb-3 border border-emerald-500/20 shadow-lg animate-[bounce_3s_ease-in-out_infinite]">
+                <Bell className="w-7 h-7 text-emerald-400 animate-pulse" />
+                <div className="absolute -top-1 -right-1 w-3 h-3 bg-amber-400 rounded-full animate-ping opacity-75" />
+                <div className="absolute -top-1 -right-1 w-3 h-3 bg-amber-400 rounded-full" />
+              </div>
+              <h4 className="text-xs font-bold text-neutral-300 mb-0.5">
+                {lang === 'en' ? 'No personal notifications' : 'কোনো ব্যক্তিগত নোটিফিকেশন নেই'}
+              </h4>
+              <p className="text-[10px] text-neutral-500 max-w-[220px]">
+                {lang === 'en' 
+                  ? 'Activity updates, deposit approvals, and reward alerts will appear here.' 
+                  : 'আপনার অ্যাকাউন্ট সংক্রান্ত সকল আপডেট, ডিপোজিট ও পুরস্কারের নোটিফিকেশন এখানে দেখানো হবে।'}
+              </p>
             </div>
           )}
 

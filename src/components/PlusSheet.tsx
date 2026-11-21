@@ -9,7 +9,7 @@ interface PlusSheetProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: User;
-  onPublishReel: (reel: Pick<Reel, 'title' | 'userId' | 'creatorName' | 'creatorHandle' | 'creatorAvatar' | 'category' | 'thumbnailUrl' | 'videoUrl' | 'pointsReward' | 'audioTrack' | 'caption' | 'hashtags' | 'isVerified'>) => void;
+  onPublishReel: (reel: Pick<Reel, 'title' | 'userId' | 'creatorName' | 'creatorHandle' | 'creatorAvatar' | 'category' | 'thumbnailUrl' | 'videoUrl' | 'pointsReward' | 'audioTrack' | 'caption' | 'hashtags' | 'isVerified' | 'filter'>) => void;
   onOpenLive: () => void;
   lang: 'bn' | 'en';
   isMuted: boolean;
@@ -39,7 +39,17 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
   const [caption, setCaption] = useState('');
   const [category, setCategory] = useState<'সকল' | 'ট্রেন্ডিং' | 'কমেডি' | 'গেমিং' | 'রান্না' | 'শিক্ষা'>('ট্রেন্ডিং');
   const [externalVideoUrl, setExternalVideoUrl] = useState('');
+  const [filter, setFilter] = useState('none');
   const [formError, setFormError] = useState<string | null>(null);
+
+  const filters = [
+    { name: lang === 'bn' ? 'সাধারণ' : 'Normal', value: 'none' },
+    { name: lang === 'bn' ? 'ধূসর' : 'Grayscale', value: 'grayscale(100%)' },
+    { name: 'Sepia', value: 'sepia(100%)' },
+    { name: lang === 'bn' ? 'উজ্জ্বল' : 'Bright', value: 'brightness(125%) saturate(125%)' },
+    { name: 'Vintage', value: 'sepia(50%) contrast(110%) brightness(95%)' },
+    { name: 'Cyberpunk', value: 'hue-rotate(90deg) saturate(150%) contrast(120%)' },
+  ];
 
   const recordInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
@@ -124,6 +134,7 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
       audioTrack: 'Original Sound - ' + currentUser.name,
       caption: caption.trim() || `${title.trim()} #রিলতাকা #ReelTaka`,
       hashtags: ['#রিলতাকা', '#ভাইরাল', '#বাংলাদেশ'],
+      filter: filter !== 'none' ? filter : undefined,
     });
 
     if (!isMuted) playSuccessChime();
@@ -136,6 +147,7 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
     setSelectedFileName(null);
     setTitle('');
     setCaption('');
+    setFilter('none');
     onClose();
   };
 
@@ -285,20 +297,47 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
           </div>
         )}
 
-        {/* Video Player Preview if selected */}
+        {/* Video Player Preview & Filter Selection Menu */}
         {videoPreviewUrl && (
-          <div className="mb-3 rounded-2xl overflow-hidden border border-emerald-500/50 bg-black">
-            <video
-              src={videoPreviewUrl}
-              controls
-              playsInline
-              className="w-full h-44 object-cover"
-            />
-            {selectedFileName && (
-              <div className="p-2 bg-neutral-900 text-[11px] text-emerald-400 truncate">
-                📹 নির্বাচিত: {selectedFileName}
+          <div className="mb-3 space-y-2">
+            <div className="rounded-2xl overflow-hidden border border-emerald-500/50 bg-black">
+              <video
+                src={videoPreviewUrl}
+                controls
+                playsInline
+                className="w-full h-44 object-cover transition-all"
+                style={{ filter }}
+              />
+              {selectedFileName && (
+                <div className="p-2 bg-neutral-900 text-[11px] text-emerald-400 truncate">
+                  📹 নির্বাচিত: {selectedFileName}
+                </div>
+              )}
+            </div>
+
+            {/* Video Filter Selection Menu */}
+            <div className="p-3 rounded-2xl bg-[#0d1611] border border-emerald-950">
+              <label className="text-[10px] text-amber-400 font-bold uppercase mb-2 block flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{lang === 'bn' ? 'ভিডিও ফিল্টার বেছে নিন (Video Filters):' : 'Choose Video Filter:'}</span>
+              </label>
+              <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                {filters.map((f) => (
+                  <button
+                    key={f.value}
+                    type="button"
+                    onClick={() => setFilter(f.value)}
+                    className={`px-3 py-1.5 rounded-xl text-[11px] font-bold border shrink-0 transition active:scale-95 cursor-pointer ${
+                      filter === f.value
+                        ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-black border-emerald-400 shadow-md shadow-emerald-950/40'
+                        : 'bg-neutral-900/90 text-neutral-300 border-emerald-950/80 hover:bg-neutral-800'
+                    }`}
+                  >
+                    {f.name}
+                  </button>
+                ))}
               </div>
-            )}
+            </div>
           </div>
         )}
 

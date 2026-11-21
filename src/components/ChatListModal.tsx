@@ -130,17 +130,22 @@ export const ChatListModal: React.FC<ChatListModalProps> = ({
               </p>
             </div>
           ) : sessions.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-              <div className="w-20 h-20 bg-emerald-900/10 rounded-full flex items-center justify-center mb-4 border border-emerald-500/10">
-                <MessageSquareOff className="w-10 h-10 text-emerald-500/20" />
+            <div className="flex flex-col items-center justify-center h-full p-8 text-center relative overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-b from-emerald-500/10 via-transparent to-transparent pointer-events-none" />
+              <div className="relative w-20 h-20 bg-gradient-to-tr from-emerald-950 to-emerald-900/40 rounded-3xl flex items-center justify-center mb-4 border border-emerald-500/30 shadow-xl animate-[bounce_3s_ease-in-out_infinite]">
+                <MessageCircle className="w-10 h-10 text-emerald-400 animate-pulse" />
+                <div className="absolute -top-2 -right-2 w-6 h-6 bg-emerald-500/20 rounded-full flex items-center justify-center animate-ping">
+                  <div className="w-2 h-2 bg-emerald-400 rounded-full" />
+                </div>
+                <div className="absolute -bottom-1 -left-1 w-4 h-4 bg-amber-400/20 rounded-full animate-bounce" />
               </div>
-              <h4 className="text-sm font-bold text-neutral-400 mb-1">
+              <h4 className="text-sm font-black text-white mb-1 tracking-wide">
                 {lang === 'bn' ? 'কোনো মেসেজ নেই' : 'No Messages Yet'}
               </h4>
-              <p className="text-[11px] text-neutral-600 max-w-[200px]">
+              <p className="text-[11px] text-neutral-400 max-w-[220px] leading-relaxed">
                 {lang === 'bn' 
-                  ? 'কাউকে মেসেজ পাঠাতে তার প্রোফাইলে যান এবং মেসেজ বাটনে ক্লিক করুন।' 
-                  : 'To start a conversation, visit a profile and click the Message button.'}
+                  ? 'কাউকে মেসেজ পাঠাতে তার প্রোফাইলে যান এবং চ্যাট বাটনে ক্লিক করুন।' 
+                  : 'To start a conversation, visit any creator profile and tap the message button.'}
               </p>
             </div>
           ) : (

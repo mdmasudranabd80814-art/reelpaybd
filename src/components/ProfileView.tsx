@@ -817,18 +817,28 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
           )
         ) : savedReels.length === 0 ? (
-          <div className="bg-[#141f19] rounded-2xl p-8 border border-emerald-950 text-center space-y-2.5">
-            <Bookmark className="w-8 h-8 text-amber-400/60 mx-auto" />
-            <p className="text-xs text-neutral-400">
-              {lang === 'bn' ? 'আপনি এখনো কোনো রিল সেভ করেননি।' : 'No saved reels yet.'}
+          <div className="bg-[#101c15] rounded-3xl p-8 border border-amber-500/30 text-center flex flex-col items-center justify-center relative overflow-hidden shadow-2xl">
+            <div className="absolute inset-0 bg-gradient-to-b from-amber-500/10 via-transparent to-transparent pointer-events-none" />
+            <div className="relative w-20 h-20 bg-gradient-to-tr from-amber-950/80 to-amber-900/30 rounded-3xl flex items-center justify-center mb-4 border border-amber-500/40 shadow-xl animate-[bounce_3s_ease-in-out_infinite]">
+              <Bookmark className="w-10 h-10 text-amber-400 fill-amber-400/30 animate-pulse" />
+              <div className="absolute -top-2 -right-2 w-6 h-6 bg-amber-400/20 rounded-full flex items-center justify-center animate-ping">
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              </div>
+              <div className="absolute -bottom-1 -left-1 w-4 h-4 bg-emerald-500/20 rounded-full animate-bounce" />
+            </div>
+            <h4 className="text-sm font-black text-white mb-1">
+              {lang === 'bn' ? 'সংরক্ষিত রিল নেই' : 'No Saved Reels'}
+            </h4>
+            <p className="text-xs text-neutral-400 max-w-[240px] mb-4 leading-relaxed">
+              {lang === 'bn' ? 'আপনি এখনো কোনো রিল সেভ করেননি। রিল ফিড থেকে পছন্দের রিলগুলো সেভ করে রাখুন।' : 'You haven\'t saved any reels yet. Bookmark your favorite reels to watch anytime.'}
             </p>
             {onNavigateToHome && (
               <button
                 type="button"
                 onClick={onNavigateToHome}
-                className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-black text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-black text-xs font-black inline-flex items-center gap-2 cursor-pointer shadow-lg active:scale-95 transition"
               >
-                <Sparkles className="w-3.5 h-3.5" />
+                <Sparkles className="w-4 h-4" />
                 <span>{lang === 'bn' ? 'হোম ফিড থেকে রিল দেখুন' : 'Explore Reels'}</span>
               </button>
             )}
