@@ -133,6 +133,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
 
     const resolveVideo = async () => {
       setVideoFailed(false);
+      setShowWatchAgain(false);
 
       if (!reel) {
         setVideoSrc('');
@@ -208,6 +209,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   const [showIncrement, setShowIncrement] = useState(false);
   const [incrementKey, setIncrementKey] = useState(0);
   const [centerHeartAnim, setCenterHeartAnim] = useState(false);
+  const [showWatchAgain, setShowWatchAgain] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const lastTapRef = useRef<number>(0);
   const onVideoCompletedRef = useRef(onVideoCompleted);
@@ -514,8 +516,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
                       onVideoCompletedRef.current?.(reel.id);
                     }
                     if (viewMode === 'reels') {
-                      e.currentTarget.currentTime = 0;
-                      e.currentTarget.play().catch(() => {});
+                      setShowWatchAgain(true);
                     }
                   }}
                   onError={() => {
@@ -563,6 +564,27 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
               </div>
             );
           })()}
+
+          {/* Watch Again Overlay Button */}
+          {showWatchAgain && viewMode === 'reels' && (
+            <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 backdrop-blur-[2px] transition-all animate-fade-in pointer-events-auto">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowWatchAgain(false);
+                  if (videoRef.current) {
+                    videoRef.current.currentTime = 0;
+                    videoRef.current.play().catch(() => {});
+                  }
+                }}
+                className="px-6 py-3 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black font-black text-sm shadow-[0_0_25px_rgba(16,185,129,0.6)] flex items-center gap-2.5 transition-all transform hover:scale-105 active:scale-95 cursor-pointer ring-2 ring-emerald-300"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>{lang === 'bn' ? 'আবার দেখুন (Watch Again)' : 'Watch Again'}</span>
+              </button>
+            </div>
+          )}
 
           {/* Gradients matching Screenshot 2 */}
           <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-transparent to-black/90 pointer-events-none" />

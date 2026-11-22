@@ -273,9 +273,11 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
                     {reel.creatorName}
                   </p>
                   <div className="text-[10px] font-medium text-neutral-300/90 truncate drop-shadow-sm flex items-center gap-1.5 mt-0.5">
-                    <button
-                      type="button"
+                    <span
+                      role="button"
+                      tabIndex={0}
                       onClick={handleCategoryClick}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCategoryClick(e as any); } }}
                       className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-black border transition-all cursor-pointer hover:brightness-125 shrink-0 ${
                         categoryMeta.badgeBg
                       } ${categoryMeta.badgeBorder} ${categoryMeta.badgeText}`}
@@ -287,7 +289,7 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
                     >
                       <span>{categoryMeta.icon}</span>
                       <span>{lang === 'bn' ? categoryMeta.labelBn : categoryMeta.labelEn}</span>
-                    </button>
+                    </span>
                     <span className="text-neutral-500 text-[8px] shrink-0">•</span>
                     <span className="truncate">{reel.title}</span>
                   </div>
