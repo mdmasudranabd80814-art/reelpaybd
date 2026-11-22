@@ -2,8 +2,6 @@ import React, { useState } from 'react';
 import {
   Sparkles,
   Gift,
-  Share2,
-  Copy,
   CheckCircle2,
   PlayCircle,
   ExternalLink,
@@ -28,6 +26,9 @@ interface EarnViewProps {
   users?: User[];
   lang?: 'bn' | 'en';
   onRecordSpin?: () => void;
+  onClaimScratch?: (prize: number) => void;
+  todayKey?: string;
+  pointRate?: number;
 }
 
 export const EarnView: React.FC<EarnViewProps> = ({
@@ -42,11 +43,13 @@ export const EarnView: React.FC<EarnViewProps> = ({
   users = [],
   lang = 'bn',
   onRecordSpin,
+  onClaimScratch,
+  todayKey,
+  pointRate = 10,
 }) => {
   const isMasterOn = earningSettings ? earningSettings.isMasterEarningEnabled : true;
   const isSpinOn = isMasterOn && (earningSettings ? earningSettings.isSpinWheelEnabled : true);
   const isScratchOn = isMasterOn && (earningSettings ? earningSettings.isScratchCardEnabled : true);
-  const isReferralOn = isMasterOn && (earningSettings ? earningSettings.isReferralEnabled : true);
   const isTasksOn = isMasterOn && (earningSettings ? earningSettings.isTasksEnabled : true);
 
   const effectiveSpinPrizes = earningSettings?.spinPrizes?.length ? earningSettings.spinPrizes : spinPrizes;
@@ -60,17 +63,25 @@ export const EarnView: React.FC<EarnViewProps> = ({
     ? Math.floor(watchedToday / videosRequired)
     : (earningSettings?.dailyMaxSpins ?? 5);
 
-  const todayStr = new Date().toDateString();
-  const spinsToday = user.dailySpinClaimDate === todayStr ? (user.dailySpinClaimsCount || 0) : 0;
+  const effectiveTodayKey = todayKey || new Date().toISOString().slice(0, 10);
+  const legacyTodayStr = new Date().toDateString();
+  const isSameSpinDay =
+    user.dailySpinClaimDate === effectiveTodayKey || user.dailySpinClaimDate === legacyTodayStr;
+  const spinsToday = isSameSpinDay ? (user.dailySpinClaimsCount || 0) : 0;
   const remainingSpins = Math.max(0, totalAllowedSpins - spinsToday);
 
-  const [copied, setCopied] = useState(false);
   const [spinning, setSpinning] = useState(false);
   const [spinDegree, setSpinDegree] = useState(0);
   const [lastSpinPrize, setLastSpinPrize] = useState<number | null>(null);
 
-  // Scratch card state
-  const [isScratched, setIsScratched] = useState(false);
+  // Scratch card state (persisted per day in Firestore + localStorage fallback)
+  const scratchStorageKey = `rt_scratch_${user.id}`;
+  const [localScratched, setLocalScratched] = useState(false);
+  const isScratched = Boolean(
+    localScratched ||
+      user.dailyScratchClaimDate === effectiveTodayKey ||
+      (typeof window !== 'undefined' && localStorage.getItem(scratchStorageKey) === effectiveTodayKey)
+  );
   const [noticeMsg, setNoticeMsg] = useState<string | null>(null);
 
   const showNotice = (msg: string) => {
@@ -80,14 +91,22 @@ export const EarnView: React.FC<EarnViewProps> = ({
 
   const handleSpinWheel = () => {
     if (!isSpinOn) {
-      showNotice('স্পিন হুইল বর্তমানে বন্ধ রয়েছে।');
+      showNotice(lang === 'bn' ? 'স্পিন হুইল বর্তমানে বন্ধ রয়েছে।' : 'Spin wheel is currently paused.');
       return;
     }
     if (spinsToday >= totalAllowedSpins) {
       if (limitMode === 'video_based') {
-        showNotice(`আরও স্পিন পেতে আরও ${toBengaliNumber(videosRequired - (watchedToday % videosRequired))}টি রিল দেখুন!`);
+        showNotice(
+          lang === 'bn'
+            ? `আরও স্পিন পেতে আরও ${toBengaliNumber(videosRequired - (watchedToday % videosRequired))}টি রিল দেখুন!`
+            : `Watch ${videosRequired - (watchedToday % videosRequired)} more reels to unlock a spin!`
+        );
       } else {
-        showNotice(`আজকের স্পিন লিমিট শেষ (${toBengaliNumber(totalAllowedSpins)} বার)। আগামীকাল আবার চেষ্টা করুন।`);
+        showNotice(
+          lang === 'bn'
+            ? `আজকের স্পিন লিমিট শেষ (${toBengaliNumber(totalAllowedSpins)} বার)। আগামীকাল আবার চেষ্টা করুন।`
+            : `Daily spin limit reached (${totalAllowedSpins}). Try again tomorrow.`
+        );
       }
       return;
     }
@@ -98,8 +117,10 @@ export const EarnView: React.FC<EarnViewProps> = ({
     const randomSegment = Math.floor(Math.random() * effectiveSpinPrizes.length);
     const prize = effectiveSpinPrizes[randomSegment];
     const segmentDegree = 360 / effectiveSpinPrizes.length;
-    // 5 full rotations + segment
-    const targetDegree = spinDegree + 1800 + (360 - randomSegment * segmentDegree);
+    // Align pointer at 12 o'clock directly with center of the chosen slice
+    const baseDegree = spinDegree - (spinDegree % 360);
+    const sliceCenter = randomSegment * segmentDegree + segmentDegree / 2;
+    const targetDegree = baseDegree + 1800 + (360 - sliceCenter);
 
     setSpinDegree(targetDegree);
 
@@ -125,13 +146,22 @@ export const EarnView: React.FC<EarnViewProps> = ({
 
   const handleScratch = () => {
     if (!isScratchOn) {
-      showNotice('স্ক্র্যাচ কার্ড বর্তমানে বন্ধ রয়েছে।');
+      showNotice(lang === 'bn' ? 'স্ক্র্যাচ কার্ড বর্তমানে বন্ধ রয়েছে।' : 'Scratch card is currently paused.');
       return;
     }
     if (isScratched) return;
-    setIsScratched(true);
+    setLocalScratched(true);
+    try {
+      localStorage.setItem(scratchStorageKey, effectiveTodayKey);
+    } catch {
+      // Ignore storage failures
+    }
     if (!isMuted) playCoinSound();
-    onAddPoints(effectiveScratchPrize, 'স্ক্র্যাচ কার্ড পুরস্কার');
+    if (onClaimScratch) {
+      onClaimScratch(effectiveScratchPrize);
+    } else {
+      onAddPoints(effectiveScratchPrize, 'স্ক্র্যাচ কার্ড পুরস্কার');
+    }
 
     try {
       confetti({
@@ -143,12 +173,6 @@ export const EarnView: React.FC<EarnViewProps> = ({
     } catch {
       // Ignore
     }
-  };
-
-  const handleCopyCode = () => {
-    navigator.clipboard.writeText(user.referralCode || 'REEL778');
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -196,11 +220,11 @@ export const EarnView: React.FC<EarnViewProps> = ({
         <p className="text-xs text-neutral-400 mb-0.5">
           {!isSpinOn ? 'স্পিন হুইল বর্তমানে বন্ধ আছে' : (limitMode === 'video_based' ? `প্রতি ${toBengaliNumber(videosRequired)}টি রিল দেখলে ১টি স্পিন!` : 'স্পিন করে জিতে নিন আকর্ষণীয় পয়েন্ট!')}
         </p>
-        <p className="text-[11px] text-emerald-400 font-semibold mb-4">
+        <p className="text-[11px] text-emerald-400 font-semibold mb-4 tabular-nums">
           {isSpinOn && (
             limitMode === 'video_based'
-              ? `দেখা রিল: ${toBengaliNumber(watchedToday)} টি | মোট স্পিন: ${toBengaliNumber(totalAllowedSpins)} | বাকি: ${toBengaliNumber(remainingSpins)}`
-              : `আজকের বাকি স্পিন: ${toBengaliNumber(remainingSpins)} / ${toBengaliNumber(totalAllowedSpins)}`
+              ? `দেখা রিল: ${toBengaliNumber(watchedToday, lang)} টি | মোট স্পিন: ${toBengaliNumber(totalAllowedSpins, lang)} | বাকি: ${toBengaliNumber(remainingSpins, lang)}`
+              : `আজকের বাকি স্পিন: ${toBengaliNumber(remainingSpins, lang)} / ${toBengaliNumber(totalAllowedSpins, lang)}`
           )}
         </p>
 
@@ -218,7 +242,8 @@ export const EarnView: React.FC<EarnViewProps> = ({
             }}
           >
             {effectiveSpinPrizes.map((p, idx) => {
-              const rot = idx * 45 + 22.5;
+              const segDeg = 360 / Math.max(1, effectiveSpinPrizes.length);
+              const rot = idx * segDeg + segDeg / 2;
               return (
                 <div
                   key={idx}
@@ -227,7 +252,7 @@ export const EarnView: React.FC<EarnViewProps> = ({
                     transform: `rotate(${rot}deg)`,
                   }}
                 >
-                  <span className="inline-block mt-2 font-mono">+{p}</span>
+                  <span className="inline-block mt-2 font-mono tabular-nums">+{p}</span>
                 </div>
               );
             })}
@@ -241,15 +266,16 @@ export const EarnView: React.FC<EarnViewProps> = ({
 
         {/* Last spin prize result */}
         {lastSpinPrize !== null && (
-          <div className="my-2 p-2 rounded-xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-xs font-bold animate-pulse">
-            🎉 অভিনন্দন! আপনি +{toBengaliNumber(lastSpinPrize)} পয়েন্ট জিতেছেন!
+          <div className="my-2 p-2.5 rounded-xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-xs font-bold tabular-nums">
+            🎉 অভিনন্দন! আপনি +{toBengaliNumber(lastSpinPrize, lang)} পয়েন্ট জিতেছেন!
           </div>
         )}
 
         <button
+          type="button"
           onClick={handleSpinWheel}
           disabled={spinning || !isSpinOn || remainingSpins <= 0}
-          className={`mt-2 px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition shadow-lg ${
+          className={`mt-2 min-h-[44px] px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition shadow-lg cursor-pointer ${
             !isSpinOn || remainingSpins <= 0
               ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed border border-neutral-700/50'
               : spinning
@@ -320,59 +346,13 @@ export const EarnView: React.FC<EarnViewProps> = ({
         </div>
       </div>
 
-      {/* Referral Program Card */}
-      <div className="rounded-2xl bg-[#141f19] border border-emerald-950/80 p-4 shadow-lg text-white relative">
-        {!isReferralOn && (
-          <div className="absolute top-3 right-3 z-30">
-            <span className="px-2 py-0.5 rounded bg-neutral-800 text-amber-400 font-bold text-[10px] flex items-center gap-1 border border-neutral-700">
-              <Lock className="w-3 h-3" />
-              <span>স্থগিত</span>
-            </span>
-          </div>
-        )}
-        <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold uppercase tracking-wider mb-1">
-          <Share2 className="w-4 h-4" />
-          <span>রেফারাল বোনাস</span>
-        </div>
-        <h3 className="font-bold text-base mb-1">
-          প্রতি রেফারে পান {toBengaliNumber(effectiveReferralPoints)} পয়েন্ট!
-        </h3>
-        <p className="text-xs text-neutral-400 mb-3">
-          আপনার রেফারাল কোড বা লিংক বন্ধুদের পাঠিয়ে দিন। তারা জয়েন করলেই আপনি পাবেন পয়েন্ট বোনাস।
-        </p>
-
-        <div className="flex items-center gap-2 bg-[#0d1611] border border-emerald-950 p-2.5 rounded-xl">
-          <div className="flex-1 min-w-0">
-            <span className="text-[10px] text-neutral-500 block">আপনার রেফার কোড:</span>
-            <span className="font-mono text-base font-extrabold text-[#00e676]">
-              {user.referralCode}
-            </span>
-          </div>
-          <button
-            onClick={handleCopyCode}
-            className="px-3 py-1.5 rounded-lg bg-emerald-950 hover:bg-emerald-900 text-emerald-400 border border-emerald-800 text-xs font-bold transition flex items-center gap-1 cursor-pointer"
-          >
-            {copied ? (
-              <>
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>কপি হয়েছে</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-3.5 h-3.5" />
-                <span>কপি</span>
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-
       {/* Top Referrers Leaderboard Widget */}
       <TopReferrersLeaderboard
         users={users}
         currentUser={user}
         lang={lang}
         referralRewardPoints={effectiveReferralPoints}
+        pointRate={pointRate}
       />
 
       {/* Tasks List */}
@@ -392,6 +372,10 @@ export const EarnView: React.FC<EarnViewProps> = ({
 
         {!isTasksOn ? (
           <p className="text-xs text-neutral-400 py-3 text-center">টাস্ক সেন্টার বর্তমানে এডমিন কর্তৃক বন্ধ রাখা হয়েছে।</p>
+        ) : tasks.length === 0 ? (
+          <div className="py-6 text-center text-xs text-neutral-400 rounded-xl bg-[#0e1712] border border-emerald-950/60">
+            বর্তমানে কোনো টাস্ক উপলব্ধ নেই। এডমিন নতুন টাস্ক যোগ করলে এখানে দেখা যাবে।
+          </div>
         ) : (
           <div className="space-y-2.5">
             {tasks.map((task) => (
@@ -419,6 +403,7 @@ export const EarnView: React.FC<EarnViewProps> = ({
                     </span>
                   ) : (
                     <button
+                      type="button"
                       onClick={() => {
                         if (task.actionUrl) {
                           window.open(task.actionUrl, '_blank');
@@ -426,9 +411,9 @@ export const EarnView: React.FC<EarnViewProps> = ({
                         onCompleteTask(task.id, task.rewardPoints);
                         if (!isMuted) playSuccessChime();
                       }}
-                      className="px-3 py-1.5 rounded-lg bg-[#00c853] hover:bg-[#00e676] active:scale-95 text-black font-bold transition flex items-center gap-1 shadow-sm cursor-pointer"
+                      className="min-h-[40px] px-3.5 py-2 rounded-lg bg-[#00c853] hover:bg-[#00e676] active:scale-95 text-black font-bold transition flex items-center gap-1 shadow-sm cursor-pointer"
                     >
-                      <span>করুন</span>
+                      <span>{lang === 'bn' ? 'করুন' : 'Do Task'}</span>
                       {task.actionUrl && <ExternalLink className="w-3 h-3" />}
                     </button>
                   )}

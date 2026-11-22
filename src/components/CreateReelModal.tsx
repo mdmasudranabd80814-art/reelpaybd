@@ -4,6 +4,7 @@ import { Reel, User } from '../types';
 import { playSuccessChime } from '../utils/audio';
 import { storeVideoInDB, fileToDataUrl, captureVideoThumbnail } from '../utils/videoStorage';
 import { extractYouTubeId } from '../utils/video';
+import { buildCreatorHandle } from '../utils/reelOwner';
 
 interface CreateReelModalProps {
   currentUser: User;
@@ -98,7 +99,7 @@ export const CreateReelModal: React.FC<CreateReelModalProps> = ({
       title: title.trim(),
       userId: currentUser.id,
       creatorName: currentUser.name,
-      creatorHandle: (currentUser.phone || 'creator').replace(/[^0-9a-zA-Z]/g, ''),
+      creatorHandle: buildCreatorHandle(currentUser.name, currentUser.phone),
       creatorAvatar: currentUser.avatar,
       isVerified: true,
       category,

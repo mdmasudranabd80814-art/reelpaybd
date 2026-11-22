@@ -3,19 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
-import {
-  INITIAL_USER,
-  INITIAL_USERS_LIST,
-  INITIAL_REELS,
-  INITIAL_WITHDRAWALS,
-  INITIAL_TASKS,
-} from './data/initialData';
+import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from 'react';
 import { User, Reel, WithdrawalRequest, Comment, TaskItem, DepositRequest, Notification, LiveStream, LiveMode, ChatSession, ChatMessage, EarningSettings, DEFAULT_EARNING_SETTINGS, SiteSettings, DEFAULT_SITE_SETTINGS } from './types';
+import { INITIAL_REELS, INITIAL_TASKS } from './data/initialData';
 import { Header } from './components/Header';
 import { ReelFeedCard } from './components/ReelFeedCard';
 import { BottomNav, TabType } from './components/BottomNav';
-import { ChevronRight, Sparkles, Radio, Mic, Video, Loader2, Headphones, Play, Users, Wrench } from 'lucide-react';
+import { ChevronRight, Sparkles, Radio, Mic, Video, Loader2, Headphones, Play, Users, Wrench, Filter, Search, X, Tag } from 'lucide-react';
 import type { StartLivePayload } from './components/GoLiveSetupModal';
 import { GiftItem } from './types';
 import { playCoinSound, playSuccessChime, playPopSound } from './utils/audio';
@@ -23,6 +17,7 @@ import { toBengaliNumber } from './utils/bengali';
 import { getUserLevel, getProgressToNextLevel } from './utils/levels';
 import { calculateGiftSplit } from './utils/gifts';
 import confetti from 'canvas-confetti';
+import { CATEGORIES_LIST, getCategoryMeta, ReelCategory } from './utils/categories';
 
 // Lazy Loaded Components
 const AdminPortal = lazy(() => import('./components/AdminPortal').then(m => ({ default: m.AdminPortal })));
@@ -46,16 +41,15 @@ const UserPickerModal = lazy(() => import('./components/UserPickerModal').then(m
 const ChatListModal = lazy(() => import('./components/ChatListModal').then(m => ({ default: m.ChatListModal })));
 import { AuthPage } from './components/AuthPage';
 import { EmailVerificationGate } from './components/EmailVerificationGate';
-import { GuestBanner } from './components/GuestBanner';
 import { GuestEarnView } from './components/GuestEarnView';
 import { GuestWalletView } from './components/GuestWalletView';
 import { GuestProfileView } from './components/GuestProfileView';
 import { AuthPromptModal } from './components/AuthPromptModal';
-import { TopEarnersLeaderboard } from './components/TopEarnersLeaderboard';
 import { useFirebase, formatFirebaseAuthError } from './hooks/useFirebase';
 import { where, orderBy, increment, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { normalizeVideoUrl } from './utils/video';
 import { downloadReelVideo } from './utils/videoDownload';
+import { buildUserMap, resolveReelWithOwner } from './utils/reelOwner';
 
 const LoadingSpinner = () => (
   <div className="flex-1 flex items-center justify-center p-12">
@@ -70,33 +64,72 @@ const FullPageLoader = () => (
   </div>
 );
 
-const CATEGORIES: ('সকল' | '🔴 লাইভ' | 'ট্রেন্ডিং' | 'কমেডি' | 'গেমিং' | 'রান্না' | 'শিক্ষা')[] = [
-  'সকল',
-  '🔴 লাইভ',
-  'ট্রেন্ডিং',
-  'কমেডি',
-  'গেমিং',
-  'রান্না',
-  'শিক্ষা',
-];
+const CATEGORIES: ReelCategory[] = CATEGORIES_LIST;
+
+const DEFAULT_AVATAR_URL =
+  'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80';
+
+const createGuestUser = (id: string, points = 0): User => ({
+  id,
+  name: 'অতিথি ইউজার',
+  phone: '',
+  avatar: DEFAULT_AVATAR_URL,
+  paymentMethod: 'bKash',
+  paymentAccountNumber: '',
+  points,
+  role: 'user',
+  createdAt: new Date().toISOString().slice(0, 10),
+  referralCode: '',
+  isVerified: false,
+  totalWithdrawn: 0,
+  reelsWatchedCount: 0,
+  followersCount: 0,
+  followingCount: 0,
+  followers: [],
+  following: [],
+  completedTaskIds: [],
+  likedReelIds: [],
+  likedCommentIds: [],
+  referralsCount: 0,
+  referralEarnedPoints: 0,
+});
 
 const toPublicProfile = (u: User) => ({
   id: u.id,
   name: (u.name || 'User').slice(0, 100),
-  avatar: u.avatar || INITIAL_USER.avatar,
+  avatar: u.avatar || DEFAULT_AVATAR_URL,
   isVerified: Boolean(u.isVerified),
+  role: u.role || 'user',
+  points: Math.max(0, u.points || 0),
   referralCode: (u.referralCode || '').slice(0, 20),
   followersCount: u.followersCount || 0,
   followingCount: u.followingCount || 0,
   followers: (u.followers || []).slice(0, 1000),
   following: (u.following || []).slice(0, 1000),
   reelsWatchedCount: u.reelsWatchedCount || 0,
+  referralsCount: u.referralsCount || 0,
+  referralEarnedPoints: u.referralEarnedPoints || 0,
   createdAt: u.createdAt || new Date().toISOString(),
 });
 
 const DEMO_USER_IDS = new Set<string>([
-  INITIAL_USER.id,
-  ...INITIAL_USERS_LIST.map((u) => u.id),
+  'usr_bd_01',
+  'system_admin',
+  'creator_sakib',
+  'creator_russell',
+  'creator_tanjila',
+  'user_001',
+  'user_002',
+  'user_003',
+  'user_004',
+  'user_005',
+  'user_006',
+  'user_7788',
+]);
+
+const DEMO_REEL_IDS = new Set<string>([
+  'reel_01',
+  'reel_02',
 ]);
 
 const isRealUserId = (id?: string | null): id is string =>
@@ -213,7 +246,7 @@ function UserApp() {
   const [syncRetryNonce, setSyncRetryNonce] = useState<number>(0);
 
   // Persistent State
-  const [users, setUsers] = useState<User[]>(INITIAL_USERS_LIST);
+  const [users, setUsers] = useState<User[]>([]);
   const [guestId] = useState<string>(() => {
     try {
       const existing = localStorage.getItem('rt_guest_id');
@@ -246,12 +279,7 @@ function UserApp() {
     open: false,
   });
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [currentUser, setCurrentUser] = useState<User>(() => ({
-    ...INITIAL_USER,
-    id: guestId,
-    name: 'অতিথি ইউজার',
-    points: 0,
-  }));
+  const [currentUser, setCurrentUser] = useState<User>(() => createGuestUser(guestId, 0));
   const [pointRate, setPointRate] = useState<number>(() => {
     try {
       const val = localStorage.getItem('rt_point_rate');
@@ -299,16 +327,9 @@ function UserApp() {
       return {};
     }
   });
-  const [reels, setReels] = useState<Reel[]>(() => {
-    try {
-      const deleted = JSON.parse(localStorage.getItem('rt_deleted_reels') || '[]');
-      return INITIAL_REELS.filter(r => !deleted.includes(r.id));
-    } catch {
-      return INITIAL_REELS;
-    }
-  });
+  const [reels, setReels] = useState<Reel[]>([]);
   const [editingReel, setEditingReel] = useState<Reel | null>(null);
-  const [likedReelIds, setLikedReelIds] = useState<string[]>(['reel_app_01']);
+  const [likedReelIds, setLikedReelIds] = useState<string[]>([]);
   const [savedReelIds, setSavedReelIds] = useState<string[]>(() => {
     try {
       return JSON.parse(localStorage.getItem('rt_saved_reels') || '[]');
@@ -323,7 +344,7 @@ function UserApp() {
       return [];
     }
   });
-  const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>(INITIAL_WITHDRAWALS);
+  const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
   const [tasks, setTasks] = useState<TaskItem[]>(INITIAL_TASKS);
   const [depositRequests, setDepositRequests] = useState<DepositRequest[]>([]);
   const [personalNotifications, setPersonalNotifications] = useState<Notification[]>([]);
@@ -472,6 +493,7 @@ function UserApp() {
                 loginOfferCampaignId: activeCampaignId,
               };
               setCurrentUser(updatedUser);
+              setLikedReelIds(Array.isArray(updatedUser.likedReelIds) ? updatedUser.likedReelIds : []);
               setIsAuthenticated(true);
               await Promise.all([
                 updateDocument('users', firebaseUser.uid, {
@@ -495,6 +517,7 @@ function UserApp() {
                 isVerified: true,
               };
               setCurrentUser(hydratedProfile);
+              setLikedReelIds(Array.isArray(hydratedProfile.likedReelIds) ? hydratedProfile.likedReelIds : []);
               setIsAuthenticated(true);
               setDocument('public_profiles', firebaseUser.uid, toPublicProfile(hydratedProfile)).catch(() => {});
             }
@@ -516,19 +539,18 @@ function UserApp() {
             ).trim().slice(0, 100);
 
             const newUser: User = {
-              ...INITIAL_USER,
               id: firebaseUser.uid,
               name: safeName || 'User',
               phone: (pendingReg.phone || '').trim().slice(0, 20),
               email: resolvedEmail,
-              avatar: firebaseUser.photoURL || INITIAL_USER.avatar,
+              avatar: firebaseUser.photoURL || DEFAULT_AVATAR_URL,
               paymentMethod: (pendingReg.paymentMethod || siteSettings.paymentMethods?.[0]?.name || 'bKash').slice(0, 100),
               paymentAccountNumber: (pendingReg.paymentAccountNumber || '').slice(0, 100),
               paymentAccountHolder: (pendingReg.paymentAccountHolder || '').slice(0, 120),
               paymentBankName: (pendingReg.paymentBankName || '').slice(0, 120),
               points: offerPoints,
               role: 'user',
-              createdAt: new Date().toISOString(),
+              createdAt: new Date().toISOString().slice(0, 10),
               referralCode: `REEL${Math.floor(1000 + Math.random() * 9000)}`,
               isVerified: true,
               totalWithdrawn: 0,
@@ -538,6 +560,10 @@ function UserApp() {
               followers: [],
               following: [],
               completedTaskIds: [],
+              likedReelIds: [],
+              likedCommentIds: [],
+              referralsCount: 0,
+              referralEarnedPoints: 0,
               loginOfferClaimed: offerPoints > 0,
               loginOfferCampaignId: activeCampaignId,
             };
@@ -547,6 +573,7 @@ function UserApp() {
             if (cancelled) return;
 
             setCurrentUser(newUser);
+            setLikedReelIds([]);
             setIsAuthenticated(true);
             setDocument('public_profiles', firebaseUser.uid, toPublicProfile(newUser)).catch(() => {});
 
@@ -586,17 +613,15 @@ function UserApp() {
       setProfileSyncing(false);
       setAuthSyncError(null);
       setIsAuthenticated(false);
-      setCurrentUser({
-        ...INITIAL_USER,
-        id: guestId,
-        name: 'অতিথি ইউজার',
-        points: guestPoints,
-      });
+      setLikedReelIds([]);
+      setCurrentUser(createGuestUser(guestId, guestPoints));
     }
     return () => {
       cancelled = true;
     };
   }, [firebaseUser, emailVerified, guestId, syncRetryNonce]);
+
+  const firestoreReelIdsRef = useRef<Set<string>>(new Set());
 
   // Public Reels Listener (Viewable in Guest Mode & Verified Mode; paused during unverified gate)
   useEffect(() => {
@@ -619,14 +644,21 @@ function UserApp() {
       })();
 
       if (data && data.length > 0) {
-        const currentData = (data as Reel[]).filter((r) => r.id !== 'reel_01' && r.id !== 'reel_02');
+        const currentData = (data as Reel[]).filter(
+          (r) => r && r.id && !DEMO_REEL_IDS.has(r.id)
+        );
         if (currentData.length > 0) {
+          firestoreReelIdsRef.current = new Set(currentData.map((r) => r.id));
           const loadedReels = currentData
             .filter((r) => !deleted.includes(r.id))
             .map((r, idx) => {
               const patched = edited[r.id] ? { ...r, ...edited[r.id] } : r;
               return {
                 ...patched,
+                viewsCount: patched.viewsCount || 0,
+                likesCount: patched.likesCount || 0,
+                commentsCount: patched.commentsCount || 0,
+                sharesCount: patched.sharesCount || 0,
                 videoUrl: normalizeVideoUrl(patched.videoUrl, idx) ?? patched.videoUrl,
               };
             });
@@ -635,10 +667,21 @@ function UserApp() {
         }
       }
 
-      const initial = INITIAL_REELS
+      firestoreReelIdsRef.current = new Set();
+      const fallbackReels = INITIAL_REELS
         .filter((r) => !deleted.includes(r.id))
-        .map((r) => (edited[r.id] ? { ...r, ...edited[r.id] } : r));
-      setReels(initial);
+        .map((r, idx) => {
+          const patched = edited[r.id] ? { ...r, ...edited[r.id] } : r;
+          return {
+            ...patched,
+            viewsCount: patched.viewsCount || 0,
+            likesCount: patched.likesCount || 0,
+            commentsCount: patched.commentsCount || 0,
+            sharesCount: patched.sharesCount || 0,
+            videoUrl: normalizeVideoUrl(patched.videoUrl, idx) ?? patched.videoUrl,
+          };
+        });
+      setReels(fallbackReels);
     }, [orderBy('createdAt', 'desc')]);
 
     return () => {
@@ -652,9 +695,7 @@ function UserApp() {
 
     // Public discovery profiles (non-PII directory)
     const unsubPublicProfiles = firebaseOnSnapshot('public_profiles', (data) => {
-      if (data && data.length > 0) {
-        setUsers(data as User[]);
-      }
+      setUsers(((data || []) as User[]).filter((u) => isRealUserId(u.id)));
     });
 
     // User-specific financial listeners (Owner only - client-side sort avoids composite index requirement)
@@ -689,7 +730,9 @@ function UserApp() {
     if (isAuthenticated && firebaseUser && emailVerified && isRealUserId(currentUser.id) && currentUser.id === firebaseUser.uid) {
       const unsubUser = onDocumentSnapshot('users', firebaseUser.uid, (me) => {
         if (me) {
-          setCurrentUser(me as User);
+          const nextUser = me as User;
+          setCurrentUser(nextUser);
+          setLikedReelIds(Array.isArray(nextUser.likedReelIds) ? nextUser.likedReelIds : []);
         }
       });
       return unsubUser;
@@ -711,7 +754,7 @@ function UserApp() {
     if (firebaseUser && !emailVerified) return;
     const unsub = firebaseOnSnapshot('live_streams', (data) => {
       const active = (data as LiveStream[])
-        .filter((s) => s && s.status === 'active')
+        .filter((s) => s && s.status === 'active' && isRealUserId(s.hostId))
         .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
       setActiveLiveStreams(active);
     });
@@ -722,11 +765,7 @@ function UserApp() {
   useEffect(() => {
     if (!firebaseUser || !emailVerified) return;
     const unsubTasks = firebaseOnSnapshot('tasks', (data) => {
-      if (data && data.length > 0) {
-        setTasks(data as TaskItem[]);
-      } else {
-        setTasks(INITIAL_TASKS);
-      }
+      setTasks(data && data.length > 0 ? (data as TaskItem[]) : INITIAL_TASKS);
     });
     return unsubTasks;
   }, [firebaseUser?.uid, emailVerified]);
@@ -795,11 +834,42 @@ function UserApp() {
   };
 
   // UI Navigation & View State
-  const [selectedCategory, setSelectedCategory] = useState<
-    'সকল' | '🔴 লাইভ' | 'ট্রেন্ডিং' | 'কমেডি' | 'গেমিং' | 'রান্না' | 'শিক্ষা'
-  >('সকল');
+  const [selectedCategory, setSelectedCategory] = useState<ReelCategory>('সকল');
+  const [feedSearchQuery, setFeedSearchQuery] = useState<string>('');
   const [sortBy, setSortBy] = useState<'newest' | 'most_watched' | 'popular'>('newest');
   const [isMuted, setIsMuted] = useState<boolean>(false);
+
+  // Category selection handler with horizontal pill auto-scroll and audio feedback
+  const handleSelectCategory = useCallback((cat: ReelCategory | string) => {
+    const target = (cat as ReelCategory);
+    setSelectedCategory(target);
+    if (!isMuted) playPopSound();
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`cat-tab-${target}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      }
+    });
+  }, [isMuted]);
+
+  // Support deep-linked category filtering via ?category= or ?cat= URL parameters
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const catParam = params.get('category') || params.get('cat');
+      if (catParam) {
+        const decoded = decodeURIComponent(catParam).trim().toLowerCase();
+        const matched = CATEGORIES_LIST.find(
+          (c) => c.toLowerCase() === decoded || getCategoryMeta(c).labelEn.toLowerCase() === decoded
+        );
+        if (matched) {
+          setSelectedCategory(matched);
+        }
+      }
+    } catch {
+      // Ignore URL parsing errors
+    }
+  }, []);
 
   const levelProgress = getProgressToNextLevel(currentUser.reelsWatchedCount);
 
@@ -975,6 +1045,7 @@ function UserApp() {
     const firestorePayload: Record<string, any> = { ...extraFields };
     if (safeDelta !== 0) {
       firestorePayload.points = increment(safeDelta);
+      updateDocument('public_profiles', activeUser.id, { points: increment(safeDelta) }).catch(() => {});
     }
     if (Object.keys(firestorePayload).length > 0) {
       updateDocument('users', activeUser.id, firestorePayload).catch((err) => {
@@ -1019,17 +1090,122 @@ function UserApp() {
     showToast(`🎉 দৈনিক বোনাস +${toBengaliNumber(actualBonus, lang)} পয়েন্ট আপনার ওয়ালেটে যুক্ত হয়েছে!`);
   };
 
-  // Like Reel
+  // Real Firestore-persisted Reel Like
   const handleToggleLike = (reelId: string) => {
-    setLikedReelIds((prev) => {
-      const next = prev.includes(reelId)
-        ? prev.filter((id) => id !== reelId)
-        : [...prev, reelId];
+    if (!isAuthenticated || !firebaseUser || !emailVerified || !isRealUserId(currentUserRef.current.id)) {
+      triggerAuthPrompt(
+        lang === 'bn'
+          ? 'রিলে লাইক দিতে অনুগ্রহ করে লগইন বা রেজিস্ট্রেশন করুন!'
+          : 'Please log in or register to like reels!'
+      );
+      return;
+    }
+    const me = currentUserRef.current;
+    const currentLiked = me.likedReelIds || likedReelIds;
+    const willLike = !currentLiked.includes(reelId);
+    const nextLiked = willLike
+      ? Array.from(new Set([...currentLiked, reelId]))
+      : currentLiked.filter((id) => id !== reelId);
 
-      localStorage.setItem('rt_liked_reels', JSON.stringify(next));
-      return next;
-    });
+    setLikedReelIds(nextLiked);
+    setCurrentUser((prev) => ({ ...prev, likedReelIds: nextLiked }));
+
+    const targetReel = reels.find((r) => r.id === reelId);
+    const currentLikesCount = Math.max(0, targetReel?.likesCount || 0);
+    setReels((prev) =>
+      prev.map((r) =>
+        r.id === reelId
+          ? { ...r, likesCount: Math.max(0, (r.likesCount || 0) + (willLike ? 1 : -1)) }
+          : r
+      )
+    );
+
+    updateDocument('users', me.id, {
+      likedReelIds: willLike ? arrayUnion(reelId) : arrayRemove(reelId),
+    }).catch((err) => console.warn('User likedReelIds sync note:', err));
+
+    if (firestoreReelIdsRef.current.has(reelId) && (willLike || currentLikesCount > 0)) {
+      updateDocument('reels', reelId, {
+        likesCount: increment(willLike ? 1 : -1),
+      }).catch((err) => console.warn('Reel likesCount sync note:', err));
+    }
   };
+
+  // Real Firestore-persisted Reel Share tracking
+  const handleRecordReelShare = (reelId: string) => {
+    if (!reelId) return;
+    setReels((prev) =>
+      prev.map((r) =>
+        r.id === reelId ? { ...r, sharesCount: (r.sharesCount || 0) + 1 } : r
+      )
+    );
+    if (
+      isAuthenticated &&
+      firebaseUser &&
+      emailVerified &&
+      firestoreReelIdsRef.current.has(reelId)
+    ) {
+      updateDocument('reels', reelId, {
+        sharesCount: increment(1),
+      }).catch((err) => console.warn('Reel sharesCount sync note:', err));
+    }
+  };
+
+  // Real Firestore-persisted Comment Like
+  const handleToggleCommentLike = async (reelId: string, commentId: string, willLike: boolean) => {
+    if (!isAuthenticated || !firebaseUser || !emailVerified || !isRealUserId(currentUserRef.current.id)) {
+      triggerAuthPrompt(
+        lang === 'bn'
+          ? 'কমেন্টে লাইক দিতে অনুগ্রহ করে লগইন করুন!'
+          : 'Please log in to like comments!'
+      );
+      return;
+    }
+    const me = currentUserRef.current;
+    const existingLiked = me.likedCommentIds || [];
+    if (!willLike && !existingLiked.includes(commentId)) return;
+
+    const nextLiked = willLike
+      ? Array.from(new Set([...existingLiked, commentId]))
+      : existingLiked.filter((id) => id !== commentId);
+
+    setCurrentUser((prev) => ({ ...prev, likedCommentIds: nextLiked }));
+
+    try {
+      await Promise.all([
+        updateDocument('users', me.id, {
+          likedCommentIds: willLike ? arrayUnion(commentId) : arrayRemove(commentId),
+        }),
+        updateDocument(`reels/${reelId}/comments`, commentId, {
+          likes: increment(willLike ? 1 : -1),
+        }),
+      ]);
+    } catch (err) {
+      console.warn('Comment like sync note:', err);
+    }
+  };
+
+  // Increment Reel View Count (every time a user watches the full video)
+  const handleIncrementReelView = useCallback((reelId: string) => {
+    if (!reelId) return;
+
+    setReels((prev) =>
+      prev.map((r) =>
+        r.id === reelId ? { ...r, viewsCount: (r.viewsCount || 0) + 1 } : r
+      )
+    );
+
+    if (
+      isAuthenticated &&
+      firebaseUser &&
+      emailVerified &&
+      firestoreReelIdsRef.current.has(reelId)
+    ) {
+      updateDocument('reels', reelId, { viewsCount: increment(1) }).catch((err) => {
+        console.warn('Reel view count sync note:', err);
+      });
+    }
+  }, [isAuthenticated, firebaseUser, emailVerified, updateDocument]);
 
   // Bookmark / Save Reel
   const handleToggleSave = (reelId: string) => {
@@ -1048,6 +1224,13 @@ function UserApp() {
     });
   };
 
+  const isOwnContentUser = (ownerId?: string | null) =>
+    Boolean(
+      ownerId &&
+        ((isAuthenticated && currentUserRef.current.id && ownerId === currentUserRef.current.id) ||
+          (firebaseUser?.uid && ownerId === firebaseUser.uid))
+    );
+
   // Claim Reel Reward (Instant 0ms + Atomic Firestore increment + Admin Limit Guard)
   const handleEarnReelReward = (rewardPoints: number, _reelTitle: string, explicitReelId?: string) => {
     // 1. Check master toggle & video earning toggle
@@ -1058,9 +1241,17 @@ function UserApp() {
 
     const targetReelId = explicitReelId || fullScreenReelId || undefined;
 
-    // 2. Check if target reel has earning enabled or matches offer filter
+    // 2. Check if target reel has earning enabled or matches offer filter, and block self-watch earning
     const activeReel = targetReelId ? reels.find(r => r.id === targetReelId) : undefined;
     if (activeReel) {
+      if (isOwnContentUser(activeReel.userId)) {
+        showToast(
+          lang === 'bn'
+            ? '📺 নিজের ভিডিও দেখে পয়েন্ট অর্জন করা যাবে না। অন্য ইউজারের রিলস দেখে আয় করুন!'
+            : '📺 You cannot earn points from watching your own video. Watch other creators\' reels to earn!'
+        );
+        return;
+      }
       if (activeReel.isEarningEnabled === false) {
         showToast(lang === 'bn' ? '📺 এই রিলটিতে পয়েন্ট আর্নিং বন্ধ রয়েছে (শুধুমাত্র বিনোদন)।' : '📺 Earning is disabled for this reel.');
         return;
@@ -1188,23 +1379,43 @@ function UserApp() {
       }, 600);
     }
 
-    if (earningSettings.isReferralEnabled && newWatchedCount === 1 && activeUser.referredBy && !activeUser.referralBonusClaimed) {
+    if (earningSettings.isReferralEnabled && newWatchedCount >= 1 && activeUser.referredBy && !activeUser.referralBonusClaimed) {
+      setCurrentUser((prev) => ({ ...prev, referralBonusClaimed: true }));
       const findReferrerAndBonus = async () => {
         try {
           const referrerCode = activeUser.referredBy;
           const usersList = await getCollection('public_profiles', [where('referralCode', '==', referrerCode)]);
           if (usersList && usersList.length > 0) {
             const referrer = usersList[0] as User;
+            if (!isRealUserId(referrer.id) || referrer.id === activeUser.id) return;
             const refBonus = earningSettings.referralRewardPoints || 50;
             setUsers((prev) =>
-              prev.map((u) => (u.id === referrer.id ? { ...u, points: (u.points || 0) + refBonus } : u))
+              prev.map((u) =>
+                u.id === referrer.id
+                  ? {
+                      ...u,
+                      points: (u.points || 0) + refBonus,
+                      referralsCount: (u.referralsCount || 0) + 1,
+                      referralEarnedPoints: (u.referralEarnedPoints || 0) + refBonus,
+                    }
+                  : u
+              )
             );
-            await updateDocument('users', referrer.id, {
-              points: increment(refBonus)
-            });
-            await updateDocument('users', activeUser.id, {
-              referralBonusClaimed: true
-            });
+            await Promise.all([
+              updateDocument('users', referrer.id, {
+                points: increment(refBonus),
+                referralsCount: increment(1),
+                referralEarnedPoints: increment(refBonus),
+              }),
+              updateDocument('public_profiles', referrer.id, {
+                points: increment(refBonus),
+                referralsCount: increment(1),
+                referralEarnedPoints: increment(refBonus),
+              }).catch(() => {}),
+              updateDocument('users', activeUser.id, {
+                referralBonusClaimed: true,
+              }),
+            ]);
             showToast(
               lang === 'bn'
                 ? `🎁 রেফারেল বোনাস (+${toBengaliNumber(refBonus, lang)} পয়েন্ট) সফলভাবে সম্পন্ন হয়েছে!`
@@ -1259,6 +1470,11 @@ function UserApp() {
       dailyReelPointsEarned: sameDay ? increment(finalReward) : finalReward,
     }).catch((err) => console.warn('Reel reward sync error:', err));
 
+    updateDocument('public_profiles', activeUser.id, {
+      points: increment(finalReward),
+      reelsWatchedCount: increment(1),
+    }).catch(() => {});
+
     if (targetReelId && !watchedReelIds.includes(targetReelId)) {
       setWatchedReelIds((prev) => {
         if (prev.includes(targetReelId)) return prev;
@@ -1281,8 +1497,17 @@ function UserApp() {
     );
   };
 
-  // Direct Claim from Feed (Respects Admin Daily Limit)
+  // Direct Claim from Feed (Respects Admin Daily Limit & Blocks Self-Watch Earning)
   const handleClaimDirect = (reel: Reel) => {
+    if (isOwnContentUser(reel.userId)) {
+      showToast(
+        lang === 'bn'
+          ? '📺 নিজের ভিডিও দেখে পয়েন্ট অর্জন করা যাবে না। অন্য ইউজারের রিলস দেখে আয় করুন!'
+          : '📺 You cannot earn points from watching your own video. Watch other creators\' reels to earn!'
+      );
+      return;
+    }
+
     if (!earningSettings.isMasterEarningEnabled || !earningSettings.isVideoWatchEarningEnabled || !earningSettings.allowDirectFeedClaim) {
       showToast(lang === 'bn' ? '📺 হোম ফিড থেকে ক্লেইম বা আর্নিং বন্ধ রয়েছে।' : '📺 Earning from feed is currently disabled.');
       return;
@@ -1383,19 +1608,46 @@ function UserApp() {
 
     await addDocument(`reels/${reelId}/comments`, newComment);
 
-    // Update comment counter on reel
-    const reel = reels.find(r => r.id === reelId);
-    if (reel) {
-      updateDocument('reels', reelId, { commentsCount: reel.commentsCount + 1 });
+    // Update comment counter on reel optimistically & in Firestore
+    setReels((prev) =>
+      prev.map((r) =>
+        r.id === reelId ? { ...r, commentsCount: (r.commentsCount || 0) + 1 } : r
+      )
+    );
+    if (firestoreReelIdsRef.current.has(reelId)) {
+      updateDocument('reels', reelId, { commentsCount: increment(1) }).catch((err) =>
+        console.warn('Reel commentsCount sync note:', err)
+      );
     }
   };
 
-  // Withdrawal Request (Instant 0ms deduction + atomic increment)
+  // Withdrawal Request (Validated + Optimistic UI + Rollback on Failure)
   const handleRequestWithdrawal = async (
     reqData: Omit<WithdrawalRequest, 'id' | 'createdAt' | 'status'>
   ) => {
     if (!siteSettings.isWithdrawalsEnabled) {
       showToast(lang === 'bn' ? '🔒 উইথড্রয়াল সিস্টেম বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : '🔒 Withdrawals are disabled by Admin.');
+      return;
+    }
+    if (!isAuthenticated || !firebaseUser || !emailVerified || !isRealUserId(currentUserRef.current.id)) {
+      triggerAuthPrompt(
+        lang === 'bn' ? 'উত্তোলন রিকোয়েস্ট পাঠাতে লগইন করুন!' : 'Please log in to request a withdrawal!'
+      );
+      return;
+    }
+    if (
+      !Number.isFinite(reqData.amountBDT) ||
+      !Number.isInteger(reqData.amountBDT) ||
+      reqData.amountBDT <= 0 ||
+      !Number.isFinite(reqData.pointsDeducted) ||
+      reqData.pointsDeducted <= 0
+    ) {
+      showToast(lang === 'bn' ? '⚠️ সঠিক উত্তোলনের পরিমাণ লিখুন।' : '⚠️ Invalid withdrawal amount.');
+      return;
+    }
+    const minRequiredPoints = Math.round(reqData.amountBDT * (pointRate || 10));
+    if (reqData.pointsDeducted < minRequiredPoints) {
+      showToast(lang === 'bn' ? '⚠️ পয়েন্টের হিসাব সঠিক নয়।' : '⚠️ Invalid points calculation.');
       return;
     }
     const effectiveMin = siteSettings.minWithdrawal || minWithdrawal;
@@ -1414,19 +1666,37 @@ function UserApp() {
       return;
     }
 
+    const createdAt = new Date().toISOString();
+    const tempId = `temp_${Date.now()}`;
     const newReq: Partial<WithdrawalRequest> = {
       ...reqData,
+      userId: activeUser.id,
       status: 'pending',
-      createdAt: new Date().toISOString(),
+      createdAt,
     };
 
-    // Instant 0ms deduction
+    // Instant 0ms deduction + optimistic history entry
     applyFastUserMutation(-reqData.pointsDeducted);
-    showToast(`💸 ৳${reqData.amountBDT} উত্তোলনের আবেদন পেন্ডিং রয়েছে।`);
+    setWithdrawals((prev) => [{ ...(newReq as WithdrawalRequest), id: tempId }, ...prev]);
+    showToast(
+      lang === 'bn'
+        ? `💸 ৳${toBengaliNumber(reqData.amountBDT, lang)} উত্তোলনের আবেদন পেন্ডিং রয়েছে।`
+        : `💸 ৳${reqData.amountBDT} withdrawal request submitted.`
+    );
 
-    addDocument('withdrawals', newReq).catch((err) => {
+    try {
+      await addDocument('withdrawals', newReq);
+    } catch (err) {
       console.error('Withdrawal request error:', err);
-    });
+      // Roll back points and temp entry if server write fails
+      applyFastUserMutation(reqData.pointsDeducted);
+      setWithdrawals((prev) => prev.filter((w) => w.id !== tempId));
+      showToast(
+        lang === 'bn'
+          ? '⚠️ উত্তোলনের আবেদন পাঠানো যায়নি! পয়েন্ট ফেরত দেওয়া হয়েছে।'
+          : '⚠️ Withdrawal failed! Your points were restored.'
+      );
+    }
   };
 
   // Deposit Points (Manual Request)
@@ -1477,6 +1747,20 @@ function UserApp() {
       );
       return;
     }
+
+    const resolvedTargetUserId = explicitTargetUserId ?? giftTarget?.userId;
+    const resolvedLiveId = explicitLiveId ?? giftTarget?.liveId;
+
+    // Strictly block self-gifting BEFORE any point deduction
+    if (!resolvedTargetUserId || isOwnContentUser(resolvedTargetUserId)) {
+      showToast(
+        lang === 'bn'
+          ? '🎁 নিজের ভিডিও বা লাইভে গিফট পাঠানো যাবে না! গিফট শুধুমাত্র অন্য ইউজারদের জন্য।'
+          : '🎁 You cannot send gifts to yourself! Gifts are only for other creators.'
+      );
+      return;
+    }
+
     const split = calculateGiftSplit(gift.costPoints, earningSettings);
     const creatorShare = split.creatorShare;
     const adminShare = split.adminShare;
@@ -1488,8 +1772,6 @@ function UserApp() {
       return;
     }
 
-    const resolvedTargetUserId = explicitTargetUserId ?? giftTarget?.userId;
-    const resolvedLiveId = explicitLiveId ?? giftTarget?.liveId;
     const adminUid =
       earningSettings.adminCommissionReceiverId ||
       users.find((u) => u.role === 'admin')?.id ||
@@ -1509,6 +1791,7 @@ function UserApp() {
         updateDocument('users', resolvedTargetUserId, { points: increment(creatorShare) }).catch((err) =>
           console.warn('Gift creator credit warning:', err)
         );
+        updateDocument('public_profiles', resolvedTargetUserId, { points: increment(creatorShare) }).catch(() => {});
         sendNotification(
           resolvedTargetUserId,
           '🎁 উপহার পেয়েছেন',
@@ -1526,6 +1809,7 @@ function UserApp() {
         updateDocument('users', adminUid, { points: increment(adminShare) }).catch((err) =>
           console.warn('Gift admin commission credit warning:', err)
         );
+        updateDocument('public_profiles', adminUid, { points: increment(adminShare) }).catch(() => {});
       }
     }
 
@@ -1559,27 +1843,64 @@ function UserApp() {
     );
   };
 
+  const userMap = React.useMemo(
+    () => buildUserMap(users, isAuthenticated ? currentUser : null),
+    [users, isAuthenticated, currentUser]
+  );
+
+  const resolvedReels = React.useMemo(
+    () => reels.map((r) => resolveReelWithOwner(r, userMap)),
+    [reels, userMap]
+  );
+
   const handleOpenUserProfile = async (userId: string) => {
-    const userToView = users.find(u => u.id === userId);
+    if (!userId) {
+      showToast(lang === 'bn' ? 'ইউজার প্রোফাইল পাওয়া যায়নি।' : 'User profile not found.');
+      return;
+    }
+
+    const userToView = userMap.get(userId);
     if (userToView) {
       setSelectedUserProfileUser(userToView);
       setIsUserProfileModalOpen(true);
+      return;
+    }
+
+    if (isAuthenticated) {
+      try {
+        const remoteUser = (await getDocument('public_profiles', userId)) as User | null;
+        if (remoteUser) {
+          setSelectedUserProfileUser(remoteUser);
+          setIsUserProfileModalOpen(true);
+          return;
+        }
+      } catch {
+        // fallback to reel creator metadata below
+      }
+    }
+
+    const creatorReel = resolvedReels.find((r) => r.userId === userId);
+    if (creatorReel) {
+      setSelectedUserProfileUser({
+        id: userId,
+        name: creatorReel.creatorName || 'ReelPay BD অফিসিয়াল',
+        phone: '',
+        avatar: creatorReel.creatorAvatar || DEFAULT_AVATAR_URL,
+        points: 0,
+        role: userId === 'system_admin' ? 'admin' : 'user',
+        createdAt: creatorReel.createdAt || new Date().toISOString().slice(0, 10),
+        referralCode: '',
+        isVerified: Boolean(creatorReel.isVerified || userId === 'system_admin'),
+        totalWithdrawn: 0,
+        reelsWatchedCount: 0,
+        followersCount: 0,
+        followingCount: 0,
+        followers: [],
+        following: [],
+      });
+      setIsUserProfileModalOpen(true);
     } else {
-      if (!isAuthenticated) {
-        triggerAuthPrompt(
-          lang === 'bn'
-            ? 'ক্রিয়েটরের পূর্ণ প্রোফাইল দেখতে অনুগ্রহ করে লগইন করুন!'
-            : 'Please log in to view full creator profiles!'
-        );
-        return;
-      }
-      const remoteUser = await getDocument('public_profiles', userId) as User | null;
-      if (remoteUser) {
-        setSelectedUserProfileUser(remoteUser);
-        setIsUserProfileModalOpen(true);
-      } else {
-        showToast(lang === 'bn' ? 'ইউজার প্রোফাইল পাওয়া যায়নি।' : 'User profile not found.');
-      }
+      showToast(lang === 'bn' ? 'ইউজার প্রোফাইল পাওয়া যায়নি।' : 'User profile not found.');
     }
   };
 
@@ -1777,6 +2098,7 @@ function UserApp() {
       }
 
       await addDocument(`chats/${sessionId}/messages`, newMsg);
+      handleRecordReelShare(sharingReelInChat.id);
       showToast(lang === 'bn' ? '✅ রিলটি সফলভাবে পাঠানো হয়েছে!' : '✅ Reel shared successfully!');
       
       setIsUserPickerOpen(false);
@@ -1800,11 +2122,17 @@ function UserApp() {
 
   // Task Completion (Instant 0ms + atomic increment)
   const handleCompleteTask = (taskId: string, rewardPoints: number) => {
+    if (!earningSettings.isMasterEarningEnabled || !earningSettings.isTasksEnabled) {
+      showToast(lang === 'bn' ? '⚠️ টাস্ক আর্নিং বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : '⚠️ Task earning is paused by Admin.');
+      return;
+    }
     if (
       !isAuthenticated ||
       !firebaseUser ||
+      !emailVerified ||
       !isRealUserId(currentUserRef.current.id) ||
-      currentUserRef.current.id !== firebaseUser.uid
+      currentUserRef.current.id !== firebaseUser.uid ||
+      rewardPoints <= 0
     ) {
       return;
     }
@@ -1816,25 +2144,64 @@ function UserApp() {
     }
   };
 
-  // Add Points (e.g., from spin wheel or scratch card)
+  // Add Points (e.g., from spin wheel)
   const handleAddPointsGeneral = (pts: number, reason: string) => {
+    if (!isAuthenticated || !firebaseUser || !emailVerified || !Number.isFinite(pts) || pts <= 0) return;
     updateUserPoints(pts);
-    showToast(`🎉 ${reason}: +${pts} পয়েন্ট ওয়ালেটে যুক্ত হয়েছে!`);
+    showToast(
+      lang === 'bn'
+        ? `🎉 ${reason}: +${toBengaliNumber(pts, lang)} পয়েন্ট ওয়ালেটে যুক্ত হয়েছে!`
+        : `🎉 ${reason}: +${pts} points added to wallet!`
+    );
+  };
+
+  const handleClaimScratchCard = (prizePts: number) => {
+    if (!earningSettings.isMasterEarningEnabled || !earningSettings.isScratchCardEnabled) {
+      showToast(lang === 'bn' ? '⚠️ স্ক্র্যাচ কার্ড বর্তমানে বন্ধ রয়েছে।' : '⚠️ Scratch card is currently paused.');
+      return;
+    }
+    const activeUser = currentUserRef.current;
+    if (!isAuthenticated || !firebaseUser || !emailVerified || !isRealUserId(activeUser.id) || activeUser.id !== firebaseUser.uid) {
+      return;
+    }
+    if (activeUser.dailyScratchClaimDate === todayKey) {
+      showToast(lang === 'bn' ? 'আজকের স্ক্র্যাচ কার্ড পুরস্কার ইতিমধ্যে সংগ্রহ করেছেন!' : 'Already claimed today\'s scratch card!');
+      return;
+    }
+    const actualPrize = Math.max(1, earningSettings.scratchCardPrize || prizePts);
+    applyFastUserMutation(actualPrize, { dailyScratchClaimDate: todayKey });
+    try {
+      localStorage.setItem(`rt_scratch_${activeUser.id}`, todayKey);
+    } catch {}
+    showToast(
+      lang === 'bn'
+        ? `🎁 স্ক্র্যাচ কার্ড: +${toBengaliNumber(actualPrize, lang)} পয়েন্ট ওয়ালেটে যুক্ত হয়েছে!`
+        : `🎁 Scratch Card: +${actualPrize} points added!`
+    );
   };
 
   const handleRecordSpin = () => {
-    const todayStr = new Date().toDateString();
-    const currentCount = currentUser.dailySpinClaimDate === todayStr ? (currentUser.dailySpinClaimsCount || 0) : 0;
+    const activeUser = currentUserRef.current;
+    const legacyTodayStr = new Date().toDateString();
+    const isSameDay =
+      activeUser.dailySpinClaimDate === todayKey || activeUser.dailySpinClaimDate === legacyTodayStr;
+    const currentCount = isSameDay ? (activeUser.dailySpinClaimsCount || 0) : 0;
     const updatedCount = currentCount + 1;
-    const updatedUser: User = {
-      ...currentUser,
-      dailySpinClaimDate: todayStr,
+    setCurrentUser((prev) => ({
+      ...prev,
+      dailySpinClaimDate: todayKey,
       dailySpinClaimsCount: updatedCount,
-    };
-    setCurrentUser(updatedUser);
-    if (isAuthenticated && firebaseUser && isRealUserId(currentUser.id) && currentUser.id === firebaseUser.uid) {
-      updateDocument('users', currentUser.id, {
-        dailySpinClaimDate: todayStr,
+    }));
+    setUsers((prev) =>
+      prev.map((u) =>
+        u.id === activeUser.id
+          ? { ...u, dailySpinClaimDate: todayKey, dailySpinClaimsCount: updatedCount }
+          : u
+      )
+    );
+    if (isAuthenticated && firebaseUser && emailVerified && isRealUserId(activeUser.id) && activeUser.id === firebaseUser.uid) {
+      updateDocument('users', activeUser.id, {
+        dailySpinClaimDate: todayKey,
         dailySpinClaimsCount: updatedCount,
       }).catch((err) => console.warn('Record spin sync error:', err));
     }
@@ -1958,7 +2325,7 @@ function UserApp() {
       id: liveId,
       hostId,
       hostName: currentUser.name || 'ইউজার',
-      hostAvatar: currentUser.avatar || INITIAL_USER.avatar,
+      hostAvatar: currentUser.avatar || DEFAULT_AVATAR_URL,
       title: cleanTitle,
       mode: payload.mode,
       category: (payload.category || 'আড্ডা').slice(0, 50),
@@ -1968,6 +2335,8 @@ function UserApp() {
       chatEnabled: payload.chatEnabled !== false,
       allowSpeakerRequests: payload.allowSpeakerRequests !== false,
       viewersCount: 1,
+      peakViewersCount: 1,
+      peakAt: new Date().toISOString(),
       likesCount: 0,
       giftsTotalPoints: 0,
       adminGiftPoints: 0,
@@ -2089,11 +2458,35 @@ function UserApp() {
     if (currentUser.id === updatedUser.id) {
       setCurrentUser(updatedUser);
     }
+    const ownedReels = reels.filter((r) => r.userId === updatedUser.id);
+    if (ownedReels.length > 0) {
+      setReels((prev) =>
+        prev.map((r) =>
+          r.userId === updatedUser.id
+            ? {
+                ...r,
+                creatorName: updatedUser.name,
+                creatorAvatar: updatedUser.avatar,
+                isVerified: Boolean(updatedUser.isVerified),
+              }
+            : r
+        )
+      );
+    }
     if (isRealUserId(updatedUser.id)) {
       try {
         await Promise.all([
           updateDocument('users', updatedUser.id, updatedUser),
           updateDocument('public_profiles', updatedUser.id, toPublicProfile(updatedUser)).catch(() => {}),
+          ...ownedReels
+            .filter((r) => firestoreReelIdsRef.current.has(r.id))
+            .map((r) =>
+              updateDocument('reels', r.id, {
+                creatorName: updatedUser.name,
+                creatorAvatar: updatedUser.avatar,
+                isVerified: Boolean(updatedUser.isVerified),
+              }).catch(() => {})
+            ),
         ]);
       } catch (err) {
         console.warn('Firestore update user note:', err);
@@ -2118,8 +2511,24 @@ function UserApp() {
       return [];
     }
     let result = selectedCategory === 'সকল'
-      ? reels
-      : reels.filter((r) => r.category === selectedCategory);
+      ? resolvedReels
+      : resolvedReels.filter((r) => r.category === selectedCategory);
+
+    if (feedSearchQuery.trim()) {
+      const q = feedSearchQuery.toLowerCase().trim();
+      result = result.filter((r) => {
+        const catMeta = getCategoryMeta(r.category);
+        return (
+          r.title.toLowerCase().includes(q) ||
+          r.category.toLowerCase().includes(q) ||
+          catMeta.labelEn.toLowerCase().includes(q) ||
+          catMeta.labelBn.toLowerCase().includes(q) ||
+          r.creatorName.toLowerCase().includes(q) ||
+          (r.caption && r.caption.toLowerCase().includes(q)) ||
+          (r.hashtags && r.hashtags.some((tag) => tag.toLowerCase().includes(q)))
+        );
+      });
+    }
 
     if (sortBy === 'newest') {
       result = [...result].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -2223,10 +2632,21 @@ function UserApp() {
       {/* Main Container constrained to Mobile/Tablet Frame */}
       <div className="w-full max-w-md mx-auto min-h-screen bg-[#0a120e] flex flex-col relative shadow-2xl border-x border-emerald-950/40">
         <Header
-          onOpenNotifications={() => setShowNotifications(true)}
+          onOpenNotifications={() => {
+            setShowNotifications(true);
+            const unreadList = personalNotifications.filter((n) => !n.read);
+            if (unreadList.length > 0) {
+              setPersonalNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+              if (isAuthenticated && firebaseUser && emailVerified) {
+                unreadList.forEach((n) => {
+                  updateDocument(`users/${firebaseUser.uid}/notifications`, n.id, { read: true }).catch(() => {});
+                });
+              }
+            }
+          }}
           isMuted={isMuted}
           onToggleMute={() => setIsMuted(!isMuted)}
-          unreadAnnouncementsCount={personalNotifications.filter((n) => !n.read).length || 1}
+          unreadAnnouncementsCount={personalNotifications.filter((n) => !n.read).length}
           lang={lang}
           onToggleLang={toggleLang}
           isAuthenticated={isAuthenticated}
@@ -2254,20 +2674,18 @@ function UserApp() {
             <>
                 {activeTab === 'home' && (
                   <div className="space-y-3.5 pb-20">
-                    {!isAuthenticated && (
-                      <GuestBanner
-                        guestId={guestId}
-                        guestPoints={guestPoints}
-                        onLogin={() => openAuthModal('login')}
-                        onRegister={() => openAuthModal('register')}
-                        lang={lang}
-                      />
-                    )}
                     {/* TOP STORIES / LIVE STREAMERS BAR (Always visible for fast live discovery) */}
                     <div className="space-y-2 pb-1 bg-[#0d1611]/80 -mx-1 px-3 py-2.5 rounded-3xl border border-emerald-950/60 shadow-lg">
                       <div className="flex items-center justify-between px-0.5">
                         <div className="flex items-center gap-2">
-                          <span className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-ping shrink-0" />
+                          {activeLiveStreams.length > 0 ? (
+                            <span className="relative flex h-2.5 w-2.5 shrink-0">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-500 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-600" />
+                            </span>
+                          ) : (
+                            <Radio className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          )}
                           <h3 className="text-xs font-black text-white flex items-center gap-1.5 tracking-wide">
                             <span>{lang === 'bn' ? 'সরাসরি লাইভ আড্ডা' : 'Live Streams'}</span>
                             {activeLiveStreams.length > 0 && (
@@ -2280,9 +2698,9 @@ function UserApp() {
                         <button
                           type="button"
                           onClick={() => openPersonalLiveStudio('audio')}
-                          className="text-[11px] font-black text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition active:scale-95 cursor-pointer bg-emerald-950/80 px-2.5 py-1 rounded-xl border border-emerald-500/40"
+                          className="text-[11px] font-black text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition active:scale-95 cursor-pointer bg-emerald-950/80 px-2.5 py-1.5 rounded-xl border border-emerald-500/40"
                         >
-                          <Radio className="w-3 h-3 text-rose-400 animate-pulse" />
+                          <Radio className="w-3 h-3 text-rose-400" />
                           <span>{lang === 'bn' ? '+ লাইভে যান' : '+ Go Live'}</span>
                         </button>
                       </div>
@@ -2313,7 +2731,7 @@ function UserApp() {
                                     : 'bg-gradient-to-tr from-emerald-500 to-teal-400'
                                 }`}>
                                   <img
-                                    src={currentUser.avatar || INITIAL_USER.avatar}
+                                    src={currentUser.avatar || DEFAULT_AVATAR_URL}
                                     alt={currentUser.name}
                                     className="w-full h-full object-cover rounded-[13px] bg-black"
                                   />
@@ -2349,7 +2767,7 @@ function UserApp() {
                                     : 'bg-gradient-to-tr from-rose-600 via-amber-500 to-rose-400 animate-pulse ring-2 ring-rose-500/50'
                                 }`}>
                                   <img
-                                    src={live.hostAvatar || INITIAL_USER.avatar}
+                                    src={live.hostAvatar || DEFAULT_AVATAR_URL}
                                     alt={live.hostName}
                                     className="w-full h-full object-cover rounded-[13px] border border-black/30 bg-neutral-900"
                                   />
@@ -2410,7 +2828,7 @@ function UserApp() {
                                 : 'bg-gradient-to-tr from-rose-500 to-amber-400'
                             }`}>
                               <img
-                                src={activeLiveStreams[0].hostAvatar || INITIAL_USER.avatar}
+                                src={activeLiveStreams[0].hostAvatar || DEFAULT_AVATAR_URL}
                                 alt={activeLiveStreams[0].hostName}
                                 className="w-full h-full object-cover rounded-[13px] bg-neutral-900"
                               />
@@ -2467,28 +2885,62 @@ function UserApp() {
                       </div>
                     )}
 
-                    {/* Category Pills */}
+                    {/* Category Pills with Icon Badges */}
                     <div className="flex gap-2 overflow-x-auto no-scrollbar py-1">
-                      {CATEGORIES.map((cat) => (
-                        <button
-                          key={cat}
-                          onClick={() => setSelectedCategory(cat)}
-                          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1 ${
-                            selectedCategory === cat
-                              ? cat === '🔴 লাইভ'
-                                ? 'bg-rose-600 text-white shadow-md shadow-rose-500/25'
-                                : 'bg-[#00c853] text-black shadow-md shadow-emerald-500/25'
-                              : cat === '🔴 লাইভ' && activeLiveStreams.length > 0
-                              ? 'bg-rose-950/60 text-rose-300 border border-rose-500/40 animate-pulse'
-                              : 'bg-[#15231c] text-neutral-300 hover:text-white border border-emerald-950'
-                          }`}
-                        >
-                          <span>{cat}</span>
-                          {cat === '🔴 লাইভ' && activeLiveStreams.length > 0 && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping" />
-                          )}
-                        </button>
-                      ))}
+                      {CATEGORIES_LIST.map((cat) => {
+                        const meta = getCategoryMeta(cat);
+                        const isSelected = selectedCategory === cat;
+                        return (
+                          <button
+                            key={cat}
+                            id={`cat-tab-${cat}`}
+                            onClick={() => handleSelectCategory(cat)}
+                            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 select-none ${
+                              isSelected
+                                ? cat === '🔴 লাইভ'
+                                  ? 'bg-rose-600 text-white shadow-md shadow-rose-500/25 ring-1 ring-rose-400'
+                                  : `${meta.activeBg} ${meta.activeText} shadow-md shadow-emerald-500/25 ring-1 ring-white/20`
+                                : cat === '🔴 লাইভ' && activeLiveStreams.length > 0
+                                ? 'bg-rose-950/70 text-rose-300 border border-rose-500/45'
+                                : 'bg-[#15231c] text-neutral-300 hover:text-white border border-emerald-950 hover:border-emerald-800'
+                            }`}
+                          >
+                            <span className="text-xs">{meta.icon}</span>
+                            <span>{lang === 'bn' ? meta.labelBn : meta.labelEn}</span>
+                            {cat === '🔴 লাইভ' && activeLiveStreams.length > 0 && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Quick Search & Category Keyword Filter Input */}
+                    <div className="relative pt-1">
+                      <div className="flex items-center gap-2 bg-[#101b14] border border-emerald-950/70 rounded-2xl px-3 py-2 shadow-inner focus-within:border-emerald-500/50 transition-colors">
+                        <Search className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <input
+                          type="text"
+                          value={feedSearchQuery}
+                          onChange={(e) => setFeedSearchQuery(e.target.value)}
+                          placeholder={
+                            lang === 'bn'
+                              ? 'ক্যাটাগরি, শিরোনাম বা হ্যাশট্যাগ দিয়ে খুঁজুন...'
+                              : 'Search by category, title, creator or tags...'
+                          }
+                          className="bg-transparent text-xs text-white placeholder-neutral-500 outline-none w-full"
+                        />
+                        {feedSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setFeedSearchQuery('')}
+                            className="text-neutral-400 hover:text-white p-0.5 rounded-full cursor-pointer"
+                            title={lang === 'bn' ? 'মুছুন' : 'Clear search'}
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* DEDICATED LIVE STREAMS FEED WHEN '🔴 লাইভ' CATEGORY IS SELECTED */}
@@ -2535,7 +2987,7 @@ function UserApp() {
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center gap-2.5">
                                     <img
-                                      src={live.hostAvatar || INITIAL_USER.avatar}
+                                      src={live.hostAvatar || DEFAULT_AVATAR_URL}
                                       alt={live.hostName}
                                       className="w-11 h-11 rounded-2xl object-cover border border-emerald-500/40"
                                     />
@@ -2597,172 +3049,201 @@ function UserApp() {
                       </div>
                     ) : (
                       <>
-                        {/* Top Earners Leaderboard Widget */}
-                        <div className="py-1">
-                          <TopEarnersLeaderboard
-                            users={users}
-                            currentUser={currentUser}
-                            lang={lang}
-                            onOpenUserProfile={handleOpenUserProfile}
-                          />
-                        </div>
+                        {/* Section Title & Category Filter Toolbar */}
+                        <div className="flex flex-col gap-2 pt-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <h2 className="text-base font-extrabold text-white tracking-tight flex items-center gap-1.5">
+                              <span>ReelPay BD</span>
+                            </h2>
+                            <div className="flex items-center gap-2">
+                              {/* Category Filter Dropdown (filters beyond just top tabs) */}
+                              <div className="flex items-center gap-1 bg-[#15231c] border border-emerald-950/70 rounded-lg px-2 py-1 shadow-sm">
+                                <Filter className="w-3 h-3 text-emerald-400 shrink-0" />
+                                <select
+                                  value={selectedCategory}
+                                  onChange={(e) => handleSelectCategory(e.target.value as any)}
+                                  className="bg-transparent text-[10px] font-bold text-emerald-300 outline-none cursor-pointer"
+                                  aria-label={lang === 'bn' ? 'ক্যাটাগরি ফিল্টার' : 'Category filter'}
+                                >
+                                  {CATEGORIES_LIST.map((cat) => {
+                                    const meta = getCategoryMeta(cat);
+                                    return (
+                                      <option key={cat} value={cat} className="bg-[#101b15] text-white">
+                                        {meta.icon} {lang === 'bn' ? meta.labelBn : meta.labelEn}
+                                      </option>
+                                    );
+                                  })}
+                                </select>
+                              </div>
 
-                        {/* Section Title Header */}
-                        <div className="flex items-center justify-between pt-1">
-                          <h2 className="text-base font-extrabold text-white tracking-tight flex items-center gap-1.5">
-                            <span>{lang === 'bn' ? 'ReelPay BD' : "ReelPay BD"}</span>
-                          </h2>
-                          <div className="flex items-center gap-3">
-                            <select
-                              value={sortBy}
-                              onChange={(e) => setSortBy(e.target.value as any)}
-                              className="bg-[#15231c] text-[10px] font-bold text-emerald-400 border border-emerald-950/60 rounded-lg px-2 py-1 outline-none cursor-pointer hover:bg-[#1a2b22] transition-colors"
-                            >
-                              <option value="newest">{lang === 'bn' ? 'নতুন' : 'Newest'}</option>
-                              <option value="most_watched">{lang === 'bn' ? 'বেশি দেখা' : 'Most Watched'}</option>
-                              <option value="popular">{lang === 'bn' ? 'জনপ্রিয়' : 'Popular'}</option>
-                            </select>
-                            <button
-                              onClick={() => setSelectedCategory('সকল')}
-                              className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-0.5 cursor-pointer"
-                            >
-                              <span>{lang === 'bn' ? 'আরও দেখুন' : 'See more'}</span>
-                              <ChevronRight className="w-3.5 h-3.5" />
-                            </button>
+                              {/* Sort By Dropdown */}
+                              <select
+                                value={sortBy}
+                                onChange={(e) => setSortBy(e.target.value as any)}
+                                className="bg-[#15231c] text-[10px] font-bold text-emerald-400 border border-emerald-950/70 rounded-lg px-2 py-1 outline-none cursor-pointer hover:bg-[#1a2b22] transition-colors"
+                              >
+                                <option value="newest">{lang === 'bn' ? 'নতুন' : 'Newest'}</option>
+                                <option value="most_watched">{lang === 'bn' ? 'বেশি দেখা' : 'Most Watched'}</option>
+                                <option value="popular">{lang === 'bn' ? 'জনপ্রিয়' : 'Popular'}</option>
+                              </select>
+
+                              {selectedCategory !== 'সকল' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectCategory('সকল')}
+                                  className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-0.5 cursor-pointer"
+                                  title={lang === 'bn' ? 'সকল রিল দেখুন' : 'View all reels'}
+                                >
+                                  <span>{lang === 'bn' ? 'সকল' : 'All'}</span>
+                                  <ChevronRight className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </div>
+
+                          {/* Active Filter Strip when category or search is active */}
+                          {(selectedCategory !== 'সকল' || feedSearchQuery.trim()) && (
+                            <div className="flex items-center justify-between bg-gradient-to-r from-emerald-950/60 via-[#101e16] to-[#0a140f] border border-emerald-500/30 px-3 py-1.5 rounded-2xl text-xs shadow-inner">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-[11px] text-neutral-400 font-medium">
+                                  {lang === 'bn' ? 'ফিল্টার:' : 'Filter:'}
+                                </span>
+                                {selectedCategory !== 'সকল' && (() => {
+                                  const activeMeta = getCategoryMeta(selectedCategory);
+                                  return (
+                                    <span
+                                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-black border ${activeMeta.badgeBg} ${activeMeta.badgeBorder} ${activeMeta.badgeText}`}
+                                    >
+                                      <span>{activeMeta.icon}</span>
+                                      <span>{lang === 'bn' ? activeMeta.labelBn : activeMeta.labelEn}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSelectCategory('সকল')}
+                                        className="ml-1 hover:text-white cursor-pointer"
+                                        title={lang === 'bn' ? 'ক্যাটাগরি ফিল্টার সরান' : 'Remove category filter'}
+                                      >
+                                        ✕
+                                      </button>
+                                    </span>
+                                  );
+                                })()}
+
+                                {feedSearchQuery.trim() && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-neutral-800 text-neutral-200 border border-neutral-700">
+                                    <span>🔍 "{feedSearchQuery.trim()}"</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setFeedSearchQuery('')}
+                                      className="ml-1 hover:text-white text-neutral-400 cursor-pointer"
+                                      title={lang === 'bn' ? 'অনুসন্ধান মুছুন' : 'Clear search'}
+                                    >
+                                      ✕
+                                    </button>
+                                  </span>
+                                )}
+
+                                <span className="text-[10px] text-emerald-400 font-bold tabular-nums">
+                                  ({toBengaliNumber(filteredReels.length, lang)} {lang === 'bn' ? 'টি রিল' : 'reels'})
+                                </span>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedCategory('সকল');
+                                  setFeedSearchQuery('');
+                                }}
+                                className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-neutral-800/90 hover:bg-neutral-700 text-neutral-300 hover:text-white border border-neutral-700/60 shrink-0 cursor-pointer transition active:scale-95"
+                              >
+                                {lang === 'bn' ? 'রিসেট' : 'Reset'}
+                              </button>
+                            </div>
+                          )}
                         </div>
 
                         {/* Feed List of Reels matching Screenshot 1 + Download + Gift */}
                         <div className="space-y-1">
                           {filteredReels.length === 0 ? (
-                            <div className="text-center py-12 text-neutral-400 text-xs">
-                              {lang === 'bn' ? 'এই ক্যাটাগরিতে কোনো রিল পাওয়া যায়নি।' : 'No reels in this category.'}
+                            <div className="p-8 rounded-3xl bg-[#0f1913] border border-emerald-950/60 text-center space-y-3 my-2">
+                              <div className="w-14 h-14 rounded-2xl bg-emerald-950/50 border border-emerald-500/30 flex items-center justify-center mx-auto text-2xl shadow-inner">
+                                {getCategoryMeta(selectedCategory).icon}
+                              </div>
+                              <div className="space-y-1">
+                                <h4 className="font-extrabold text-sm text-white">
+                                  {lang === 'bn'
+                                    ? `${getCategoryMeta(selectedCategory).labelBn} ক্যাটাগরিতে কোনো রিল পাওয়া যায়নি`
+                                    : `No reels found in ${getCategoryMeta(selectedCategory).labelEn}`}
+                                </h4>
+                                <p className="text-xs text-neutral-400 max-w-xs mx-auto">
+                                  {lang === 'bn'
+                                    ? 'অন্য ক্যাটাগরি বেছে নিন অথবা সকল রিল দেখতে রিসেট বাটনে ট্যাপ করুন।'
+                                    : 'Select another category or tap reset to browse all reels.'}
+                                </p>
+                              </div>
+                              <div className="flex items-center justify-center gap-2 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedCategory('সকল');
+                                    setFeedSearchQuery('');
+                                  }}
+                                  className="px-4 py-2 rounded-xl bg-[#00c853] hover:bg-[#00e676] text-black font-extrabold text-xs shadow-md transition active:scale-95 cursor-pointer"
+                                >
+                                  ✨ {lang === 'bn' ? 'সকল রিল দেখুন (রিসেট)' : 'View All Reels (Reset)'}
+                                </button>
+                              </div>
                             </div>
                           ) : (
-                            filteredReels.map((reel, rIdx) => (
-                              <React.Fragment key={reel.id}>
-                                <ReelFeedCard
-                                  reel={reel}
-                                  isLiked={likedReelIds.includes(reel.id)}
-                                  hasWatched={(isAuthenticated ? watchedReelIds : guestWatchedReelIds).includes(reel.id)}
-                                  onLikeToggle={handleToggleLike}
-                                  onOpenReel={(r) => setFullScreenReelId(r.id)}
-                                  onOpenComments={(r) => setActiveCommentReel(r)}
-                                  onClaimDirect={handleClaimDirect}
-                                  onOpenGift={() => {
-                                    if (!isAuthenticated) {
-                                      triggerAuthPrompt(
-                                        lang === 'bn'
-                                          ? 'ক্রিয়েটরকে গিফট পাঠাতে অনুগ্রহ করে রিয়েল আইডিতে লগইন করুন!'
-                                          : 'Please log in with a real account to send gifts!'
-                                      );
-                                      return;
-                                    }
-                                    setGiftTarget({ userId: reel.userId, creatorName: reel.creatorName });
-                                    setShowGiftSheet(true);
-                                  }}
-                                  onOpenCreatorProfile={(userId) => handleOpenUserProfile(userId)}
-                                  onShare={handleOpenShare}
-                                  lang={lang}
-                                  isMuted={isMuted}
-                                  levelProgress={levelProgress}
-                                  earningSettings={earningSettings}
-                                  isDailyLimitReached={isDailyReelLimitReached}
-                                  isSaved={savedReelIds.includes(reel.id)}
-                                  onToggleSave={handleToggleSave}
-                                  isGiftsEnabled={siteSettings.isGiftsEnabled}
-                                  isCommentsEnabled={siteSettings.isCommentsEnabled}
-                                />
-
-                                {/* In-feed Live Recommendation Interstitial Card after 1st reel */}
-                                {rIdx === 0 && activeLiveStreams.length > 0 && (
-                                  <div
-                                    onClick={() => handleJoinLiveStream(activeLiveStreams[0].id)}
-                                    className="my-2 p-3.5 rounded-3xl bg-gradient-to-r from-rose-950/60 via-[#13221a] to-[#0d1611] border border-rose-500/40 shadow-lg flex items-center justify-between cursor-pointer hover:border-rose-400/60 transition group"
-                                  >
-                                    <div className="flex items-center gap-3 min-w-0">
-                                      <div className="relative shrink-0">
-                                        <img
-                                          src={activeLiveStreams[0].hostAvatar || INITIAL_USER.avatar}
-                                          alt={activeLiveStreams[0].hostName}
-                                          className="w-12 h-12 rounded-2xl object-cover ring-2 ring-rose-500 animate-pulse"
-                                        />
-                                        <span className="absolute -bottom-1 -right-1 bg-rose-600 text-[8px] font-black text-white px-1 py-0.2 rounded border border-black">
-                                          LIVE
-                                        </span>
-                                      </div>
-                                      <div className="min-w-0">
-                                        <div className="flex items-center gap-1.5">
-                                          <span className="text-[10px] font-black text-rose-400 uppercase tracking-wider flex items-center gap-1">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping" />
-                                            <span>{activeLiveStreams[0].mode === 'audio' ? 'অডিও আড্ডা' : 'লাইভ ভিডিও'}</span>
-                                          </span>
-                                          <span className="text-[10px] text-neutral-400">• {toBengaliNumber(activeLiveStreams[0].viewersCount || 1, lang)} জন যুক্ত</span>
-                                        </div>
-                                        <h4 className="text-xs font-black text-white truncate mt-0.5">
-                                          {activeLiveStreams[0].hostName}: {activeLiveStreams[0].title}
-                                        </h4>
-                                      </div>
-                                    </div>
-                                    <button
-                                      type="button"
-                                      className="px-3 py-1.5 rounded-xl bg-rose-600 group-hover:bg-rose-500 text-white font-black text-[11px] shrink-0 shadow flex items-center gap-1 cursor-pointer"
-                                    >
-                                      <Play className="w-3 h-3 fill-current" />
-                                      <span>দেখুন</span>
-                                    </button>
-                                  </div>
-                                )}
-                              </React.Fragment>
+                            filteredReels.map((reel) => (
+                              <ReelFeedCard
+                                key={reel.id}
+                                reel={reel}
+                                currentUserId={isAuthenticated ? currentUser.id : undefined}
+                                isLiked={likedReelIds.includes(reel.id)}
+                                hasWatched={(isAuthenticated ? watchedReelIds : guestWatchedReelIds).includes(reel.id)}
+                                onLikeToggle={handleToggleLike}
+                                onOpenReel={(r) => setFullScreenReelId(r.id)}
+                                onOpenComments={(r) => setActiveCommentReel(r)}
+                                onClaimDirect={handleClaimDirect}
+                                onOpenGift={() => {
+                                  if (!isAuthenticated) {
+                                    triggerAuthPrompt(
+                                      lang === 'bn'
+                                        ? 'ক্রিয়েটরকে গিফট পাঠাতে অনুগ্রহ করে রিয়েল আইডিতে লগইন করুন!'
+                                        : 'Please log in with a real account to send gifts!'
+                                    );
+                                    return;
+                                  }
+                                  if (isOwnContentUser(reel.userId)) {
+                                    showToast(
+                                      lang === 'bn'
+                                        ? '🎁 নিজের ভিডিওতে গিফট পাঠানো যাবে না! গিফট শুধুমাত্র অন্য ইউজারদের জন্য।'
+                                        : '🎁 You cannot send gifts to your own video!'
+                                    );
+                                    return;
+                                  }
+                                  setGiftTarget({ userId: reel.userId, creatorName: reel.creatorName });
+                                  setShowGiftSheet(true);
+                                }}
+                                onOpenCreatorProfile={(userId) => handleOpenUserProfile(userId)}
+                                onShare={handleOpenShare}
+                                lang={lang}
+                                isMuted={isMuted}
+                                levelProgress={levelProgress}
+                                earningSettings={earningSettings}
+                                isDailyLimitReached={isDailyReelLimitReached}
+                                isSaved={savedReelIds.includes(reel.id)}
+                                onToggleSave={handleToggleSave}
+                                isGiftsEnabled={siteSettings.isGiftsEnabled}
+                                isCommentsEnabled={siteSettings.isCommentsEnabled}
+                                onSelectCategory={handleSelectCategory}
+                                activeCategory={selectedCategory}
+                              />
                             ))
                           )}
                         </div>
                       </>
                     )}
-
-                    {/* LIVE STREAM HIGHLIGHT CARD matching prompt - moved to ProfileView */}
-                    {/*
-                    <div className="rounded-2xl p-4 bg-gradient-to-r from-rose-950/40 via-[#19221d] to-[#121c17] border-2 border-[#ff2d55] shadow-lg mt-3 text-white">
-                      <span className="bg-[#ff2d55] text-white px-3 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1.5 shadow-sm animate-pulse">
-                        <span className="w-2 h-2 rounded-full bg-white" />
-                        <span>🔴 LIVE • {toBengaliNumber('2.3', lang)} {lang === 'bn' ? 'হাজার দেখছে' : 'k watching'}</span>
-                      </span>
-
-                      <div className="mt-3">
-                        <b className="text-base font-extrabold text-white block">
-                          {lang === 'bn' ? 'আরিয়ান লাইভে আছে 🎤' : 'Aryan is LIVE 🎤'}
-                        </b>
-                        <p className="text-xs text-neutral-400 mt-1">
-                          {lang === 'bn' ? 'লাইভ দেখে ভালো লাগলে গিফট পাঠান!' : 'Watch live stream and send gifts to support!'}
-                        </p>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 mt-3 pt-2 border-t border-neutral-800">
-                        <button
-                          onClick={() => {
-                            if (!isAuthenticated) {
-                              triggerAuthPrompt(
-                                lang === 'bn'
-                                  ? 'লাইভে গিফট পাঠাতে অনুগ্রহ করে লগইন বা রেজিস্ট্রেশন করুন!'
-                                  : 'Login or register to send live gifts!'
-                              );
-                              return;
-                            }
-                            setShowGiftSheet(true);
-                          }}
-                          className="py-2.5 rounded-xl font-bold text-xs bg-[#ff2d55] hover:bg-[#e0264b] text-white transition active:scale-95 flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
-                        >
-                          <span>🎁 {lang === 'bn' ? 'লাইভে গিফট পাঠান' : 'Send Gift'}</span>
-                        </button>
-                        <button
-                          onClick={() => setShowLiveSheet(true)}
-                          className="py-2.5 rounded-xl font-bold text-xs bg-[#00c853] hover:bg-[#00e676] text-black transition active:scale-95 flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
-                        >
-                          <span>👁️ {lang === 'bn' ? 'লাইভ দেখুন' : 'Watch Live'}</span>
-                        </button>
-                      </div>
-                    </div>
-                    */}
                   </div>
                 )}
 
@@ -2779,7 +3260,10 @@ function UserApp() {
                       earningSettings={earningSettings}
                       users={users}
                       lang={lang}
+                      pointRate={pointRate}
                       onRecordSpin={handleRecordSpin}
+                      onClaimScratch={handleClaimScratchCard}
+                      todayKey={todayKey}
                     />
                   ) : (
                     <GuestEarnView
@@ -2797,6 +3281,7 @@ function UserApp() {
                       user={currentUser}
                       pointRate={pointRate}
                       withdrawals={withdrawals}
+                      depositRequests={depositRequests}
                       onRequestWithdrawal={handleRequestWithdrawal}
                       onDepositClick={() => setShowDepositSheet(true)}
                       isMuted={isMuted}
@@ -2805,6 +3290,7 @@ function UserApp() {
                       isWithdrawalsEnabled={siteSettings.isWithdrawalsEnabled}
                       isDepositsEnabled={siteSettings.isDepositsEnabled}
                       paymentMethods={siteSettings.paymentMethods}
+                      lang={lang}
                     />
                   ) : (
                     <GuestWalletView
@@ -2837,7 +3323,7 @@ function UserApp() {
                       activeMyLive={activeLiveStreams.find((s) => s.hostId === currentUser.id) || null}
                       onManageMyLive={(liveId) => handleJoinLiveStream(liveId)}
                       onEndMyLive={handleEndLive}
-                      reels={reels}
+                      reels={resolvedReels}
                       onOpenReel={(r) => setFullScreenReelId(r.id)}
                       onEditReel={(r) => setEditingReel(r)}
                       onDeleteReel={handleDeleteReel}
@@ -2859,6 +3345,8 @@ function UserApp() {
                       allowUserAudioLive={siteSettings.allowUserAudioLive}
                       allowUserVideoLive={siteSettings.allowUserVideoLive}
                       isDirectChatEnabled={siteSettings.isDirectChatEnabled}
+                      users={users}
+                      onOpenUserProfile={handleOpenUserProfile}
                     />
                   ) : (
                     <GuestProfileView
@@ -2898,7 +3386,7 @@ function UserApp() {
           {/* Full-Screen Immersive Reel Player Modal */}
           {fullScreenReelId && (
             <FullScreenReelModal
-              reels={reels}
+              reels={resolvedReels}
               initialReelId={fullScreenReelId}
               onClose={() => setFullScreenReelId(null)}
               isLiked={likedReelIds.includes(fullScreenReelId)}
@@ -2914,8 +3402,16 @@ function UserApp() {
                   );
                   return;
                 }
-                const targetReel = reels.find((r) => r.id === fullScreenReelId);
+                const targetReel = resolvedReels.find((r) => r.id === fullScreenReelId);
                 if (targetReel) {
+                  if (isOwnContentUser(targetReel.userId)) {
+                    showToast(
+                      lang === 'bn'
+                        ? '🎁 নিজের ভিডিওতে গিফট পাঠানো যাবে না! গিফট শুধুমাত্র অন্য ইউজারদের জন্য।'
+                        : '🎁 You cannot send gifts to your own video!'
+                    );
+                    return;
+                  }
                   setGiftTarget({ userId: targetReel.userId, creatorName: targetReel.creatorName });
                 }
                 setShowGiftSheet(true);
@@ -2957,6 +3453,9 @@ function UserApp() {
               isGiftsEnabled={siteSettings.isGiftsEnabled}
               isCommentsEnabled={siteSettings.isCommentsEnabled}
               isDirectChatEnabled={siteSettings.isDirectChatEnabled}
+              onVideoCompleted={handleIncrementReelView}
+              currentUserId={currentUser.id}
+              onSelectCategory={handleSelectCategory}
               onOpenChatWithCreator={async (creatorId) => {
                 if (!siteSettings.isDirectChatEnabled) {
                   showToast(lang === 'bn' ? '🔒 ডিরেক্ট চ্যাট বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : '🔒 Direct chat paused by Admin.');
@@ -2991,6 +3490,7 @@ function UserApp() {
               onUpdateReel={handleUpdateReel}
               lang={lang}
               isMuted={isMuted}
+              users={currentUser.role === 'admin' ? users : undefined}
             />
           )}
 
@@ -3006,6 +3506,8 @@ function UserApp() {
                 handleOpenUserProfile(userId);
               }}
               isCommentsEnabled={siteSettings.isCommentsEnabled}
+              likedCommentIds={currentUser.likedCommentIds || []}
+              onToggleCommentLike={handleToggleCommentLike}
             />
           )}
 
@@ -3065,6 +3567,7 @@ function UserApp() {
               isMuted={isMuted}
               recipientName={giftTarget?.creatorName}
               earningSettings={earningSettings}
+              isSelfTarget={Boolean(giftTarget?.userId && isOwnContentUser(giftTarget.userId))}
             />
           )}
 
@@ -3090,6 +3593,14 @@ function UserApp() {
               isOpen={showLiveSheet}
               onClose={() => setShowLiveSheet(false)}
               onOpenGift={(stream) => {
+                if (isOwnContentUser(stream.hostId)) {
+                  showToast(
+                    lang === 'bn'
+                      ? '🎁 নিজের লাইভে নিজেকে গিফট পাঠানো যাবে না!'
+                      : '🎁 You cannot send gifts to your own live stream!'
+                  );
+                  return;
+                }
                 setGiftTarget({
                   userId: stream.hostId,
                   liveId: stream.id,
@@ -3098,6 +3609,14 @@ function UserApp() {
                 setShowGiftSheet(true);
               }}
               onQuickGift={(gift, stream) => {
+                if (isOwnContentUser(stream.hostId)) {
+                  showToast(
+                    lang === 'bn'
+                      ? '🎁 নিজের লাইভে নিজেকে গিফট পাঠানো যাবে না!'
+                      : '🎁 You cannot send gifts to your own live stream!'
+                  );
+                  return;
+                }
                 const split = calculateGiftSplit(gift.costPoints, earningSettings);
                 handleSendGift(gift, split.creatorShare, split.userCashback, stream.hostId, stream.id, split.adminShare);
               }}
@@ -3127,12 +3646,12 @@ function UserApp() {
             />
           )}
 
-          {/* Floating Live Stream Ticker (When live stream is active and user is browsing feed) */}
-          {activeLiveStreams.length > 0 && !showLiveSheet && (
+          {/* Floating Live Stream Ticker (Shown on non-Home tabs so Home isn't duplicated) */}
+          {activeTab !== 'home' && activeLiveStreams.length > 0 && !showLiveSheet && (
             <button
               type="button"
               onClick={() => handleJoinLiveStream(activeLiveStreams[0].id)}
-              className="fixed bottom-20 right-3 z-40 bg-gradient-to-r from-rose-600 via-rose-500 to-amber-500 text-white px-3.5 py-2 rounded-full shadow-2xl border-2 border-black/40 flex items-center gap-2 cursor-pointer hover:scale-105 transition active:scale-95 animate-pulse"
+              className="fixed bottom-20 right-3 z-40 min-h-[40px] bg-gradient-to-r from-rose-600 via-rose-500 to-amber-500 text-white px-3.5 py-2 rounded-full shadow-2xl border-2 border-black/40 flex items-center gap-2 cursor-pointer hover:scale-105 transition active:scale-95"
             >
               <span className="relative flex h-2 w-2 shrink-0">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
@@ -3157,6 +3676,7 @@ function UserApp() {
             lang={lang}
             onSendInChat={handleShareInChat}
             onDownloadReel={(r) => downloadReelVideo(r, lang)}
+            onShareTracked={handleRecordReelShare}
           />
 
           {/* User Profile Modal */}
@@ -3171,7 +3691,7 @@ function UserApp() {
               isFollowing={(currentUser.following || []).includes(selectedUserProfileUser.id)}
               onOpenFollowList={(tab) => setFollowListModal({ user: selectedUserProfileUser, tab })}
               lang={lang}
-              allReels={reels}
+              allReels={resolvedReels}
               onOpenReel={(r) => {
                 setFullScreenReelId(r.id);
                 setIsUserProfileModalOpen(false);
@@ -3232,7 +3752,7 @@ function UserApp() {
               currentUser={currentUser}
               otherUser={activeChatOtherUser}
               lang={lang}
-              allReels={reels}
+              allReels={resolvedReels}
             />
           )}
 

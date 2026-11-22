@@ -27,11 +27,13 @@ import {
   Play,
   Sparkles,
   Lock,
+  Mail,
 } from 'lucide-react';
 import { User, Reel, EarningSettings, LiveStream, LiveMode, PaymentMethodConfig, DEFAULT_PAYMENT_METHODS } from '../types';
 import { toBengaliNumber, formatTaka } from '../utils/bengali';
 import { getUserLevel, getNextLevel, getProgressToNextLevel } from '../utils/levels';
 import { ProfileInfoModal, ProfileInfoModalMode } from './ProfileInfoModal';
+import { TopEarnersLeaderboard } from './TopEarnersLeaderboard';
 
 interface ProfileViewProps {
   user: User;
@@ -66,6 +68,8 @@ interface ProfileViewProps {
   allowUserAudioLive?: boolean;
   allowUserVideoLive?: boolean;
   isDirectChatEnabled?: boolean;
+  users?: User[];
+  onOpenUserProfile?: (userId: string) => void;
 }
 
 export const ProfileView: React.FC<ProfileViewProps> = ({
@@ -101,6 +105,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   allowUserAudioLive = true,
   allowUserVideoLive = true,
   isDirectChatEnabled = true,
+  users = [],
+  onOpenUserProfile,
 }) => {
   const availablePaymentMethods = React.useMemo(() => {
     const base = paymentMethods && paymentMethods.length > 0 ? paymentMethods : DEFAULT_PAYMENT_METHODS;
@@ -188,11 +194,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const progress = getProgressToNextLevel(user.reelsWatchedCount);
 
   // Show user's created reels: strictly show only this specific user's uploaded reels
-  const userReels = reels.filter((r) => {
-    if (r.userId === user.id) return true;
-    if (r.creatorName && user.name && r.creatorName.trim().toLowerCase() === user.name.trim().toLowerCase() && user.name !== 'নতুন ইউজার') return true;
-    return false;
-  });
+  const userReels = reels.filter((r) => r.userId === user.id);
 
   // Saved reels (local list)
   const savedReels = (savedReelIds || [])
@@ -334,9 +336,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               alt={user.name}
               className="w-16 h-16 rounded-2xl object-cover border-2 border-emerald-400 shadow-lg"
             />
-            <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-500 text-black rounded-full flex items-center justify-center text-[10px] font-black">
-              ✓
-            </span>
+            {user.isVerified && (
+              <span
+                className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-500 text-black rounded-full flex items-center justify-center text-[10px] font-black shadow"
+                title={lang === 'bn' ? 'ভেরিফায়েড অ্যাকাউন্ট' : 'Verified Account'}
+              >
+                ✓
+              </span>
+            )}
           </div>
 
           <div className="flex-1 min-w-0">
@@ -350,13 +357,31 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </span>
             </div>
 
-            <div className="flex items-center gap-1.5 text-xs text-neutral-400 mt-1">
-              <Phone className="w-3 h-3 text-emerald-400" />
-              <span>{user.phone}</span>
-            </div>
+            {user.phone ? (
+              <div className="flex items-center gap-1.5 text-xs text-neutral-400 mt-1">
+                <Phone className="w-3 h-3 text-emerald-400 shrink-0" />
+                <span className="truncate">{user.phone}</span>
+              </div>
+            ) : user.email ? (
+              <div className="flex items-center gap-1.5 text-xs text-neutral-400 mt-1">
+                <Mail className="w-3 h-3 text-emerald-400 shrink-0" />
+                <span className="truncate">{user.email}</span>
+              </div>
+            ) : null}
 
             <p className="text-[11px] text-neutral-500 mt-0.5">
-              যুক্ত হয়েছেন: {user.createdAt}
+              {lang === 'bn' ? 'যুক্ত হয়েছেন:' : 'Joined:'}{' '}
+              {(() => {
+                if (!user.createdAt) return '—';
+                const parsed = new Date(user.createdAt);
+                return Number.isNaN(parsed.getTime())
+                  ? user.createdAt
+                  : parsed.toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                    });
+              })()}
             </p>
           </div>
 
@@ -443,15 +468,19 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 <input 
                   type="text"
                   value={referredByInput}
-                  onChange={(e) => setReferredByInput(e.target.value)}
+                  onChange={(e) => {
+                    setReferredByInput(e.target.value.toUpperCase());
+                    if (referralNote) setReferralNote(null);
+                  }}
                   placeholder="যেমন: REEL1234"
-                  className="flex-1 bg-black/40 border border-emerald-900/50 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-emerald-500"
+                  className="flex-1 bg-black/40 border border-emerald-900/50 rounded-lg px-3 py-2 text-xs text-white font-mono outline-none focus:border-emerald-500"
                 />
                 <button 
                   type="button"
+                  disabled={referredByInput.trim().length < 4}
                   onClick={() => {
-                    const val = referredByInput.trim();
-                    if (val && val !== user.referralCode) {
+                    const val = referredByInput.trim().toUpperCase();
+                    if (val.length >= 4 && val !== (user.referralCode || '').toUpperCase()) {
                       onSwitchUser({ ...user, referredBy: val });
                       setReferredByInput('');
                       setReferralNote(lang === 'bn' ? 'রেফার কোড সফলভাবে যুক্ত হয়েছে!' : 'Referral code added!');
@@ -459,7 +488,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       setReferralNote(lang === 'bn' ? 'সঠিক রেফার কোড দিন!' : 'Enter a valid referral code!');
                     }
                   }}
-                  className="bg-emerald-500 hover:bg-emerald-400 text-black px-4 py-1.5 rounded-lg text-xs font-bold transition active:scale-95 cursor-pointer"
+                  className={`min-h-[40px] px-4 py-1.5 rounded-lg text-xs font-bold transition ${
+                    referredByInput.trim().length < 4
+                      ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
+                      : 'bg-emerald-500 hover:bg-emerald-400 text-black active:scale-95 cursor-pointer'
+                  }`}
                 >
                   {lang === 'bn' ? 'সাবমিট' : 'Submit'}
                 </button>
@@ -484,8 +517,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <div className="flex items-center justify-center text-emerald-400 mb-1">
               <Users className="w-4 h-4" />
             </div>
-            <span className="text-base font-extrabold text-white block">
-              {toBengaliNumber(user.followersCount || 0)}
+            <span className="text-base font-extrabold text-white block tabular-nums">
+              {toBengaliNumber(user.followersCount || 0, lang)}
             </span>
             <p className="text-[10px] text-neutral-300 font-semibold">ফলোয়ার ↗</p>
           </button>
@@ -498,8 +531,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <div className="flex items-center justify-center text-cyan-400 mb-1">
               <UserPlus className="w-4 h-4" />
             </div>
-            <span className="text-base font-extrabold text-white block">
-              {toBengaliNumber(user.followingCount || 0)}
+            <span className="text-base font-extrabold text-white block tabular-nums">
+              {toBengaliNumber(user.followingCount || 0, lang)}
             </span>
             <p className="text-[10px] text-neutral-300 font-semibold">ফলোয়িং ↗</p>
           </button>
@@ -512,8 +545,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <div className="flex items-center justify-center text-amber-400 mb-1">
               <Coins className="w-4 h-4" />
             </div>
-            <span className="text-base font-extrabold text-white block">
-              {toBengaliNumber(user.points)}
+            <span className="text-base font-extrabold text-white block tabular-nums">
+              {toBengaliNumber(user.points, lang)}
             </span>
             <p className="text-[10px] text-neutral-300 font-semibold">মোট পয়েন্ট ↗</p>
           </button>
@@ -526,8 +559,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <div className="flex items-center justify-center text-green-400 mb-1">
               <ShieldCheck className="w-4 h-4" />
             </div>
-            <span className="text-base font-extrabold text-white block">
-              {formatTaka(user.totalWithdrawn)}
+            <span className="text-base font-extrabold text-white block tabular-nums">
+              {formatTaka(user.totalWithdrawn, lang)}
             </span>
             <p className="text-[10px] text-neutral-300 font-semibold">উত্তোলিত টাকা ↗</p>
           </button>
@@ -715,6 +748,15 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </button>
       </div>
 
+      {/* Top Earners Leaderboard */}
+      <TopEarnersLeaderboard
+        users={users}
+        currentUser={user}
+        lang={lang}
+        pointRate={pointRate}
+        onOpenUserProfile={onOpenUserProfile}
+      />
+
       {/* My Reels & Saved Reels Switcher */}
       <div className="pt-2">
         <div className="grid grid-cols-2 gap-2 mb-3 bg-[#101914] p-1 rounded-2xl border border-emerald-950/70">
@@ -817,14 +859,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
           )
         ) : savedReels.length === 0 ? (
-          <div className="bg-[#101c15] rounded-3xl p-8 border border-amber-500/30 text-center flex flex-col items-center justify-center relative overflow-hidden shadow-2xl">
-            <div className="absolute inset-0 bg-gradient-to-b from-amber-500/10 via-transparent to-transparent pointer-events-none" />
-            <div className="relative w-20 h-20 bg-gradient-to-tr from-amber-950/80 to-amber-900/30 rounded-3xl flex items-center justify-center mb-4 border border-amber-500/40 shadow-xl animate-[bounce_3s_ease-in-out_infinite]">
-              <Bookmark className="w-10 h-10 text-amber-400 fill-amber-400/30 animate-pulse" />
-              <div className="absolute -top-2 -right-2 w-6 h-6 bg-amber-400/20 rounded-full flex items-center justify-center animate-ping">
-                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-              </div>
-              <div className="absolute -bottom-1 -left-1 w-4 h-4 bg-emerald-500/20 rounded-full animate-bounce" />
+          <div className="bg-[#101c15] rounded-3xl p-8 border border-amber-500/25 text-center flex flex-col items-center justify-center relative overflow-hidden shadow-xl">
+            <div className="absolute inset-0 bg-gradient-to-b from-amber-500/8 via-transparent to-transparent pointer-events-none" />
+            <div className="relative w-16 h-16 bg-gradient-to-tr from-amber-950/80 to-amber-900/30 rounded-2xl flex items-center justify-center mb-4 border border-amber-500/35 shadow-lg">
+              <Bookmark className="w-8 h-8 text-amber-400 fill-amber-400/20" />
             </div>
             <h4 className="text-sm font-black text-white mb-1">
               {lang === 'bn' ? 'সংরক্ষিত রিল নেই' : 'No Saved Reels'}
@@ -836,7 +874,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               <button
                 type="button"
                 onClick={onNavigateToHome}
-                className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-black text-xs font-black inline-flex items-center gap-2 cursor-pointer shadow-lg active:scale-95 transition"
+                className="min-h-[44px] px-5 py-2.5 rounded-2xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-black text-xs font-black inline-flex items-center gap-2 cursor-pointer shadow-lg active:scale-95 transition"
               >
                 <Sparkles className="w-4 h-4" />
                 <span>{lang === 'bn' ? 'হোম ফিড থেকে রিল দেখুন' : 'Explore Reels'}</span>
@@ -876,11 +914,20 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     <Bookmark className="w-3.5 h-3.5 fill-current" />
                   </button>
                 )}
-                <div className="absolute bottom-2 left-2 right-2 z-10 pointer-events-none">
-                  <p className="text-xs font-bold text-white truncate drop-shadow-sm">
+                <div className="absolute bottom-2 left-2 right-2 z-10">
+                  <p className="text-xs font-bold text-white truncate drop-shadow-sm pointer-events-none">
                     {reel.title}
                   </p>
-                  <p className="text-[10px] text-amber-300 truncate">{reel.creatorName}</p>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenUserProfile?.(reel.userId);
+                    }}
+                    className="text-[10px] text-amber-300 hover:text-emerald-300 hover:underline truncate block max-w-full text-left cursor-pointer"
+                  >
+                    {reel.creatorName}
+                  </button>
                 </div>
               </div>
             ))}

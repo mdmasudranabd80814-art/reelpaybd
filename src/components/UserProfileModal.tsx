@@ -38,7 +38,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const isSelf = currentUser.id === user.id;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
       <div className="w-full max-w-md bg-[#0a120e] border border-emerald-900/60 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
         {/* Top Header */}
         <div className="flex justify-between items-center p-4 border-b border-emerald-950/60">

@@ -12,6 +12,8 @@ interface CommentsModalProps {
   onAddComment: (reelId: string, text: string) => void;
   onOpenProfile?: (userId: string) => void;
   isCommentsEnabled?: boolean;
+  likedCommentIds?: string[];
+  onToggleCommentLike?: (reelId: string, commentId: string, willLike: boolean) => void;
 }
 
 export const CommentsModal: React.FC<CommentsModalProps> = ({
@@ -21,11 +23,13 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
   onAddComment,
   onOpenProfile,
   isCommentsEnabled = true,
+  likedCommentIds,
+  onToggleCommentLike,
 }) => {
   const [inputText, setInputText] = useState('');
-  const [likedComments, setLikedComments] = useState<Record<string, boolean>>({});
   const [reelComments, setReelComments] = useState<Comment[]>([]);
   const { onSnapshot } = useFirebase();
+  const activeLikedCommentIds = likedCommentIds ?? currentUser.likedCommentIds ?? [];
 
   useEffect(() => {
     const unsub = onSnapshot(`reels/${reel.id}/comments`, (data) => {
@@ -43,7 +47,10 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
   };
 
   const toggleCommentLike = (id: string) => {
-    setLikedComments((prev) => ({ ...prev, [id]: !prev[id] }));
+    const willLike = !activeLikedCommentIds.includes(id);
+    if (onToggleCommentLike) {
+      onToggleCommentLike(reel.id, id, willLike);
+    }
   };
 
   const formatTimeAgo = (dateStr: string) => {
@@ -82,8 +89,8 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
             </div>
           ) : (
             reelComments.map((comment) => {
-              const isLiked = likedComments[comment.id];
-              const likes = isLiked ? (comment.likes || 0) + 1 : (comment.likes || 0);
+              const isLiked = activeLikedCommentIds.includes(comment.id);
+              const likes = Math.max(0, comment.likes || 0);
               return (
                 <div key={comment.id} className="flex gap-3 text-xs">
                   <div 

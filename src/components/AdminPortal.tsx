@@ -449,6 +449,7 @@ export const AdminPortal: React.FC = () => {
     try {
       await Promise.all([
         updateDocument('users', req.userId, { points: increment(req.pointsDeducted) }),
+        updateDocument('public_profiles', req.userId, { points: increment(req.pointsDeducted) }).catch(() => {}),
         updateDocument('withdrawals', id, { status: 'rejected' }),
       ]);
       sendNotification(
@@ -471,6 +472,7 @@ export const AdminPortal: React.FC = () => {
     try {
       await Promise.all([
         updateDocument('users', req.userId, { points: increment(req.pointsToAdd) }),
+        updateDocument('public_profiles', req.userId, { points: increment(req.pointsToAdd) }).catch(() => {}),
         updateDocument('deposits', id, { status: 'approved' }),
       ]);
       sendNotification(
@@ -563,22 +565,51 @@ export const AdminPortal: React.FC = () => {
         ? `🎉 +${toBengaliNumber(effectiveDelta)} পয়েন্ট যোগ করা হয়েছে!`
         : `➖ ${toBengaliNumber(Math.abs(effectiveDelta))} পয়েন্ট কমানো হয়েছে!`
     );
-    await updateDocument('users', userId, { points: increment(effectiveDelta) }).catch((err) =>
-      console.warn('Bonus sync warning:', err)
-    );
+    await Promise.all([
+      updateDocument('users', userId, { points: increment(effectiveDelta) }).catch((err) =>
+        console.warn('Bonus sync warning:', err)
+      ),
+      updateDocument('public_profiles', userId, { points: increment(effectiveDelta) }).catch(() => {}),
+    ]);
   };
 
   const handleUpdateUser = async (updatedUser: User) => {
     setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+    const ownedReels = reels.filter((r) => r.userId === updatedUser.id);
+    if (ownedReels.length > 0) {
+      setReels((prev) =>
+        prev.map((r) =>
+          r.userId === updatedUser.id
+            ? {
+                ...r,
+                creatorName: updatedUser.name,
+                creatorAvatar: updatedUser.avatar,
+                isVerified: Boolean(updatedUser.isVerified),
+              }
+            : r
+        )
+      );
+    }
     await Promise.all([
       updateDocument('users', updatedUser.id, updatedUser).catch(() => {}),
       updateDocument('public_profiles', updatedUser.id, {
         name: updatedUser.name,
         avatar: updatedUser.avatar,
         isVerified: updatedUser.isVerified,
+        role: updatedUser.role || 'user',
+        points: updatedUser.points || 0,
         followersCount: updatedUser.followersCount || 0,
         followingCount: updatedUser.followingCount || 0,
+        referralsCount: updatedUser.referralsCount || 0,
+        referralEarnedPoints: updatedUser.referralEarnedPoints || 0,
       }).catch(() => {}),
+      ...ownedReels.map((r) =>
+        updateDocument('reels', r.id, {
+          creatorName: updatedUser.name,
+          creatorAvatar: updatedUser.avatar,
+          isVerified: Boolean(updatedUser.isVerified),
+        }).catch(() => {})
+      ),
     ]);
     showToast('✅ ইউজার প্রোফাইল আপডেট করা হয়েছে!');
   };
@@ -1123,6 +1154,7 @@ export const AdminPortal: React.FC = () => {
           onUpdateReel={handleUpdateReel}
           lang="bn"
           isMuted={false}
+          users={users}
         />
       )}
 

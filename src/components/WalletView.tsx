@@ -1,13 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  Wallet,
   ShieldCheck,
   Clock,
   CheckCircle2,
   XCircle,
   ArrowUpRight,
   AlertCircle,
-  Coins,
   CreditCard,
   Landmark,
   Smartphone,
@@ -16,6 +14,7 @@ import {
 import {
   User,
   WithdrawalRequest,
+  DepositRequest,
   PaymentMethodConfig,
   PaymentMethodCategory,
   DEFAULT_PAYMENT_METHODS,
@@ -29,6 +28,7 @@ interface WalletViewProps {
   user: User;
   pointRate: number;
   withdrawals: WithdrawalRequest[];
+  depositRequests?: DepositRequest[];
   onRequestWithdrawal: (req: Omit<WithdrawalRequest, 'id' | 'createdAt' | 'status'>) => void;
   onDepositClick: () => void;
   isMuted: boolean;
@@ -37,12 +37,14 @@ interface WalletViewProps {
   isWithdrawalsEnabled?: boolean;
   isDepositsEnabled?: boolean;
   paymentMethods?: PaymentMethodConfig[];
+  lang?: 'bn' | 'en';
 }
 
 export const WalletView: React.FC<WalletViewProps> = ({
   user,
   pointRate,
   withdrawals,
+  depositRequests = [],
   onRequestWithdrawal,
   onDepositClick,
   isMuted,
@@ -51,7 +53,11 @@ export const WalletView: React.FC<WalletViewProps> = ({
   isWithdrawalsEnabled = true,
   isDepositsEnabled = true,
   paymentMethods,
+  lang = 'bn',
 }) => {
+  const withdrawFormRef = useRef<HTMLDivElement>(null);
+  const [historyTab, setHistoryTab] = useState<'withdrawals' | 'deposits'>('withdrawals');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const activeWithdrawMethods = useMemo(() => {
     const base = paymentMethods && paymentMethods.length > 0 ? paymentMethods : DEFAULT_PAYMENT_METHODS;
     return base.filter((m) => m.isEnabled && m.supportsWithdrawal);
@@ -147,20 +153,29 @@ export const WalletView: React.FC<WalletViewProps> = ({
       return;
     }
 
+    if (!Number.isFinite(amountBDT) || !Number.isInteger(amountBDT) || amountBDT <= 0) {
+      setErrorMsg('অনুগ্রহ করে সঠিক পূর্ণ সংখ্যার টাকার পরিমাণ লিখুন।');
+      return;
+    }
+
     if (amountBDT < minWithdrawal) {
-      setErrorMsg(`সর্বনিম্ন উত্তোলন পরিমাণ ৳${toBengaliNumber(minWithdrawal)} টাকা`);
+      setErrorMsg(`সর্বনিম্ন উত্তোলন পরিমাণ ৳${toBengaliNumber(minWithdrawal, lang)} টাকা`);
       return;
     }
 
     if (maxWithdrawal > 0 && amountBDT > maxWithdrawal) {
-      setErrorMsg(`সর্বোচ্চ উত্তোলন সীমা ৳${toBengaliNumber(maxWithdrawal)} টাকা`);
+      setErrorMsg(`সর্বোচ্চ উত্তোলন সীমা ৳${toBengaliNumber(maxWithdrawal, lang)} টাকা`);
       return;
     }
 
     if (amountBDT > availableBDT) {
-      setErrorMsg(`আপনার ব্যালেন্সে পর্যাপ্ত পয়েন্ট নেই! আপনার আছে ৳${toBengaliNumber(availableBDT)}`);
+      setErrorMsg(`আপনার ব্যালেন্সে পর্যাপ্ত পয়েন্ট নেই! আপনার আছে ৳${toBengaliNumber(availableBDT, lang)}`);
       return;
     }
+
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    setTimeout(() => setIsSubmitting(false), 1200);
 
     if (!isMuted) playSuccessChime();
 
@@ -191,12 +206,25 @@ export const WalletView: React.FC<WalletViewProps> = ({
     });
 
     setSuccessMsg(
-      `🎉 ${selectedMethod.nameBn}-এ ৳${toBengaliNumber(amountBDT)} উত্তোলনের আবেদন সফলভাবে গৃহীত হয়েছে!`
+      `🎉 ${selectedMethod.nameBn}-এ ৳${toBengaliNumber(amountBDT, lang)} উত্তোলনের আবেদন সফলভাবে গৃহীত হয়েছে!`
     );
   };
 
-  const userWithdrawals = withdrawals.filter((w) => w.userId === user.id || w.userPhone === user.phone);
+  const userWithdrawals = withdrawals.filter(
+    (w) => w.userId === user.id || (Boolean(user.phone) && w.userPhone === user.phone)
+  );
+  const userDeposits = depositRequests.filter(
+    (d) => d.userId === user.id || (Boolean(user.phone) && d.userPhone === user.phone)
+  );
   const currentLevel = getUserLevel(user.reelsWatchedCount);
+  const effectiveMaxSelectable =
+    maxWithdrawal > 0 ? Math.min(availableBDT, maxWithdrawal) : availableBDT;
+  const isAmountValid =
+    Number.isFinite(amountBDT) &&
+    Number.isInteger(amountBDT) &&
+    amountBDT >= minWithdrawal &&
+    (maxWithdrawal <= 0 || amountBDT <= maxWithdrawal) &&
+    amountBDT <= availableBDT;
 
   const hasCategories =
     new Set(activeWithdrawMethods.map((m) => m.category)).size > 1;
@@ -213,31 +241,44 @@ export const WalletView: React.FC<WalletViewProps> = ({
       <BalanceCard
         points={user.points}
         pointRate={pointRate}
-        onWithdrawClick={() => {}}
+        onWithdrawClick={() => withdrawFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
         onDepositClick={onDepositClick}
-        lang="bn"
+        lang={lang}
         multiplier={currentLevel.multiplier}
+        isDepositsEnabled={isDepositsEnabled}
       />
 
       <div className="rounded-2xl bg-gradient-to-br from-[#122419] to-[#0c1811] p-4 border border-emerald-900/60 shadow-xl">
         <div className="grid grid-cols-2 gap-2 text-xs">
           <div>
-            <span className="text-neutral-400">মোট উত্তোলন:</span>
-            <p className="font-bold text-white mt-0.5">{formatTaka(user.totalWithdrawn)}</p>
+            <span className="text-neutral-400">{lang === 'bn' ? 'মোট উত্তোলন:' : 'Total Withdrawn:'}</span>
+            <p className="font-bold text-white mt-0.5 tabular-nums">{formatTaka(user.totalWithdrawn, lang)}</p>
           </div>
           <div>
-            <span className="text-neutral-400">উত্তোলনযোগ্য ব্যালেন্স:</span>
-            <p className="font-bold text-emerald-400 mt-0.5">{formatTaka(availableBDT)}</p>
+            <span className="text-neutral-400">{lang === 'bn' ? 'উত্তোলনযোগ্য ব্যালেন্স:' : 'Available Balance:'}</span>
+            <p className="font-bold text-emerald-400 mt-0.5 tabular-nums">{formatTaka(availableBDT, lang)}</p>
           </div>
         </div>
       </div>
 
       {/* Cashout / Withdrawal Form Card */}
-      <div className="rounded-2xl bg-[#141f19] border border-emerald-950/80 p-4 shadow-lg text-white">
-        <h3 className="text-base font-bold flex items-center gap-2 mb-3">
-          <ArrowUpRight className="w-4 h-4 text-emerald-400" />
-          <span>টাকা উত্তোলন (Withdraw)</span>
-        </h3>
+      <div ref={withdrawFormRef} className="rounded-2xl bg-[#141f19] border border-emerald-950/80 p-4 shadow-lg text-white">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <h3 className="text-base font-bold flex items-center gap-2">
+            <ArrowUpRight className="w-4 h-4 text-emerald-400" />
+            <span>টাকা উত্তোলন (Withdraw)</span>
+          </h3>
+          {isDepositsEnabled && (
+            <button
+              type="button"
+              onClick={onDepositClick}
+              className="px-3 py-1.5 rounded-xl bg-[#ff2d55] hover:bg-[#e0264b] text-white text-xs font-extrabold shadow-md transition active:scale-95 flex items-center gap-1 cursor-pointer shrink-0"
+            >
+              <span>💎</span>
+              <span>ডিপোজিট করুন</span>
+            </button>
+          )}
+        </div>
 
         {!isWithdrawalsEnabled ? (
           <div className="p-4 rounded-2xl bg-rose-950/40 border border-rose-500/40 text-center space-y-2">
@@ -496,72 +537,78 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     টাকার পরিমাণ (সর্বনিম্ন ৳{toBengaliNumber(minWithdrawal)}
                     {maxWithdrawal > 0 ? ` — সর্বোচ্চ ৳${toBengaliNumber(maxWithdrawal)}` : ''}):
                   </label>
-                  <span className="text-[11px] text-emerald-400">
-                    পয়েন্ট খরচ: {toBengaliNumber(pointsRequired)}
+                  <span className="text-[11px] text-emerald-400 tabular-nums">
+                    পয়েন্ট খরচ: {toBengaliNumber(Number.isFinite(pointsRequired) ? pointsRequired : 0, lang)}
                   </span>
                 </div>
                 <input
                   type="number"
                   min={minWithdrawal}
                   max={maxWithdrawal > 0 ? maxWithdrawal : undefined}
-                  step="10"
-                  value={amountBDT}
-                  onChange={(e) => setAmountBDT(Number(e.target.value))}
+                  step="1"
+                  value={Number.isFinite(amountBDT) ? amountBDT : ''}
+                  onChange={(e) => {
+                    const val = e.target.value === '' ? 0 : Math.floor(Number(e.target.value));
+                    setAmountBDT(Number.isFinite(val) ? val : 0);
+                    setErrorMsg('');
+                  }}
                   placeholder={String(minWithdrawal)}
-                  className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 transition font-bold"
+                  className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 transition font-bold tabular-nums"
                   required
                 />
 
                 {/* Quick chips */}
-                <div className="flex gap-2 mt-2">
+                <div className="flex flex-wrap gap-2 mt-2">
                   {[minWithdrawal, 200, 500, 1000]
                     .filter((v, idx, arr) => arr.indexOf(v) === idx)
+                    .filter((v) => maxWithdrawal <= 0 || v <= maxWithdrawal)
                     .map((amt) => (
                       <button
                         type="button"
                         key={amt}
                         onClick={() => handleQuickAmount(amt)}
-                        className={`flex-1 py-1 rounded-lg text-xs font-bold border transition ${
+                        className={`flex-1 min-w-[60px] min-h-[38px] py-1.5 rounded-lg text-xs font-bold border transition cursor-pointer tabular-nums ${
                           amountBDT === amt
                             ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50'
                             : 'bg-[#1b2b23] text-neutral-400 border-neutral-800 hover:text-white'
                         }`}
                       >
-                        ৳{toBengaliNumber(amt)}
+                        ৳{toBengaliNumber(amt, lang)}
                       </button>
                     ))}
+                  {effectiveMaxSelectable >= minWithdrawal && (
+                    <button
+                      type="button"
+                      onClick={() => handleQuickAmount(effectiveMaxSelectable)}
+                      className={`min-w-[56px] min-h-[38px] px-2.5 py-1.5 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                        amountBDT === effectiveMaxSelectable
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50'
+                          : 'bg-[#1b2b23] text-emerald-400 border-emerald-900/60 hover:text-emerald-300'
+                      }`}
+                    >
+                      {lang === 'bn' ? 'সর্বোচ্চ' : 'Max'}
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {/* Action Buttons: Withdrawal (Left) & Deposit (Right) */}
-              <div className="grid grid-cols-2 gap-2.5">
-                <button
-                  type="submit"
-                  disabled={amountBDT > availableBDT || amountBDT < minWithdrawal}
-                  className={`py-3 px-2 rounded-xl font-bold text-xs sm:text-sm transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer shadow-lg ${
-                    amountBDT > availableBDT || amountBDT < minWithdrawal
-                      ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
-                      : 'bg-[#00c853] hover:bg-[#00e676] active:scale-98 text-black shadow-emerald-500/25'
-                  }`}
-                >
-                  <ArrowUpRight className="w-4 h-4 shrink-0" />
-                  <span>উত্তোলন রিকোয়েস্ট</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={onDepositClick}
-                  disabled={!isDepositsEnabled}
-                  className={`py-3 px-2 rounded-xl font-bold text-xs sm:text-sm transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer shadow-lg ${
-                    isDepositsEnabled
-                      ? 'bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-black active:scale-98'
-                      : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
-                  }`}
-                >
-                  <Coins className="w-4 h-4 shrink-0" />
-                  <span>{isDepositsEnabled ? 'ডিপোজিট করুন' : 'ডিপোজিট বন্ধ'}</span>
-                </button>
-              </div>
+              {/* Submit Withdrawal Button */}
+              <button
+                type="submit"
+                disabled={!isAmountValid || isSubmitting}
+                className={`w-full min-h-[44px] py-3 px-4 rounded-xl font-bold text-xs sm:text-sm transition-all duration-150 flex items-center justify-center gap-1.5 shadow-lg ${
+                  !isAmountValid || isSubmitting
+                    ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
+                    : 'bg-[#00c853] hover:bg-[#00e676] active:scale-[0.98] text-black shadow-emerald-500/25 cursor-pointer'
+                }`}
+              >
+                <ArrowUpRight className="w-4 h-4 shrink-0" />
+                <span>
+                  {isSubmitting
+                    ? (lang === 'bn' ? 'প্রসেস হচ্ছে...' : 'Processing...')
+                    : (lang === 'bn' ? 'উত্তোলন রিকোয়েস্ট পাঠান' : 'Submit Withdrawal')}
+                </span>
+              </button>
             </form>
           </>
         )}
@@ -572,63 +619,157 @@ export const WalletView: React.FC<WalletViewProps> = ({
         </div>
       </div>
 
-      {/* Withdrawal History Card */}
+      {/* Withdrawal & Deposit History Card */}
       <div className="rounded-2xl bg-[#141f19] border border-emerald-950/80 p-4 shadow-lg text-white">
-        <h3 className="text-base font-bold flex items-center justify-between mb-3">
-          <span className="flex items-center gap-2">
-            <Clock className="w-4 h-4 text-emerald-400" />
-            <span>উত্তোলন হিস্ট্রি ({toBengaliNumber(userWithdrawals.length)})</span>
-          </span>
-        </h3>
+        <div className="grid grid-cols-2 gap-2 mb-3 bg-[#0d1611] p-1 rounded-xl border border-emerald-950/70">
+          <button
+            type="button"
+            onClick={() => setHistoryTab('withdrawals')}
+            className={`py-2 px-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+              historyTab === 'withdrawals'
+                ? 'bg-[#00c853] text-black shadow'
+                : 'text-neutral-300 hover:text-white'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>উত্তোলন ({toBengaliNumber(userWithdrawals.length)})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setHistoryTab('deposits')}
+            className={`py-2 px-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+              historyTab === 'deposits'
+                ? 'bg-[#ff2d55] text-white shadow'
+                : 'text-neutral-300 hover:text-white'
+            }`}
+          >
+            <span>💎</span>
+            <span>ডিপোজিট ({toBengaliNumber(userDeposits.length)})</span>
+          </button>
+        </div>
 
-        {userWithdrawals.length === 0 ? (
-          <div className="text-center py-6 text-neutral-400 text-xs">
-            এখনো কোনো উত্তোলনের আবেদন করা হয়নি।
+        {historyTab === 'withdrawals' ? (
+          userWithdrawals.length === 0 ? (
+            <div className="text-center py-6 text-neutral-400 text-xs">
+              এখনো কোনো উত্তোলনের আবেদন করা হয়নি।
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {userWithdrawals.map((w) => (
+                <div
+                  key={w.id}
+                  className="p-3 rounded-xl bg-[#0e1712] border border-emerald-950/80 flex items-center justify-between gap-3 text-xs"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-bold text-white">{w.method}</span>
+                      <span className="text-[11px] text-neutral-400 font-mono">({w.accountNumber})</span>
+                    </div>
+                    {w.accountDetails && (
+                      <div className="text-[10px] text-neutral-400 truncate max-w-[210px] mt-0.5">
+                        {w.accountDetails}
+                      </div>
+                    )}
+                    <div className="text-[11px] text-neutral-400 mt-0.5">
+                      {new Date(w.createdAt).toLocaleDateString('bn-BD')}
+                      {w.transactionId && (
+                        <span className="ml-1.5 text-emerald-400 font-mono">Trx: {w.transactionId}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="text-right shrink-0">
+                    <span className="font-extrabold text-sm text-white block">
+                      {formatTaka(w.amountBDT)}
+                    </span>
+                    <span
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold mt-1 ${
+                        w.status === 'approved'
+                          ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                          : w.status === 'rejected'
+                          ? 'bg-rose-950 text-rose-400 border border-rose-800'
+                          : 'bg-amber-950 text-amber-400 border border-amber-800'
+                      }`}
+                    >
+                      {w.status === 'approved' ? (
+                        <>
+                          <CheckCircle2 className="w-3 h-3" />
+                          <span>অনুমোদিত</span>
+                        </>
+                      ) : w.status === 'rejected' ? (
+                        <>
+                          <XCircle className="w-3 h-3" />
+                          <span>বাতিল</span>
+                        </>
+                      ) : (
+                        <>
+                          <Clock className="w-3 h-3" />
+                          <span>পেন্ডিং</span>
+                        </>
+                      )}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : userDeposits.length === 0 ? (
+          <div className="text-center py-6 text-neutral-400 text-xs space-y-2">
+            <p>এখনো কোনো ডিপোজিট রিকোয়েস্ট পাঠানো হয়নি।</p>
+            {isDepositsEnabled && (
+              <button
+                type="button"
+                onClick={onDepositClick}
+                className="px-4 py-2 rounded-xl bg-[#ff2d55] hover:bg-[#e0264b] text-white text-xs font-bold cursor-pointer inline-flex items-center gap-1"
+              >
+                <span>💎 পয়েন্ট ডিপোজিট করুন</span>
+              </button>
+            )}
           </div>
         ) : (
           <div className="space-y-2.5">
-            {userWithdrawals.map((w) => (
+            {userDeposits.map((d) => (
               <div
-                key={w.id}
+                key={d.id}
                 className="p-3 rounded-xl bg-[#0e1712] border border-emerald-950/80 flex items-center justify-between gap-3 text-xs"
               >
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="font-bold text-white">{w.method}</span>
-                    <span className="text-[11px] text-neutral-400 font-mono">({w.accountNumber})</span>
+                    <span className="font-bold text-white">{d.method}</span>
+                    {d.senderNumber && (
+                      <span className="text-[11px] text-neutral-400 font-mono">({d.senderNumber})</span>
+                    )}
                   </div>
-                  {w.accountDetails && (
-                    <div className="text-[10px] text-neutral-400 truncate max-w-[210px] mt-0.5">
-                      {w.accountDetails}
-                    </div>
-                  )}
+                  <div className="text-[11px] text-emerald-400 font-semibold mt-0.5">
+                    +{toBengaliNumber(d.pointsToAdd)} পয়েন্ট
+                  </div>
                   <div className="text-[11px] text-neutral-400 mt-0.5">
-                    {new Date(w.createdAt).toLocaleDateString('bn-BD')}
-                    {w.transactionId && (
-                      <span className="ml-1.5 text-emerald-400 font-mono">Trx: {w.transactionId}</span>
+                    {new Date(d.createdAt).toLocaleDateString('bn-BD')}
+                    {d.transactionId && (
+                      <span className="ml-1.5 text-amber-300 font-mono">Trx: {d.transactionId}</span>
                     )}
                   </div>
                 </div>
 
                 <div className="text-right shrink-0">
                   <span className="font-extrabold text-sm text-white block">
-                    {formatTaka(w.amountBDT)}
+                    {formatTaka(d.amountBDT)}
                   </span>
                   <span
                     className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold mt-1 ${
-                      w.status === 'approved'
+                      d.status === 'approved'
                         ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                        : w.status === 'rejected'
+                        : d.status === 'rejected'
                         ? 'bg-rose-950 text-rose-400 border border-rose-800'
                         : 'bg-amber-950 text-amber-400 border border-amber-800'
                     }`}
                   >
-                    {w.status === 'approved' ? (
+                    {d.status === 'approved' ? (
                       <>
                         <CheckCircle2 className="w-3 h-3" />
                         <span>অনুমোদিত</span>
                       </>
-                    ) : w.status === 'rejected' ? (
+                    ) : d.status === 'rejected' ? (
                       <>
                         <XCircle className="w-3 h-3" />
                         <span>বাতিল</span>

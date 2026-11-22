@@ -52,7 +52,9 @@ service cloud.firestore {
                'dailyClaimedDate', 'lastPage', 'totalSessions', 'followersCount',
                'followingCount', 'followers', 'following', 'completedTaskIds',
                'dailyReelClaimDate', 'dailyReelClaimsCount', 'dailyReelPointsEarned',
-               'loginOfferClaimed', 'loginOfferCampaignId'
+               'loginOfferClaimed', 'loginOfferCampaignId', 'dailySpinClaimDate',
+               'dailySpinClaimsCount', 'dailyScratchClaimDate', 'referralsCount', 'referralEarnedPoints',
+               'likedReelIds', 'likedCommentIds'
              ]) &&
              data.id is string && data.id.size() <= 128 &&
              data.name is string && data.name.size() <= 100 &&
@@ -73,7 +75,14 @@ service cloud.firestore {
              (!('dailyReelClaimsCount' in data) || (data.dailyReelClaimsCount is number && data.dailyReelClaimsCount >= 0)) &&
              (!('dailyReelPointsEarned' in data) || (data.dailyReelPointsEarned is number && data.dailyReelPointsEarned >= 0)) &&
              (!('loginOfferClaimed' in data) || data.loginOfferClaimed is bool) &&
-             (!('loginOfferCampaignId' in data) || (data.loginOfferCampaignId is string && data.loginOfferCampaignId.size() <= 100));
+             (!('loginOfferCampaignId' in data) || (data.loginOfferCampaignId is string && data.loginOfferCampaignId.size() <= 100)) &&
+             (!('dailySpinClaimDate' in data) || (data.dailySpinClaimDate is string && data.dailySpinClaimDate.size() <= 40)) &&
+             (!('dailySpinClaimsCount' in data) || (data.dailySpinClaimsCount is number && data.dailySpinClaimsCount >= 0)) &&
+             (!('dailyScratchClaimDate' in data) || (data.dailyScratchClaimDate is string && data.dailyScratchClaimDate.size() <= 40)) &&
+             (!('referralsCount' in data) || (data.referralsCount is number && data.referralsCount >= 0)) &&
+             (!('referralEarnedPoints' in data) || (data.referralEarnedPoints is number && data.referralEarnedPoints >= 0)) &&
+             (!('likedReelIds' in data) || (data.likedReelIds is list && data.likedReelIds.size() <= 2000)) &&
+             (!('likedCommentIds' in data) || (data.likedCommentIds is list && data.likedCommentIds.size() <= 2000));
     }
 
     function isValidPublicProfile(data) {
@@ -81,7 +90,8 @@ service cloud.firestore {
              data.keys().hasOnly([
                'id', 'name', 'avatar', 'isVerified', 'referralCode',
                'followersCount', 'followingCount', 'followers', 'following',
-               'reelsWatchedCount', 'createdAt'
+               'reelsWatchedCount', 'points', 'role', 'referralsCount',
+               'referralEarnedPoints', 'createdAt'
              ]) &&
              data.id is string && data.id.size() <= 128 &&
              data.name is string && data.name.size() <= 100 &&
@@ -89,7 +99,11 @@ service cloud.firestore {
              (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 200000)) &&
              (!('referralCode' in data) || (data.referralCode is string && data.referralCode.size() <= 20)) &&
              (!('followers' in data) || (data.followers is list && data.followers.size() <= 1000)) &&
-             (!('following' in data) || (data.following is list && data.following.size() <= 1000));
+             (!('following' in data) || (data.following is list && data.following.size() <= 1000)) &&
+             (!('points' in data) || (data.points is number && data.points >= 0)) &&
+             (!('role' in data) || data.role in ['user', 'admin']) &&
+             (!('referralsCount' in data) || (data.referralsCount is number && data.referralsCount >= 0)) &&
+             (!('referralEarnedPoints' in data) || (data.referralEarnedPoints is number && data.referralEarnedPoints >= 0));
     }
 
     function isValidNotification(data) {
@@ -127,11 +141,12 @@ service cloud.firestore {
     function isValidComment(data) {
       return data.keys().hasAll(['reelId', 'userId', 'userName', 'text', 'createdAt']) &&
              data.keys().hasOnly(['id', 'reelId', 'userId', 'userName', 'userAvatar', 'text', 'createdAt', 'likes', 'timeAgo']) &&
-             data.userId == request.auth.uid &&
+             data.userId is string && data.userId.size() <= 128 &&
              data.reelId is string && data.reelId.size() <= 128 &&
              data.userName is string && data.userName.size() <= 100 &&
              data.text is string && data.text.size() <= 500 &&
-             data.createdAt is string && data.createdAt.size() <= 64;
+             data.createdAt is string && data.createdAt.size() <= 64 &&
+             (!('likes' in data) || (data.likes is number && data.likes >= 0));
     }
 
     function isValidWithdrawal(data) {
@@ -213,7 +228,15 @@ service cloud.firestore {
                      (isSignedIn() && isValidId(userId) && isValidUser(incoming()) &&
                       incoming().diff(existing()).affectedKeys().hasOnly(['points']) &&
                       incoming().points is number && incoming().points > existing().points &&
-                      incoming().points <= existing().points + 1000);
+                      incoming().points <= existing().points + 1000) ||
+                     (isSignedIn() && isValidId(userId) && isValidUser(incoming()) &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['points', 'referralsCount', 'referralEarnedPoints']) &&
+                      incoming().points is number && incoming().points > existing().points &&
+                      incoming().points <= existing().points + 1000 &&
+                      incoming().referralsCount is number &&
+                      (!('referralsCount' in existing()) || incoming().referralsCount <= existing().referralsCount + 1) &&
+                      incoming().referralEarnedPoints is number &&
+                      (!('referralEarnedPoints' in existing()) || incoming().referralEarnedPoints <= existing().referralEarnedPoints + 1000));
       allow delete: if isAdmin();
 
       match /notifications/{notificationId} {
@@ -233,7 +256,15 @@ service cloud.firestore {
                      (isOwner(userId) && isValidId(userId) && isValidPublicProfile(incoming()) &&
                       incoming().id == existing().id && incoming().createdAt == existing().createdAt) ||
                      (isSignedIn() && isValidId(userId) && isValidPublicProfile(incoming()) &&
-                      incoming().diff(existing()).affectedKeys().hasOnly(['followersCount', 'followers']));
+                      incoming().diff(existing()).affectedKeys().hasOnly(['followersCount', 'followers'])) ||
+                     (isSignedIn() && isValidId(userId) && isValidPublicProfile(incoming()) &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['points']) &&
+                      incoming().points is number &&
+                      (!('points' in existing()) || incoming().points <= existing().points + 10000)) ||
+                     (isSignedIn() && isValidId(userId) && isValidPublicProfile(incoming()) &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['points', 'referralsCount', 'referralEarnedPoints']) &&
+                      incoming().points is number &&
+                      (!('points' in existing()) || incoming().points <= existing().points + 1000));
       allow delete: if isAdmin();
     }
 
@@ -255,9 +286,15 @@ service cloud.firestore {
       match /comments/{commentId} {
         allow get: if (request.auth == null || isSignedIn()) && isValidId(commentId);
         allow list: if request.auth == null || isSignedIn() || isAdmin();
-        allow create: if isSignedIn() && isValidId(commentId) && isValidComment(incoming()) && incoming().reelId == reelId && exists(/databases/$(database)/documents/reels/$(reelId));
+        allow create: if isSignedIn() && isValidId(commentId) && isValidComment(incoming()) && incoming().userId == request.auth.uid && incoming().reelId == reelId && exists(/databases/$(database)/documents/reels/$(reelId));
         allow delete: if isAdmin() || (isSignedIn() && isValidId(commentId) && existing().userId == request.auth.uid);
-        allow update: if isAdmin();
+        allow update: if isAdmin() ||
+                         (isSignedIn() && isValidId(commentId) && isValidComment(incoming()) &&
+                          incoming().userId == existing().userId &&
+                          incoming().reelId == existing().reelId &&
+                          incoming().createdAt == existing().createdAt &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['likes']) &&
+                          incoming().likes is number && incoming().likes >= 0);
       }
     }
 
@@ -289,21 +326,25 @@ service cloud.firestore {
       allow create: if isSignedIn() &&
                        isValidId(liveId) &&
                        incoming().keys().hasAll(['id', 'hostId', 'hostName', 'title', 'mode', 'status', 'createdAt']) &&
-                       incoming().keys().hasOnly(['id', 'hostId', 'hostName', 'hostAvatar', 'title', 'mode', 'category', 'pinnedNotice', 'isMicMuted', 'isCameraOn', 'chatEnabled', 'allowSpeakerRequests', 'viewersCount', 'likesCount', 'giftsTotalPoints', 'adminGiftPoints', 'coHosts', 'status', 'cancelledByAdmin', 'cancelReason', 'createdAt', 'endedAt']) &&
+                       incoming().keys().hasOnly(['id', 'hostId', 'hostName', 'hostAvatar', 'title', 'mode', 'category', 'pinnedNotice', 'isMicMuted', 'isCameraOn', 'chatEnabled', 'allowSpeakerRequests', 'viewersCount', 'peakViewersCount', 'peakAt', 'likesCount', 'giftsTotalPoints', 'adminGiftPoints', 'coHosts', 'status', 'cancelledByAdmin', 'cancelReason', 'createdAt', 'endedAt']) &&
                        (incoming().hostId == request.auth.uid || isAdmin()) &&
                        incoming().mode in ['audio', 'video'] &&
                        incoming().status == 'active' &&
-                       incoming().title is string && incoming().title.size() <= 140;
+                       incoming().title is string && incoming().title.size() <= 140 &&
+                       (!('peakViewersCount' in incoming()) || (incoming().peakViewersCount is number && incoming().peakViewersCount >= 0)) &&
+                       (!('peakAt' in incoming()) || (incoming().peakAt is string && incoming().peakAt.size() <= 64));
       allow update: if isAdmin() ||
                        (isSignedIn() && isValidId(liveId) && existing().hostId == request.auth.uid &&
-                        incoming().keys().hasOnly(['id', 'hostId', 'hostName', 'hostAvatar', 'title', 'mode', 'category', 'pinnedNotice', 'isMicMuted', 'isCameraOn', 'chatEnabled', 'allowSpeakerRequests', 'viewersCount', 'likesCount', 'giftsTotalPoints', 'adminGiftPoints', 'coHosts', 'status', 'cancelledByAdmin', 'cancelReason', 'createdAt', 'endedAt']) &&
+                        incoming().keys().hasOnly(['id', 'hostId', 'hostName', 'hostAvatar', 'title', 'mode', 'category', 'pinnedNotice', 'isMicMuted', 'isCameraOn', 'chatEnabled', 'allowSpeakerRequests', 'viewersCount', 'peakViewersCount', 'peakAt', 'likesCount', 'giftsTotalPoints', 'adminGiftPoints', 'coHosts', 'status', 'cancelledByAdmin', 'cancelReason', 'createdAt', 'endedAt']) &&
                         incoming().hostId == existing().hostId &&
                         incoming().mode in ['audio', 'video'] &&
                         incoming().status in ['active', 'ended']) ||
                        (isSignedIn() && isValidId(liveId) &&
-                        incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'viewersCount', 'giftsTotalPoints', 'adminGiftPoints']) &&
+                        incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'viewersCount', 'peakViewersCount', 'peakAt', 'giftsTotalPoints', 'adminGiftPoints']) &&
                         (!('likesCount' in incoming()) || (incoming().likesCount is number && incoming().likesCount >= 0)) &&
                         (!('viewersCount' in incoming()) || (incoming().viewersCount is number && incoming().viewersCount >= 0)) &&
+                        (!('peakViewersCount' in incoming()) || (incoming().peakViewersCount is number && incoming().peakViewersCount >= 0 && (!('peakViewersCount' in existing()) || incoming().peakViewersCount >= existing().peakViewersCount))) &&
+                        (!('peakAt' in incoming()) || (incoming().peakAt is string && incoming().peakAt.size() <= 64)) &&
                         (!('giftsTotalPoints' in incoming()) || (incoming().giftsTotalPoints is number && incoming().giftsTotalPoints >= 0)) &&
                         (!('adminGiftPoints' in incoming()) || (incoming().adminGiftPoints is number && incoming().adminGiftPoints >= 0)));
       allow delete: if isAdmin() || (isSignedIn() && isValidId(liveId) && existing().hostId == request.auth.uid);

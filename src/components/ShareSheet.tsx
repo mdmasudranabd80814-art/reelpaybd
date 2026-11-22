@@ -12,9 +12,10 @@ interface ShareSheetProps {
   lang: 'bn' | 'en';
   onSendInChat?: (reel: Reel) => void;
   onDownloadReel?: (reel: Reel) => void;
+  onShareTracked?: (reelId: string) => void;
 }
 
-export const ShareSheet: React.FC<ShareSheetProps> = ({ isOpen, onClose, reel, liveStream, lang, onSendInChat, onDownloadReel }) => {
+export const ShareSheet: React.FC<ShareSheetProps> = ({ isOpen, onClose, reel, liveStream, lang, onSendInChat, onDownloadReel, onShareTracked }) => {
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadDone, setDownloadDone] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -55,6 +56,9 @@ export const ShareSheet: React.FC<ShareSheetProps> = ({ isOpen, onClose, reel, l
   const copyToClipboard = async () => {
     try {
       await navigator.clipboard.writeText(shareUrl);
+      if (!isLiveShare && reel && onShareTracked) {
+        onShareTracked(reel.id);
+      }
       setCopiedLink(true);
       setTimeout(() => {
         setCopiedLink(false);
@@ -73,6 +77,9 @@ export const ShareSheet: React.FC<ShareSheetProps> = ({ isOpen, onClose, reel, l
           text: shareText,
           url: shareUrl,
         });
+        if (!isLiveShare && reel && onShareTracked) {
+          onShareTracked(reel.id);
+        }
         onClose();
       } else {
         copyToClipboard();
@@ -106,6 +113,9 @@ export const ShareSheet: React.FC<ShareSheetProps> = ({ isOpen, onClose, reel, l
     }
 
     if (url) {
+      if (!isLiveShare && reel && onShareTracked) {
+        onShareTracked(reel.id);
+      }
       window.open(url, '_blank');
       onClose();
     }

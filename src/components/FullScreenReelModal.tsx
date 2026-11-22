@@ -25,10 +25,11 @@ import {
 } from 'lucide-react';
 import { Reel, LiveStream, EarningSettings } from '../types';
 import { toBengaliNumber } from '../utils/bengali';
-import { playCoinSound, playPopSound, playSuccessChime } from '../utils/audio';
+import { playCoinSound, playPopSound } from '../utils/audio';
 import { normalizeVideoUrl, extractYouTubeId, extractVimeoId } from '../utils/video';
 import { getVideoFromDB } from '../utils/videoStorage';
 import confetti from 'canvas-confetti';
+import { getCategoryMeta } from '../utils/categories';
 
 interface FullScreenReelModalProps {
   reels: Reel[];
@@ -64,6 +65,9 @@ interface FullScreenReelModalProps {
   isGiftsEnabled?: boolean;
   isCommentsEnabled?: boolean;
   isDirectChatEnabled?: boolean;
+  onVideoCompleted?: (reelId: string) => void;
+  currentUserId?: string;
+  onSelectCategory?: (category: Reel['category']) => void;
 }
 
 export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
@@ -100,6 +104,9 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   isGiftsEnabled = true,
   isCommentsEnabled = true,
   isDirectChatEnabled = true,
+  onVideoCompleted,
+  currentUserId,
+  onSelectCategory,
 }) => {
   const [viewMode, setViewMode] = useState<'reels' | 'live'>('reels');
   const [activeLiveIndex, setActiveLiveIndex] = useState(0);
@@ -107,6 +114,14 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
     const idx = reels.findIndex((r) => r.id === initialReelId);
     return idx !== -1 ? idx : 0;
   });
+
+  useEffect(() => {
+    const idx = reels.findIndex((r) => r.id === initialReelId);
+    if (idx !== -1) {
+      setCurrentIndex(idx);
+      setViewMode('reels');
+    }
+  }, [initialReelId]);
 
   const reel = reels[currentIndex] || reels[0];
   const [videoSrc, setVideoSrc] = useState<string>(() => reel?.videoUrl || '');
@@ -162,7 +177,8 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
     };
   }, [currentIndex, reel?.id, reel?.videoUrl]);
 
-  // Master & Reel Earning Eligibility controlled by Admin
+  // Master & Reel Earning Eligibility controlled by Admin (own reels never earn points)
+  const isOwnReel = Boolean(currentUserId && reel?.userId === currentUserId);
   const masterEarningOn = earningSettings ? earningSettings.isMasterEarningEnabled : true;
   const videoEarningOn = earningSettings ? earningSettings.isVideoWatchEarningEnabled : true;
   const scope = earningSettings?.videoEarningScope || 'all_reels';
@@ -172,7 +188,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
     ? Boolean(reel?.isEarningEnabled || reel?.isSpecialOffer)
     : (reel?.isEarningEnabled !== false);
 
-  const isEarningActive = masterEarningOn && videoEarningOn && isReelEligible;
+  const isEarningActive = masterEarningOn && videoEarningOn && isReelEligible && !isOwnReel;
 
   // Custom seconds controlled by admin (per reel or default app setting)
   const totalSeconds = (reel?.customWatchSeconds && reel.customWatchSeconds > 0)
@@ -184,11 +200,9 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   const [watchSeconds, setWatchSeconds] = useState(0);
   const [hasClaimedCurrent, setHasClaimedCurrent] = useState(false);
   const [modalNotice, setModalNotice] = useState<string | null>(null);
-  const [isFollowing, setIsFollowing] = useState(false);
   const isFollowingCurrent = followingIds
     ? Boolean(reel && followingIds.includes(reel.userId))
-    : (isFollowingCreator || isFollowing);
-  const [showGiftModal, setShowGiftModal] = useState(false);
+    : isFollowingCreator;
   const [floatingHearts, setFloatingHearts] = useState<{ id: number; x: number }[]>([]);
   const [isSpringing, setIsSpringing] = useState(false);
   const [showIncrement, setShowIncrement] = useState(false);
@@ -196,6 +210,8 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   const [centerHeartAnim, setCenterHeartAnim] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const lastTapRef = useRef<number>(0);
+  const onVideoCompletedRef = useRef(onVideoCompleted);
+  onVideoCompletedRef.current = onVideoCompleted;
 
   const showModalNotice = (msg: string) => {
     setModalNotice(msg);
@@ -234,7 +250,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
     setWatchSeconds(0);
     setHasClaimedCurrent(reel ? watchedReelIds.includes(reel.id) : false);
 
-    if (videoRef.current) {
+    if (videoRef.current && viewMode === 'reels') {
       videoRef.current.currentTime = 0;
       videoRef.current.play().catch(() => {});
     }
@@ -256,6 +272,38 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
     return () => clearInterval(timer);
   }, [currentIndex, reel?.id, totalSeconds, isEarningActive, isDailyLimitReached]);
 
+  // Pause background reel video when viewing Live tab, resume when back on Reels
+  useEffect(() => {
+    if (!videoRef.current) return;
+    if (viewMode === 'live') {
+      videoRef.current.pause();
+    } else {
+      videoRef.current.play().catch(() => {});
+    }
+  }, [viewMode]);
+
+  // Fallback full-watch view tracking for non-HTML5-video reels (YouTube, Vimeo, or image fallback)
+  const resolvedYtId = extractYouTubeId(videoSrc);
+  const resolvedVimeoId = extractVimeoId(videoSrc);
+  const isNativeVideoElement = !resolvedYtId && !resolvedVimeoId && !videoFailed && Boolean(videoSrc);
+
+  useEffect(() => {
+    if (viewMode !== 'reels' || !reel?.id || isNativeVideoElement) {
+      return;
+    }
+    let elapsed = 0;
+    const targetDuration = Math.max(1, totalSeconds);
+    const viewTimer = setInterval(() => {
+      elapsed += 1;
+      if (elapsed >= targetDuration) {
+        elapsed = 0;
+        onVideoCompletedRef.current?.(reel.id);
+      }
+    }, 1000);
+
+    return () => clearInterval(viewTimer);
+  }, [viewMode, reel?.id, isNativeVideoElement, totalSeconds]);
+
   // Sync mute state
   useEffect(() => {
     if (videoRef.current) {
@@ -269,8 +317,17 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
     }
   }, [watchSeconds, isReelAlreadyClaimed, isEarningActive, isDailyLimitReached, totalSeconds]);
 
-  // Handle claiming points (respects watch time & admin daily limit)
+  // Handle claiming points (respects watch time & admin daily limit; strictly blocks own reels)
   const handleClaimPoints = (fromTimer = false) => {
+    if (isOwnReel) {
+      showModalNotice(
+        lang === 'bn'
+          ? '📺 নিজের ভিডিও দেখে পয়েন্ট অর্জন করা যাবে না। অন্য ইউজারের ভিডিও দেখুন!'
+          : '📺 You cannot earn points from watching your own video.'
+      );
+      return;
+    }
+
     if (!isEarningActive) {
       showModalNotice(lang === 'bn' ? '📺 এই ভিডিওতে পয়েন্ট আর্নিং বন্ধ রয়েছে।' : '📺 Point earning is disabled on this video.');
       return;
@@ -374,12 +431,6 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
     onShare(reel);
   };
 
-  const handleSendGift = (giftName: string) => {
-    setShowGiftModal(false);
-    if (!isMuted) playSuccessChime();
-    showModalNotice(`🎉 আপনি ক্রিয়েটরকে "${giftName}" উপহার পাঠিয়েছেন! ধন্যবাদ।`);
-  };
-
   const goNext = () => {
     if (currentIndex < reels.length - 1) {
       setCurrentIndex((prev) => prev + 1);
@@ -393,7 +444,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   };
 
   const progressPercent = Math.min(100, (watchSeconds / totalSeconds) * 100);
-  const likesDisplay = isLiked ? reel.likesCount + 1 : reel.likesCount;
+  const likesDisplay = Math.max(0, reel.likesCount || 0);
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex justify-center items-center select-none overflow-hidden">
@@ -441,16 +492,31 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
               return (
                 <video
                   ref={videoRef}
-                  key={videoSrc}
+                  key={`${reel?.id || 'reel'}-${videoSrc}`}
                   src={videoSrc}
                   poster={reel.thumbnailUrl}
-                  autoPlay
+                  autoPlay={viewMode === 'reels'}
                   muted={isMuted}
-                  loop
                   playsInline
                   preload="auto"
                   onCanPlay={(e) => {
-                    e.currentTarget.play().catch(() => {});
+                    if (viewMode === 'reels') {
+                      e.currentTarget.play().catch(() => {});
+                    }
+                  }}
+                  onEnded={(e) => {
+                    if (
+                      viewMode === 'reels' &&
+                      reel?.id &&
+                      Number.isFinite(e.currentTarget.duration) &&
+                      e.currentTarget.duration > 0
+                    ) {
+                      onVideoCompletedRef.current?.(reel.id);
+                    }
+                    if (viewMode === 'reels') {
+                      e.currentTarget.currentTime = 0;
+                      e.currentTarget.play().catch(() => {});
+                    }
                   }}
                   onError={() => {
                     // DO NOT replace user's video with another video!
@@ -580,100 +646,133 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
         {/* Dynamic Mode Content: Live Streams vs Reels */}
         {viewMode === 'live' ? (
           /* FULL-SCREEN LIVE STREAM MODE */
-          <div className="relative z-10 flex-1 flex flex-col justify-between p-4 pt-2">
-            {/* Live Host Stage Header */}
-            <div className="flex items-center justify-between bg-black/60 backdrop-blur-md p-3 rounded-2xl border border-rose-500/30 shadow-lg">
+          activeLiveStreams.length === 0 ? (
+            <div className="relative z-10 flex-1 flex flex-col items-center justify-center p-6 text-center">
+              <div className="w-16 h-16 rounded-full bg-rose-600/20 border border-rose-500/40 flex items-center justify-center mb-4">
+                <Radio className="w-8 h-8 text-rose-400" />
+              </div>
+              <h3 className="text-base font-extrabold text-white mb-1.5">
+                {lang === 'bn' ? 'বর্তমানে কোনো লাইভ চলছে না' : 'No Live Streams Right Now'}
+              </h3>
+              <p className="text-xs text-neutral-400 max-w-xs mb-5">
+                {lang === 'bn'
+                  ? 'এই মুহূর্তে কোনো ক্রিয়েটর লাইভে নেই। আপনি রিলস দেখতে পারেন অথবা নিজেই লাইভ শুরু করতে পারেন।'
+                  : 'No creators are live right now. Watch Reels or start your own live stream.'}
+              </p>
               <div className="flex items-center gap-2.5">
-                <div className="relative">
-                  <img
-                    src={activeLiveStreams[activeLiveIndex]?.hostAvatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80"}
-                    alt="Live Host"
-                    className="w-10 h-10 rounded-full object-cover border-2 border-rose-500"
-                  />
-                  <span className="absolute -bottom-1 -right-1 bg-rose-600 text-[8px] font-black text-white px-1 rounded uppercase border border-black animate-pulse">LIVE</span>
-                </div>
-                <div>
-                  <h3 className="text-xs font-extrabold text-white flex items-center gap-1">
-                    <span>{activeLiveStreams[activeLiveIndex]?.hostName || (lang === 'bn' ? 'আরিয়ান লাইভ 🎤' : 'Aryan Live 🎤')}</span>
-                  </h3>
-                  <p className="text-[10px] text-rose-300 flex items-center gap-1 mt-0.5">
-                    <Users className="w-3 h-3 text-rose-400" />
-                    <span>{toBengaliNumber(activeLiveStreams[activeLiveIndex]?.viewersCount || 2450, lang)} {lang === 'bn' ? 'জন সরাসরি দেখছে' : 'watching live'}</span>
-                  </p>
-                </div>
-              </div>
-
-              {onOpenLiveSheet && (
                 <button
-                  onClick={onOpenLiveSheet}
-                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-md"
+                  onClick={() => setViewMode('reels')}
+                  className="px-4 py-2 rounded-xl bg-[#00c853] hover:bg-[#00e676] text-black text-xs font-extrabold transition cursor-pointer"
                 >
-                  <Radio className="w-3.5 h-3.5" />
-                  <span>{lang === 'bn' ? 'চ্যাট রুম' : 'Chat Room'}</span>
+                  {lang === 'bn' ? 'রিলসে ফিরে যান' : 'Back to Reels'}
                 </button>
-              )}
-            </div>
-
-            {/* Live Stage Visual */}
-            <div className="relative flex-1 my-3 rounded-3xl overflow-hidden bg-gradient-to-br from-rose-950/40 via-neutral-900 to-black border border-rose-900/40 flex flex-col justify-center items-center text-center p-6 shadow-2xl">
-              <img
-                src={activeLiveStreams[activeLiveIndex]?.hostAvatar || "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=700&auto=format&fit=crop&q=80"}
-                alt="Live Stream Visual"
-                className="absolute inset-0 w-full h-full object-cover opacity-35 blur-xs"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-black/60 pointer-events-none" />
-
-              <div className="relative z-10">
-                <div className="w-16 h-16 rounded-full bg-rose-600/30 border-2 border-rose-500/50 flex items-center justify-center mx-auto mb-3 animate-pulse shadow-lg">
-                  <Mic className="w-8 h-8 text-rose-400" />
-                </div>
-                <span className="bg-rose-600 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-widest shadow-md inline-block mb-2 animate-bounce">
-                  🔴 LIVE STREAM
-                </span>
-                <h2 className="text-base sm:text-lg font-extrabold text-white drop-shadow-md">
-                  {activeLiveStreams[activeLiveIndex]?.title || (lang === 'bn' ? 'সরাসরি লাইভ স্ট্রিম ও গান 🎤' : 'Live Music Stream')}
-                </h2>
-                <p className="text-xs text-neutral-300 mt-1 max-w-xs mx-auto">
-                  {lang === 'bn' ? 'লাইভে মেসেজ করুন এবং প্রিয় ক্রিয়েটরকে গিফট পাঠান!' : 'Chat live and send gifts to support the host!'}
-                </p>
-              </div>
-
-              {/* Action Floating Buttons */}
-              <div className="relative z-10 flex gap-3 mt-5">
-                <button
-                  onClick={handleLike}
-                  className="px-4 py-2 rounded-2xl bg-rose-600/90 hover:bg-rose-500 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-lg active:scale-95 cursor-pointer"
-                >
-                  <Heart className="w-4 h-4 fill-current" />
-                  <span>{toBengaliNumber(activeLiveStreams[activeLiveIndex]?.likesCount || 1840, lang)}</span>
-                </button>
-                {isGiftsEnabled && (
+                {onOpenLiveSheet && (
                   <button
-                    onClick={() => (onOpenGiftSheet ? onOpenGiftSheet() : setShowGiftModal(true))}
-                    className="px-4 py-2 rounded-2xl bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-black font-extrabold text-xs transition flex items-center gap-1.5 shadow-lg active:scale-95 cursor-pointer"
+                    onClick={onOpenLiveSheet}
+                    className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-extrabold transition cursor-pointer"
                   >
-                    <Gift className="w-4 h-4" />
-                    <span>{lang === 'bn' ? '🎁 গিফট পাঠান' : '🎁 Send Gift'}</span>
+                    {lang === 'bn' ? 'লাইভ করুন' : 'Go Live'}
                   </button>
                 )}
               </div>
             </div>
+          ) : (() => {
+            const currentLive = activeLiveStreams[activeLiveIndex] || activeLiveStreams[0];
+            return (
+              <div className="relative z-10 flex-1 flex flex-col justify-between p-4 pt-2">
+                {/* Live Host Stage Header */}
+                <div className="flex items-center justify-between bg-black/60 backdrop-blur-md p-3 rounded-2xl border border-rose-500/30 shadow-lg">
+                  <div className="flex items-center gap-2.5">
+                    <div className="relative">
+                      <img
+                        src={currentLive.hostAvatar}
+                        alt={currentLive.hostName}
+                        className="w-10 h-10 rounded-full object-cover border-2 border-rose-500"
+                      />
+                      <span className="absolute -bottom-1 -right-1 bg-rose-600 text-[8px] font-black text-white px-1 rounded uppercase border border-black animate-pulse">LIVE</span>
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-extrabold text-white flex items-center gap-1">
+                        <span>{currentLive.hostName}</span>
+                      </h3>
+                      <p className="text-[10px] text-rose-300 flex items-center gap-1 mt-0.5">
+                        <Users className="w-3 h-3 text-rose-400" />
+                        <span>{toBengaliNumber(currentLive.viewersCount || 0, lang)} {lang === 'bn' ? 'জন সরাসরি দেখছে' : 'watching live'}</span>
+                      </p>
+                    </div>
+                  </div>
 
-            {/* Bottom Bar: Live Chat Action */}
-            <div className="relative z-20 flex items-center justify-between gap-2 bg-black/70 backdrop-blur-md p-3 rounded-2xl border border-white/10">
-              <span className="text-xs text-neutral-300 font-medium truncate flex-1">
-                💬 {lang === 'bn' ? 'লাইভ চ্যাট চলছে...' : 'Live chat active...'}
-              </span>
-              <button
-                onClick={() => {
-                  if (onOpenLiveSheet) onOpenLiveSheet();
-                }}
-                className="px-3 py-1.5 rounded-xl bg-[#00c853] hover:bg-[#00e676] text-black font-bold text-xs transition cursor-pointer shadow-md"
-              >
-                {lang === 'bn' ? 'লাইভে যোগ দিন' : 'Join Live'}
-              </button>
-            </div>
-          </div>
+                  {onOpenLiveSheet && (
+                    <button
+                      onClick={onOpenLiveSheet}
+                      className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-md"
+                    >
+                      <Radio className="w-3.5 h-3.5" />
+                      <span>{lang === 'bn' ? 'চ্যাট রুম' : 'Chat Room'}</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Live Stage Visual */}
+                <div className="relative flex-1 my-3 rounded-3xl overflow-hidden bg-gradient-to-br from-rose-950/40 via-neutral-900 to-black border border-rose-900/40 flex flex-col justify-center items-center text-center p-6 shadow-2xl">
+                  <img
+                    src={currentLive.hostAvatar}
+                    alt={currentLive.hostName}
+                    className="absolute inset-0 w-full h-full object-cover opacity-35 blur-xs"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-black/60 pointer-events-none" />
+
+                  <div className="relative z-10">
+                    <div className="w-16 h-16 rounded-full bg-rose-600/30 border-2 border-rose-500/50 flex items-center justify-center mx-auto mb-3 animate-pulse shadow-lg">
+                      <Mic className="w-8 h-8 text-rose-400" />
+                    </div>
+                    <span className="bg-rose-600 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-widest shadow-md inline-block mb-2 animate-bounce">
+                      🔴 LIVE STREAM
+                    </span>
+                    <h2 className="text-base sm:text-lg font-extrabold text-white drop-shadow-md">
+                      {currentLive.title}
+                    </h2>
+                    <p className="text-xs text-neutral-300 mt-1 max-w-xs mx-auto">
+                      {lang === 'bn' ? 'লাইভে মেসেজ করুন এবং প্রিয় ক্রিয়েটরকে গিফট পাঠান!' : 'Chat live and send gifts to support the host!'}
+                    </p>
+                  </div>
+
+                  {/* Real Live Stats & Actions */}
+                  <div className="relative z-10 flex gap-3 mt-5">
+                    <div className="px-4 py-2 rounded-2xl bg-rose-600/80 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg">
+                      <Heart className="w-4 h-4 fill-current" />
+                      <span>{toBengaliNumber(currentLive.likesCount || 0, lang)}</span>
+                    </div>
+                    {isGiftsEnabled && onOpenGiftSheet && !(currentUserId && currentLive.hostId === currentUserId) && (
+                      <button
+                        type="button"
+                        onClick={onOpenGiftSheet}
+                        className="px-4 py-2 rounded-2xl bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-black font-extrabold text-xs transition flex items-center gap-1.5 shadow-lg active:scale-95 cursor-pointer"
+                      >
+                        <Gift className="w-4 h-4" />
+                        <span>{lang === 'bn' ? '🎁 গিফট পাঠান' : '🎁 Send Gift'}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Bottom Bar: Live Chat Action */}
+                <div className="relative z-20 flex items-center justify-between gap-2 bg-black/70 backdrop-blur-md p-3 rounded-2xl border border-white/10">
+                  <span className="text-xs text-neutral-300 font-medium truncate flex-1">
+                    💬 {lang === 'bn' ? 'লাইভ চ্যাট চলছে...' : 'Live chat active...'}
+                  </span>
+                  {onOpenLiveSheet && (
+                    <button
+                      onClick={onOpenLiveSheet}
+                      className="px-3 py-1.5 rounded-xl bg-[#00c853] hover:bg-[#00e676] text-black font-bold text-xs transition cursor-pointer shadow-md"
+                    >
+                      {lang === 'bn' ? 'লাইভে যোগ দিন' : 'Join Live'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })()
         ) : (
           /* STANDARD REELS MODE */
           <div className="relative z-10 flex-1 flex flex-col justify-between">
@@ -747,10 +846,14 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
                 </div>
               </div>
             ) : (
-              <div className="w-full mt-1 px-3 py-1.5 rounded-xl bg-black/60 backdrop-blur-md border border-neutral-800/80 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-1.5 text-amber-300 font-bold">
-                  <Eye className="w-3.5 h-3.5 text-amber-400" />
-                  <span>{lang === 'bn' ? '📺 বিনোদন মোড (আর্নিং বন্ধ)' : '📺 Entertainment Mode (Earning Off)'}</span>
+              <div className="w-full mt-1 px-3 py-1.5 rounded-xl bg-black/65 backdrop-blur-md border border-neutral-800/80 flex items-center justify-between text-xs">
+                <div className={`flex items-center gap-1.5 font-bold ${isOwnReel ? 'text-emerald-300' : 'text-amber-300'}`}>
+                  <Eye className={`w-3.5 h-3.5 ${isOwnReel ? 'text-emerald-400' : 'text-amber-400'}`} />
+                  <span>
+                    {isOwnReel
+                      ? (lang === 'bn' ? 'আপনার নিজের ভিডিও (আয় প্রযোজ্য নয়)' : 'Your Own Video (No Self-Earn)')
+                      : (lang === 'bn' ? 'বিনোদন মোড (আর্নিং বন্ধ)' : 'Entertainment Mode (Earning Off)')}
+                  </span>
                 </div>
                 <span className="text-[10px] text-neutral-400">
                   {lang === 'bn' ? 'শুধুমাত্র ভিডিও দেখুন' : 'Watch only'}
@@ -884,18 +987,19 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
             <div className="w-12 h-12 rounded-2xl bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center hover:bg-black/60 transition">
               <Share2 className="w-6 h-6" />
             </div>
-            <span className="text-xs font-bold drop-shadow">
-              {lang === 'bn' ? 'শেয়ার' : 'Share'}
+            <span className="text-xs font-bold drop-shadow tabular-nums">
+              {reel.sharesCount ? toBengaliNumber(reel.sharesCount, lang) : (lang === 'bn' ? 'শেয়ার' : 'Share')}
             </span>
           </button>
 
-          {/* Gift / উপহার Button */}
-          {isGiftsEnabled && (
+          {/* Gift / উপহার Button (strictly hidden on user's own reels) */}
+          {isGiftsEnabled && onOpenGiftSheet && !isOwnReel && (
             <button
-              onClick={() => (onOpenGiftSheet ? onOpenGiftSheet() : setShowGiftModal(true))}
+              type="button"
+              onClick={onOpenGiftSheet}
               className="flex flex-col items-center gap-0.5 cursor-pointer group"
             >
-              <div className="w-12 h-12 rounded-2xl bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center hover:bg-black/60 transition text-rose-400">
+              <div className="w-12 h-12 rounded-2xl bg-black/45 backdrop-blur-md border border-white/15 flex items-center justify-center hover:bg-black/65 transition text-rose-400">
                 <Gift className="w-6 h-6" />
               </div>
               <span className="text-xs font-bold drop-shadow">
@@ -904,20 +1008,21 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
             </button>
           )}
 
-          {/* Reward Button or Entertainment Badge */}
+          {/* Reward Button or Own Reel / Entertainment Badge */}
           {isEarningActive ? (
             <button
+              type="button"
               onClick={() => handleClaimPoints(false)}
-              className={`px-3 py-2 rounded-2xl text-xs font-extrabold flex items-center gap-1.5 shadow-xl transition-all active:scale-95 cursor-pointer ${
+              className={`px-3 py-2 rounded-2xl text-xs font-extrabold flex items-center gap-1.5 shadow-xl transition-all active:scale-95 cursor-pointer tabular-nums ${
                 isReelAlreadyClaimed
-                  ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-500/40'
+                  ? 'bg-emerald-950/85 text-emerald-400 border border-emerald-500/40'
                   : isDailyLimitReached
                   ? 'bg-neutral-900/90 text-amber-300 border border-amber-500/40'
                   : requireFullWatch && watchSeconds < totalSeconds
                   ? 'bg-black/75 text-emerald-300 border border-emerald-500/40'
                   : reel.isSpecialOffer
-                  ? 'bg-gradient-to-r from-amber-400 to-[#00c853] hover:from-amber-300 hover:to-[#00e676] text-black shadow-amber-500/40 border border-amber-300 animate-pulse'
-                  : 'bg-[#00c853] hover:bg-[#00e676] text-black shadow-emerald-500/40 animate-pulse'
+                  ? 'bg-gradient-to-r from-amber-400 to-[#00c853] hover:from-amber-300 hover:to-[#00e676] text-black shadow-amber-500/40 border border-amber-300'
+                  : 'bg-[#00c853] hover:bg-[#00e676] text-black shadow-emerald-500/40'
               }`}
             >
               {reel.isSpecialOffer && !isDailyLimitReached && !isReelAlreadyClaimed ? (
@@ -936,9 +1041,13 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
               </span>
             </button>
           ) : (
-            <div className="px-2.5 py-1.5 rounded-2xl text-[10px] font-bold bg-neutral-900/90 text-neutral-400 border border-neutral-800 flex items-center gap-1 shadow-md select-none">
-              <Eye className="w-3.5 h-3.5" />
-              <span>{lang === 'bn' ? 'আর্নিং বন্ধ' : 'Earning Off'}</span>
+            <div className="px-2.5 py-1.5 rounded-2xl text-[10px] font-bold bg-neutral-900/90 text-neutral-300 border border-neutral-700/70 flex items-center gap-1 shadow-md select-none">
+              <Eye className="w-3.5 h-3.5 text-emerald-400" />
+              <span>
+                {isOwnReel
+                  ? (lang === 'bn' ? 'নিজের রিল' : 'Own Reel')
+                  : (lang === 'bn' ? 'আর্নিং বন্ধ' : 'Earning Off')}
+              </span>
             </div>
           )}
         </div>
@@ -947,11 +1056,20 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
         <div className="relative z-20 px-4 pb-4 bg-gradient-to-t from-black/95 via-black/60 to-transparent pt-6">
           {/* Creator row */}
           <div className="flex items-center gap-2.5 mb-2">
-            <div 
-              className="flex items-center gap-2.5 cursor-pointer group/creator"
-              onClick={() => onOpenProfile && onOpenProfile(reel.userId)}
+            <button
+              type="button"
+              className="flex items-center gap-2.5 cursor-pointer group/creator text-left min-w-0"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenProfile && onOpenProfile(reel.userId);
+              }}
+              title={
+                lang === 'bn'
+                  ? `${reel.creatorName}-এর প্রোফাইল দেখুন`
+                  : `View ${reel.creatorName}'s profile`
+              }
             >
-              <div className="relative">
+              <div className="relative shrink-0">
                 <img
                   src={reel.creatorAvatar}
                   alt={reel.creatorName}
@@ -964,45 +1082,48 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
                 )}
               </div>
 
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-bold text-white tracking-wide group-hover/creator:text-emerald-400 transition">
-                  @{reel.creatorHandle}
+              <div className="flex flex-col min-w-0">
+                <span className="text-sm font-extrabold text-white tracking-wide group-hover/creator:text-emerald-400 group-hover/creator:underline transition truncate">
+                  {reel.creatorName}
                 </span>
+                {reel.title && (
+                  <span className="text-[11px] text-neutral-300/90 truncate">
+                    {reel.title}
+                  </span>
+                )}
               </div>
-            </div>
-
-            {/* Prominently Awake Follow Button ("শুরুতে জেগে থাকবে") */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (onToggleFollow) {
-                  onToggleFollow(reel.userId, reel.creatorName);
-                } else {
-                  setIsFollowing(!isFollowing);
-                }
-              }}
-              className={`text-xs font-black px-3 py-1 rounded-full flex items-center gap-1.5 shadow-lg active:scale-95 transition-all cursor-pointer ${
-                isFollowingCurrent
-                  ? 'bg-neutral-800/90 text-neutral-300 border border-neutral-600 hover:bg-neutral-700'
-                  : 'bg-gradient-to-r from-[#00e676] to-[#00c853] hover:from-[#00ff88] hover:to-[#00e676] text-black ring-2 ring-emerald-400/60 shadow-emerald-500/40 animate-pulse'
-              }`}
-              title={lang === 'bn' ? 'ক্রিয়েটরকে ফলো করুন' : 'Follow Creator'}
-            >
-              {isFollowingCurrent ? (
-                <>
-                  <Check className="w-3.5 h-3.5 stroke-[3]" />
-                  <span>{lang === 'bn' ? 'ফলোয়িং' : 'Following'}</span>
-                </>
-              ) : (
-                <>
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>{lang === 'bn' ? '+ ফলো' : '+ Follow'}</span>
-                </>
-              )}
             </button>
 
-            {/* Quick Direct Message Button */}
-            {onOpenChatWithCreator && isDirectChatEnabled && (
+            {/* Follow Button (hidden on own reels) */}
+            {onToggleFollow && (!currentUserId || reel.userId !== currentUserId) && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleFollow(reel.userId, reel.creatorName);
+                }}
+                className={`text-xs font-black px-3 py-1 rounded-full flex items-center gap-1.5 shadow-lg active:scale-95 transition-all cursor-pointer ${
+                  isFollowingCurrent
+                    ? 'bg-neutral-800/90 text-neutral-300 border border-neutral-600 hover:bg-neutral-700'
+                    : 'bg-gradient-to-r from-[#00e676] to-[#00c853] hover:from-[#00ff88] hover:to-[#00e676] text-black ring-2 ring-emerald-400/60 shadow-emerald-500/40 animate-pulse'
+                }`}
+                title={lang === 'bn' ? 'ক্রিয়েটরকে ফলো করুন' : 'Follow Creator'}
+              >
+                {isFollowingCurrent ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 stroke-[3]" />
+                    <span>{lang === 'bn' ? 'ফলোয়িং' : 'Following'}</span>
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>{lang === 'bn' ? '+ ফলো' : '+ Follow'}</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            {/* Quick Direct Message Button (hidden on own reels) */}
+            {onOpenChatWithCreator && isDirectChatEnabled && (!currentUserId || reel.userId !== currentUserId) && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1013,6 +1134,40 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
               >
                 <MessageCircle className="w-3.5 h-3.5" />
               </button>
+            )}
+          </div>
+
+          {/* Category Badge & Special Tags */}
+          <div className="flex items-center gap-2 mb-2">
+            {reel.category && (() => {
+              const catMeta = getCategoryMeta(reel.category);
+              return (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onSelectCategory) {
+                      onSelectCategory(reel.category);
+                      onClose();
+                    }
+                  }}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-black border backdrop-blur-md shadow-md transition-all active:scale-95 cursor-pointer hover:brightness-125 select-none ${catMeta.badgeBg} ${catMeta.badgeBorder} ${catMeta.badgeText}`}
+                  title={
+                    lang === 'bn'
+                      ? `${catMeta.labelBn} ক্যাটাগরির রিল দেখুন`
+                      : `View ${catMeta.labelEn} reels`
+                  }
+                >
+                  <span className="text-xs">{catMeta.icon}</span>
+                  <span>{lang === 'bn' ? catMeta.labelBn : catMeta.labelEn}</span>
+                </button>
+              );
+            })()}
+            {reel.isSpecialOffer && (
+              <span className="px-2 py-0.5 rounded-lg text-[10px] font-black bg-gradient-to-r from-amber-500 to-rose-500 text-black shadow-md flex items-center gap-1 border border-amber-300">
+                <Flame className="w-3 h-3 fill-current text-black" />
+                <span>{reel.specialOfferBadge || (lang === 'bn' ? 'অফার রিল' : 'Offer')}</span>
+              </span>
             )}
           </div>
 
@@ -1029,54 +1184,22 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
             ))}
           </div>
 
-          {/* Audio Marquee matching Screenshot 2 */}
-          <div className="flex items-center gap-2 text-xs text-neutral-300 overflow-hidden">
-            <Music className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
-            <div className="truncate font-medium">{reel.audioTrack}</div>
-          </div>
-        </div>
-        </div>
-        )}
-
-        {/* Send Gift Mini Modal */}
-        {showGiftModal && (
-          <div className="absolute inset-0 z-40 bg-black/70 backdrop-blur-sm flex items-end justify-center p-4">
-            <div className="w-full bg-[#121c17] border border-emerald-900/60 rounded-3xl p-4 text-white shadow-2xl animate-in slide-in-from-bottom-5">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="font-bold text-base flex items-center gap-1.5">
-                  <Gift className="w-4 h-4 text-emerald-400" />
-                  <span>ক্রিয়েটরকে উপহার দিন</span>
-                </h3>
-                <button
-                  onClick={() => setShowGiftModal(false)}
-                  className="p-1 hover:bg-neutral-800 rounded-full"
-                >
-                  <X className="w-4 h-4 text-neutral-400" />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-4 gap-2 mb-3">
-                {[
-                  { name: 'গরম চা', icon: '☕️', points: 10 },
-                  { name: 'মিষ্টি', icon: '🍬', points: 20 },
-                  { name: 'লাল গোলাপ', icon: '🌹', points: 50 },
-                  { name: 'সুপার লাভ', icon: '💖', points: 100 },
-                ].map((item, i) => (
-                  <button
-                    key={i}
-                    onClick={() => handleSendGift(item.name)}
-                    className="p-3 bg-[#192720] hover:bg-emerald-900/40 rounded-2xl flex flex-col items-center gap-1 border border-emerald-900/40 transition active:scale-95"
-                  >
-                    <span className="text-2xl">{item.icon}</span>
-                    <span className="text-xs font-semibold">{item.name}</span>
-                    <span className="text-[10px] text-emerald-400">
-                      {toBengaliNumber(item.points)} পয়েন্ট
-                    </span>
-                  </button>
-                ))}
-              </div>
+          {/* Audio Marquee & View Count */}
+          <div className="flex items-center justify-between gap-2 text-xs text-neutral-300 overflow-hidden">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <Music className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+              <div className="truncate font-medium">{reel.audioTrack}</div>
+            </div>
+            <div className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/10 border border-white/10 text-[10px] font-bold text-slate-100 tabular-nums">
+              <Eye className="w-3 h-3 text-emerald-400 shrink-0" />
+              <span>{toBengaliNumber((reel.viewsCount || 0).toLocaleString('en-US'), lang)}</span>
+              <span className="text-[9px] text-neutral-300 font-medium">
+                {lang === 'bn' ? 'ভিউ' : 'views'}
+              </span>
             </div>
           </div>
+        </div>
+        </div>
         )}
       </div>
     </div>

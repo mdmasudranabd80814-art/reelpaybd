@@ -187,6 +187,7 @@ export const LiveStreamSheet: React.FC<LiveStreamSheetProps> = ({
   const animFrameRef = useRef<number | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const hasCountedViewerRef = useRef<string | null>(null);
+  const lastSyncedPeakRef = useRef<{ streamId: string; peak: number } | null>(null);
   const lastStageTapRef = useRef<number>(0);
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -348,6 +349,51 @@ export const LiveStreamSheet: React.FC<LiveStreamSheetProps> = ({
       }
     };
   }, [isOpen, liveStreamId, isAuthenticated, isFirebaseSignedIn, currentUser.id, isAdminView]);
+
+  // 4b. Persist concurrent viewer peak when a new high is reached
+  useEffect(() => {
+    if (
+      !isOpen ||
+      !liveStreamId ||
+      !stream ||
+      stream.id !== liveStreamId ||
+      stream.status !== 'active' ||
+      !isFirebaseSignedIn ||
+      isAdminView
+    ) {
+      return;
+    }
+
+    const currentConcurrency = Math.max(
+      stream.viewersCount || 0,
+      viewers.length > 0 ? viewers.length : stream.viewersCount || 0
+    );
+    const existingPeak = stream.peakViewersCount ?? 0;
+
+    if (currentConcurrency <= existingPeak) return;
+
+    if (
+      lastSyncedPeakRef.current &&
+      lastSyncedPeakRef.current.streamId === liveStreamId &&
+      lastSyncedPeakRef.current.peak >= currentConcurrency
+    ) {
+      return;
+    }
+
+    lastSyncedPeakRef.current = { streamId: liveStreamId, peak: currentConcurrency };
+    updateDocument('live_streams', liveStreamId, {
+      peakViewersCount: currentConcurrency,
+      peakAt: new Date().toISOString(),
+    }).catch(() => {});
+  }, [
+    isOpen,
+    liveStreamId,
+    stream,
+    viewers.length,
+    isFirebaseSignedIn,
+    isAdminView,
+    updateDocument,
+  ]);
 
   // Cleanup helpers for WebRTC
   const closeAllHostPeers = () => {
@@ -834,6 +880,13 @@ export const LiveStreamSheet: React.FC<LiveStreamSheetProps> = ({
   };
 
   const handleLike = async () => {
+    if (
+      !ensureAuth(
+        lang === 'bn' ? 'লাইভে লাইক দিতে লগইন করুন!' : 'Login to like live streams!'
+      )
+    ) {
+      return;
+    }
     if (!liveStreamId || !stream) return;
     if (!isMuted) playPopSound();
 
@@ -866,6 +919,14 @@ export const LiveStreamSheet: React.FC<LiveStreamSheetProps> = ({
 
   const handleQuickGiftSend = (gift: GiftItem) => {
     if (!stream) return;
+    if (isHost) {
+      flashStudioNotice(
+        lang === 'bn'
+          ? '⚠️ নিজের লাইভে নিজে গিফট পাঠানো যাবে না।'
+          : '⚠️ You cannot send gifts to your own live stream.'
+      );
+      return;
+    }
     if (
       !ensureAuth(
         lang === 'bn' ? 'লাইভে গিফট পাঠাতে লগইন করুন!' : 'Login to send live gifts!'

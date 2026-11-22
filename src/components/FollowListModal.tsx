@@ -14,7 +14,21 @@ import { User } from '../types';
 import { toBengaliNumber } from '../utils/bengali';
 import { getUserLevel } from '../utils/levels';
 import { useFirebase } from '../hooks/useFirebase';
-import { INITIAL_USERS_LIST } from '../data/initialData';
+
+const DEMO_USER_IDS = new Set([
+  'usr_bd_01',
+  'system_admin',
+  'creator_sakib',
+  'creator_russell',
+  'creator_tanjila',
+  'user_001',
+  'user_002',
+  'user_003',
+  'user_004',
+  'user_005',
+  'user_006',
+  'user_7788',
+]);
 
 interface FollowListModalProps {
   isOpen: boolean;
@@ -66,8 +80,8 @@ export const FollowListModal: React.FC<FollowListModalProps> = ({
       setLoading(true);
       const nextMap: Record<string, User> = {};
 
-      for (const u of [...INITIAL_USERS_LIST, ...knownUsers, currentUser, targetUser]) {
-        if (u && u.id) {
+      for (const u of [...knownUsers, currentUser, targetUser]) {
+        if (u && u.id && !u.id.startsWith('GUEST-') && !DEMO_USER_IDS.has(u.id)) {
           nextMap[u.id] = u;
         }
       }
@@ -76,10 +90,13 @@ export const FollowListModal: React.FC<FollowListModalProps> = ({
         try {
           const remoteList = (await getCollection('public_profiles', [limit(50)])) as User[];
           if (!cancelled && Array.isArray(remoteList)) {
-            remoteList.forEach((u) => {
-              if (u && u.id) nextMap[u.id] = u;
+            const realRemote = remoteList.filter(
+              (u) => u && u.id && !u.id.startsWith('GUEST-') && !DEMO_USER_IDS.has(u.id)
+            );
+            realRemote.forEach((u) => {
+              nextMap[u.id] = u;
             });
-            setDiscoverUsers(remoteList.filter((u) => u.id && u.id !== currentUser.id));
+            setDiscoverUsers(realRemote.filter((u) => u.id !== currentUser.id));
           }
         } catch (err) {
           console.warn('Could not load directory users:', err);
@@ -88,7 +105,7 @@ export const FollowListModal: React.FC<FollowListModalProps> = ({
         // Fetch any specific follower/following IDs not yet in map
         const neededIds = Array.from(
           new Set([...(targetUser.followers || []), ...(targetUser.following || [])])
-        ).filter((id) => id && !nextMap[id]);
+        ).filter((id) => id && !nextMap[id] && !DEMO_USER_IDS.has(id));
 
         if (neededIds.length > 0) {
           await Promise.all(
@@ -103,7 +120,7 @@ export const FollowListModal: React.FC<FollowListModalProps> = ({
           );
         }
       } else {
-        setDiscoverUsers(INITIAL_USERS_LIST.filter((u) => u.id !== currentUser.id));
+        setDiscoverUsers([]);
       }
 
       if (!cancelled) {
@@ -127,10 +144,12 @@ export const FollowListModal: React.FC<FollowListModalProps> = ({
     let list: User[] = [];
 
     if (activeTab === 'discover') {
-      const pool = discoverUsers.length > 0 ? discoverUsers : INITIAL_USERS_LIST;
+      const pool = discoverUsers.length > 0 ? discoverUsers : knownUsers;
       const seen = new Set<string>();
       list = pool.filter((u) => {
-        if (!u.id || u.id === currentUser.id || seen.has(u.id)) return false;
+        if (!u.id || u.id === currentUser.id || u.id.startsWith('GUEST-') || DEMO_USER_IDS.has(u.id) || seen.has(u.id)) {
+          return false;
+        }
         seen.add(u.id);
         return true;
       });

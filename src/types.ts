@@ -169,10 +169,15 @@ export interface User {
   loginOfferCampaignId?: string;
   dailySpinClaimDate?: string;
   dailySpinClaimsCount?: number;
+  dailyScratchClaimDate?: string;
   followersCount?: number;
   followingCount?: number;
   followers?: string[];
   following?: string[];
+  referralsCount?: number;
+  referralEarnedPoints?: number;
+  likedReelIds?: string[];
+  likedCommentIds?: string[];
 }
 
 export interface Reel {
@@ -380,6 +385,8 @@ export interface LiveStream {
   chatEnabled?: boolean;
   allowSpeakerRequests?: boolean;
   viewersCount: number;
+  peakViewersCount?: number;
+  peakAt?: string;
   likesCount: number;
   giftsTotalPoints?: number;
   adminGiftPoints?: number;

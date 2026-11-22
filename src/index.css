@@ -3,6 +3,7 @@
 @layer base {
   body {
     font-family: 'Hind Siliguri', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    -webkit-tap-highlight-color: transparent;
   }
 }
 
@@ -26,10 +27,6 @@
 
 .glow-btn {
   animation: pulseGlow 2.5s infinite;
-}
-
-div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) {
-  display: none;
 }
 
 @keyframes marquee {

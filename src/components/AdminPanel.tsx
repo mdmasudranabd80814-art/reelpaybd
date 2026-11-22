@@ -68,6 +68,7 @@ import {
   Smartphone,
   Wrench,
   Copy,
+  UserCheck,
 } from 'lucide-react';
 import { useFirebase } from '../hooks/useFirebase';
 import { orderBy, limit } from 'firebase/firestore';
@@ -96,6 +97,8 @@ import { storeVideoInDB, fileToDataUrl, captureVideoThumbnail } from '../utils/v
 import { extractYouTubeId } from '../utils/video';
 import { getUserLevel } from '../utils/levels';
 import { calculateGiftSplit } from '../utils/gifts';
+import { buildCreatorHandle } from '../utils/reelOwner';
+import { LiveViewerPeakChart } from './LiveViewerPeakChart';
 
 export interface AdminPanelProps {
   users: User[];
@@ -385,6 +388,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // Reel Form state
   const [showAddReel, setShowAddReel] = useState(false);
+  const [targetUserId, setTargetUserId] = useState<string>(currentUserUid || '');
   const [newTitle, setNewTitle] = useState('');
   const [newCreator, setNewCreator] = useState('');
   const [newCategory, setNewCategory] = useState<'সকল' | 'ট্রেন্ডিং' | 'কমেডি' | 'গেমিং' | 'রান্না' | 'শিক্ষা'>('ট্রেন্ডিং');
@@ -392,6 +396,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [newCaption, setNewCaption] = useState('');
   const [newVideoUrl, setNewVideoUrl] = useState('');
   const [newThumbUrl, setNewThumbUrl] = useState('');
+
+  useEffect(() => {
+    if (!targetUserId && (currentUserUid || users.length > 0)) {
+      const preferred =
+        users.find((u) => u.id === currentUserUid) ||
+        users.find((u) => u.role === 'admin') ||
+        users[0];
+      if (preferred) {
+        setTargetUserId(preferred.id);
+        setNewCreator((prev) => prev || preferred.name);
+      } else if (currentUserUid) {
+        setTargetUserId(currentUserUid);
+      }
+    }
+  }, [currentUserUid, users, targetUserId]);
   
   // Gallery file upload states
   const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null);
@@ -418,11 +437,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // Helper to isolate reels uploaded by a specific user
   const getUserReels = (u: User) => {
-    return reels.filter(
-      (r) =>
-        r.userId === u.id ||
-        (r.creatorName && u.name && r.creatorName.trim().toLowerCase() === u.name.trim().toLowerCase() && u.name !== 'নতুন ইউজার')
-    );
+    return reels.filter((r) => r.userId === u.id);
   };
 
   // App Settings Form states
@@ -586,18 +601,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         return;
       }
 
-      const creatorTitle = newCreator.trim() || 'এডমিন ক্রিয়েটর';
+      const targetOwner =
+        users.find((u) => u.id === targetUserId) ||
+        users.find((u) => u.id === currentUserUid);
+      const resolvedOwnerId = targetOwner?.id || targetUserId || currentUserUid;
+      const creatorTitle = newCreator.trim() || targetOwner?.name || 'ক্রিয়েটর';
+      const creatorAvatar =
+        targetOwner?.avatar ||
+        'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80';
+      const creatorVerified = targetOwner ? Boolean(targetOwner.isVerified) : true;
 
       onAddReel({
         title: newTitle.trim(),
-        userId: currentUserUid,
+        userId: resolvedOwnerId,
         creatorName: creatorTitle,
-        creatorHandle: `@${creatorTitle.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'admin'}`,
-        creatorAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80',
+        creatorHandle: `@${buildCreatorHandle(creatorTitle, targetOwner?.phone)}`,
+        creatorAvatar,
         category: newCategory,
         thumbnailUrl: finalThumbUrl,
         videoUrl: finalVideoUrl,
-        isVerified: true,
+        isVerified: creatorVerified,
         pointsReward: Number(newPointsReward) || 15,
         audioTrack: 'Original Sound - ' + creatorTitle,
         caption: newCaption.trim() || `${newTitle.trim()} #ReelPayBD`,
@@ -605,11 +628,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       });
 
       playSuccessChime();
-      showPanelToast('🎉 নতুন রিল সফলভাবে আপলোড ও পাবলিশ করা হয়েছে!');
+      showPanelToast(`🎉 "${creatorTitle}"-এর প্রোফাইলে রিলটি সফলভাবে পাবলিশ করা হয়েছে!`);
 
       // Reset Form
       setNewTitle('');
-      setNewCreator('');
+      setNewCreator(targetOwner?.name || '');
       setNewCaption('');
       setNewVideoUrl('');
       setNewThumbUrl('');
@@ -1025,6 +1048,47 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   />
                 </div>
 
+                {/* Target User Profile Selector */}
+                <div className="p-3 rounded-xl bg-[#0d1611] border border-emerald-900/70 space-y-2">
+                  <label className="text-xs text-emerald-300 font-bold flex items-center gap-1.5">
+                    <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>কোন ইউজারের প্রোফাইলে ভিডিও দিবে *:</span>
+                  </label>
+                  <select
+                    value={targetUserId}
+                    onChange={(e) => {
+                      const nextUid = e.target.value;
+                      setTargetUserId(nextUid);
+                      const picked = users.find((u) => u.id === nextUid);
+                      if (picked) {
+                        setNewCreator(picked.name);
+                      }
+                    }}
+                    className="w-full bg-[#132219] border border-emerald-900 rounded-xl px-3 py-2 text-xs text-white font-semibold focus:outline-none focus:border-emerald-500"
+                  >
+                    {!users.some((u) => u.id === targetUserId) && currentUserUid && (
+                      <option value={currentUserUid}>বর্তমান এডমিন ({currentUserUid.slice(0, 8)})</option>
+                    )}
+                    {users.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} {u.role === 'admin' ? '(Admin)' : ''} • {u.email || u.phone || u.id.slice(0, 8)}
+                      </option>
+                    ))}
+                  </select>
+                  {(() => {
+                    const picked = users.find((u) => u.id === targetUserId);
+                    if (!picked) return null;
+                    return (
+                      <div className="flex items-center gap-2 text-[11px] text-emerald-300 bg-emerald-950/40 px-2.5 py-1.5 rounded-lg border border-emerald-900/50">
+                        <img src={picked.avatar} alt={picked.name} className="w-5 h-5 rounded-full object-cover border border-emerald-400" />
+                        <span>
+                          ভিডিওতে <b className="text-white">{picked.name}</b> নাম শো করবে এবং তাদের প্রোফাইলে যুক্ত হবে।
+                        </span>
+                      </div>
+                    );
+                  })()}
+                </div>
+
                 {/* Title & Creator */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
@@ -1039,12 +1103,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-neutral-400 block mb-1">ক্রিয়েটর নাম:</label>
+                    <label className="text-xs text-neutral-400 block mb-1">প্রদর্শিত ক্রিয়েটর নাম:</label>
                     <input
                       type="text"
                       value={newCreator}
                       onChange={(e) => setNewCreator(e.target.value)}
-                      placeholder="এডমিন ক্রিয়েটর"
+                      placeholder="সিলেক্ট করা ইউজারের নাম"
                       className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
                     />
                   </div>
@@ -1105,19 +1169,52 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
           {/* All Reels Grid with Edit & Delete */}
           <div className="rounded-2xl bg-[#141f19] border border-emerald-950 p-4 shadow-lg">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <Video className="w-4 h-4 text-emerald-400" />
                 <span>📋 সকল সক্রিয় রিলসের তালিকা ({toBengaliNumber(reels.length)})</span>
               </h3>
-              <span className="text-[11px] text-neutral-400">এডিট ✏️ ও ডিলিট 🗑️ কন্ট্রোল</span>
+              <div className="flex items-center gap-2">
+                {(() => {
+                  const staleReels = reels.filter((r) => {
+                    const owner = users.find((u) => u.id === r.userId);
+                    return owner && owner.name && (owner.name !== r.creatorName || owner.avatar !== r.creatorAvatar);
+                  });
+                  if (staleReels.length === 0 || !onQuickUpdateReel) return null;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        staleReels.forEach((r) => {
+                          const owner = users.find((u) => u.id === r.userId);
+                          if (owner) {
+                            onQuickUpdateReel(r.id, {
+                              creatorName: owner.name,
+                              creatorAvatar: owner.avatar,
+                              isVerified: Boolean(owner.isVerified),
+                            });
+                          }
+                        });
+                        showPanelToast(`✅ ${toBengaliNumber(staleReels.length)}টি রিলের প্রোফাইল নাম ডাটাবেসে সিঙ্ক করা হয়েছে!`);
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500 hover:text-black text-emerald-300 border border-emerald-500/40 text-[11px] font-bold transition cursor-pointer"
+                    >
+                      🔄 {toBengaliNumber(staleReels.length)}টি রিলে নাম সিঙ্ক করুন
+                    </button>
+                  );
+                })()}
+                <span className="text-[11px] text-neutral-400">এডিট ✏️ ও ডিলিট 🗑️ কন্ট্রোল</span>
+              </div>
             </div>
 
             {reels.length === 0 ? (
               <p className="text-center py-8 text-neutral-500 text-xs">কোনো রিল পাওয়া যায়নি।</p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {reels.map((reel) => (
+                {reels.map((reel) => {
+                  const owner = users.find((u) => u.id === reel.userId);
+                  const displayCreatorName = owner?.name || reel.creatorName;
+                  return (
                   <div
                     key={reel.id}
                     className="p-3 rounded-2xl bg-[#0e1712] border border-emerald-950/70 flex gap-3 items-center justify-between hover:border-emerald-800/40 transition"
@@ -1130,7 +1227,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       />
                       <div className="min-w-0">
                         <p className="font-bold text-white text-xs truncate mb-0.5">{reel.title}</p>
-                        <p className="text-[10px] text-neutral-400 truncate">{reel.creatorName} ({reel.category})</p>
+                        <div className="flex items-center gap-1 text-[10px] text-neutral-400 truncate">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (owner) {
+                                setSelectedUserForDetails(owner);
+                                setUserDetailSubTab('reels');
+                                setDetailUserPointsInput(String(owner.points));
+                              } else {
+                                onEditReel(reel);
+                              }
+                            }}
+                            className="text-emerald-300 hover:text-emerald-200 hover:underline font-semibold truncate cursor-pointer text-left"
+                            title={owner ? `${displayCreatorName}-এর প্রোফাইল দেখুন` : 'রিলের ইউজার এডিট করুন'}
+                          >
+                            👤 {displayCreatorName}
+                          </button>
+                          <span className="shrink-0">({reel.category})</span>
+                        </div>
                         <div className="flex items-center gap-2 text-[10px] text-emerald-400 mt-1">
                           <span>👁️ {toBengaliNumber(reel.viewsCount || 0)} ভিউ</span>
                           <span>•</span>
@@ -1174,7 +1289,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -2191,7 +2307,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   if (reelOfferFilter === 'earning_off') return r.isEarningEnabled === false;
                   return true;
                 })
-                .map((reel) => (
+                .map((reel) => {
+                  const owner = users.find((u) => u.id === reel.userId);
+                  const displayCreatorName = owner?.name || reel.creatorName;
+                  return (
                   <div
                     key={reel.id}
                     className="p-3.5 rounded-2xl bg-[#0d1611] border border-emerald-950/80 hover:border-emerald-800/40 transition flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-sm"
@@ -2217,7 +2336,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             {reel.category}
                           </span>
                         </div>
-                        <p className="text-[11px] text-neutral-400">{reel.creatorName}</p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (owner) {
+                              setSelectedUserForDetails(owner);
+                              setUserDetailSubTab('reels');
+                              setDetailUserPointsInput(String(owner.points));
+                            } else {
+                              onEditReel(reel);
+                            }
+                          }}
+                          className="text-[11px] text-emerald-300 hover:text-emerald-200 hover:underline font-semibold cursor-pointer text-left"
+                        >
+                          👤 {displayCreatorName}
+                        </button>
                         
                         <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[10px]">
                           <span className={`px-2 py-0.5 rounded-full font-bold flex items-center gap-1 ${
@@ -2317,7 +2450,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
             </div>
           </div>
 
@@ -2601,6 +2735,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
             )}
 
+            {/* 0. Active Live Streams Concurrent Viewer Peak Chart (Recharts) */}
+            <LiveViewerPeakChart streams={liveStreamsList} lang="bn" />
+
             {/* 1. Gift Commission Split & Percentage Controls */}
             <div className="rounded-2xl bg-gradient-to-br from-[#1b1623] via-[#141f19] to-[#111c16] border border-amber-500/40 p-4 shadow-xl space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2841,6 +2978,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           <div className="text-right text-[11px] shrink-0 space-y-0.5">
                             <div className="text-neutral-300 font-bold">
                               👁️ {toBengaliNumber(live.viewersCount || 0)} · ❤️ {toBengaliNumber(live.likesCount || 0)}
+                            </div>
+                            <div className="text-rose-400 font-bold">
+                              📈 পিক: {toBengaliNumber(Math.max(live.peakViewersCount || 0, live.viewersCount || 0))}
                             </div>
                             <div className="text-amber-300 font-bold">
                               🎁 হোস্ট: {toBengaliNumber(live.giftsTotalPoints || 0)}
@@ -4165,6 +4305,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               * গত ৭ দিনের ইউজার অ্যাক্টিভিটি এবং রিলস ভিউসের একটি তুলনামূলক চিত্র
             </p>
           </div>
+
+          {/* Active Live Streams Concurrent Viewer Peak Analytics (Recharts) */}
+          <LiveViewerPeakChart streams={liveStreamsList} lang="bn" />
         </div>
       )}
 
@@ -4638,9 +4781,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 {/* SUBTAB 1: USER'S UPLOADED REELS */}
                 {userDetailSubTab === 'reels' && (
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between text-xs text-neutral-400">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-400">
                       <span>🎬 এই ইউজারের আপলোড করা মোট রিলস: <b className="text-white">{toBengaliNumber(detailUserReels.length)} টি</b></span>
-                      <span>এডমিন এডিট ও ডিলিট সুবিধা</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTargetUserId(selectedUserForDetails.id);
+                          setNewCreator(selectedUserForDetails.name);
+                          setSelectedUserForDetails(null);
+                          setActiveAdminTab('reels');
+                          setShowAddReel(true);
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-[#00c853] hover:bg-[#00e676] text-black font-extrabold text-[11px] transition cursor-pointer flex items-center gap-1"
+                      >
+                        <PlusCircle className="w-3.5 h-3.5" />
+                        <span>এই ইউজারের প্রোফাইলে রিল দিন</span>
+                      </button>
                     </div>
 
                     {detailUserReels.length === 0 ? (

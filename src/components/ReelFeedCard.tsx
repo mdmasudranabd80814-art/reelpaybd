@@ -4,6 +4,7 @@ import { Reel, EarningSettings } from '../types';
 import { toBengaliNumber } from '../utils/bengali';
 import { playPopSound } from '../utils/audio';
 import { extractYouTubeId } from '../utils/video';
+import { getCategoryMeta } from '../utils/categories';
 
 interface ReelFeedCardProps {
   reel: Reel;
@@ -25,6 +26,9 @@ interface ReelFeedCardProps {
   onToggleSave?: (reelId: string) => void;
   isGiftsEnabled?: boolean;
   isCommentsEnabled?: boolean;
+  currentUserId?: string;
+  onSelectCategory?: (category: Reel['category']) => void;
+  activeCategory?: string;
 }
 
 export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
@@ -47,6 +51,9 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
   onToggleSave,
   isGiftsEnabled = true,
   isCommentsEnabled = true,
+  currentUserId,
+  onSelectCategory,
+  activeCategory,
 }) => {
   const [isSpringing, setIsSpringing] = React.useState(false);
   const [isBookmarkSpringing, setIsBookmarkSpringing] = React.useState(false);
@@ -54,6 +61,31 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
   const [incrementKey, setIncrementKey] = React.useState(0);
   const [imgLoaded, setImgLoaded] = React.useState(false);
 
+  const categoryMeta = getCategoryMeta(reel.category);
+
+  const handleCategoryClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isMuted) playPopSound();
+    if (onSelectCategory) {
+      onSelectCategory(reel.category);
+    }
+  };
+
+  const viewsCount = reel.viewsCount || 0;
+  const prevViewsRef = React.useRef<number>(viewsCount);
+  const [viewJustIncremented, setViewJustIncremented] = React.useState(false);
+
+  React.useEffect(() => {
+    if (viewsCount > prevViewsRef.current) {
+      setViewJustIncremented(true);
+      const timer = setTimeout(() => setViewJustIncremented(false), 1200);
+      prevViewsRef.current = viewsCount;
+      return () => clearTimeout(timer);
+    }
+    prevViewsRef.current = viewsCount;
+  }, [viewsCount]);
+
+  const isOwnReel = Boolean(currentUserId && reel.userId === currentUserId);
   const masterEarningOn = earningSettings ? earningSettings.isMasterEarningEnabled : true;
   const videoEarningOn = earningSettings ? earningSettings.isVideoWatchEarningEnabled : true;
   const allowFeedClaim = earningSettings ? earningSettings.allowDirectFeedClaim : true;
@@ -63,7 +95,7 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
     ? Boolean(reel.isEarningEnabled || reel.isSpecialOffer)
     : (reel.isEarningEnabled !== false);
 
-  const isEarningActive = masterEarningOn && videoEarningOn && isReelEligible;
+  const isEarningActive = masterEarningOn && videoEarningOn && isReelEligible && !isOwnReel;
   const rewardPoints = reel.pointsReward || earningSettings?.defaultVideoRewardPoints || 10;
 
   const handleLike = (e: React.MouseEvent) => {
@@ -110,7 +142,7 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
     }
   };
 
-  const likesDisplay = isLiked ? reel.likesCount + 1 : reel.likesCount;
+  const likesDisplay = Math.max(0, reel.likesCount || 0);
   const ytId = extractYouTubeId(reel.videoUrl);
   const displayThumbnail = (ytId && (!reel.thumbnailUrl || reel.thumbnailUrl.includes('unsplash')))
     ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`
@@ -152,23 +184,47 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
           </div>
         </div>
 
-        {/* Category tag on top left & Special Offer badge on top right */}
-        <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between pointer-events-none">
-          <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-black/60 backdrop-blur-md text-emerald-300 border border-emerald-500/20">
-            {reel.category}
-          </span>
-          {reel.isSpecialOffer && (
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-gradient-to-r from-amber-500 to-rose-500 text-black shadow-lg flex items-center gap-1 animate-pulse border border-amber-300">
-              <Flame className="w-3 h-3 fill-current text-black" />
-              <span>{reel.specialOfferBadge || (lang === 'bn' ? 'অফার রিল' : 'Offer')}</span>
+        {/* Category badge button on top left & Own Reel / Special Offer badge on top right */}
+        <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between gap-2 z-10 pointer-events-none">
+          <button
+            type="button"
+            onClick={handleCategoryClick}
+            className={`pointer-events-auto px-2.5 py-1 rounded-xl text-[11px] font-black backdrop-blur-md border shadow-md flex items-center gap-1.5 transition-all duration-200 cursor-pointer active:scale-95 group/cat hover:brightness-125 select-none ${
+              categoryMeta.badgeBg
+            } ${categoryMeta.badgeBorder} ${categoryMeta.badgeText} ${
+              activeCategory === reel.category ? 'ring-2 ring-emerald-400 ring-offset-1 ring-offset-black/50 shadow-emerald-500/25' : ''
+            }`}
+            title={
+              lang === 'bn'
+                ? `${categoryMeta.labelBn} ক্যাটাগরির রিল ফিল্টার করুন`
+                : `Filter feed by ${categoryMeta.labelEn}`
+            }
+          >
+            <span className="text-xs transition-transform duration-200 group-hover/cat:scale-125">
+              {categoryMeta.icon}
             </span>
-          )}
-          {!isEarningActive && !reel.isSpecialOffer && (
-            <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-neutral-900/80 backdrop-blur-md text-neutral-400 border border-neutral-700/60 flex items-center gap-1">
-              <Eye className="w-2.5 h-2.5" />
-              <span>{lang === 'bn' ? 'শুধু বিনোদন' : 'No Earn'}</span>
+            <span className="tracking-wide">
+              {lang === 'bn' ? categoryMeta.labelBn : categoryMeta.labelEn}
             </span>
-          )}
+          </button>
+
+          <div className="flex items-center gap-1.5 pointer-events-auto">
+            {isOwnReel ? (
+              <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-black/70 backdrop-blur-md text-emerald-300 border border-emerald-500/35">
+                {lang === 'bn' ? 'আপনার রিল' : 'Your Reel'}
+              </span>
+            ) : reel.isSpecialOffer ? (
+              <span className="px-2 py-0.5 rounded-lg text-[10px] font-black bg-gradient-to-r from-amber-500 to-rose-500 text-black shadow-lg flex items-center gap-1 border border-amber-300">
+                <Flame className="w-3 h-3 fill-current text-black" />
+                <span>{reel.specialOfferBadge || (lang === 'bn' ? 'অফার রিল' : 'Offer')}</span>
+              </span>
+            ) : !isEarningActive ? (
+              <span className="px-2 py-0.5 rounded-lg text-[9px] font-bold bg-neutral-900/80 backdrop-blur-md text-neutral-300 border border-neutral-700/60 flex items-center gap-1">
+                <Eye className="w-2.5 h-2.5" />
+                <span>{lang === 'bn' ? 'শুধু বিনোদন' : 'No Earn'}</span>
+              </span>
+            ) : null}
+          </div>
         </div>
 
         {/* Progress Bar towards next level/reward matching prompt */}
@@ -179,21 +235,27 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
           />
         </div>
 
-        {/* Bottom Creator Pill matching Screenshot 1 */}
-        <div className="absolute bottom-3 left-2.5 right-2.5 flex items-center gap-2">
-          <div 
-            className="flex items-center gap-2 cursor-pointer group/creator"
+        {/* Bottom Creator Pill & View Count Social Proof */}
+        <div className="absolute bottom-3 left-2.5 right-2.5 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            className="flex items-center gap-2 cursor-pointer group/creator min-w-0 flex-1 text-left"
             onClick={(e) => {
               e.stopPropagation();
               onOpenCreatorProfile(reel.userId);
             }}
+            title={
+              lang === 'bn'
+                ? `${reel.creatorName}-এর প্রোফাইল দেখুন`
+                : `View ${reel.creatorName}'s profile`
+            }
           >
             <div className="relative shrink-0">
               <div className={`w-7 h-7 rounded-full bg-neutral-800 ${!imgLoaded ? 'animate-pulse' : ''}`}>
                 <img
                   src={reel.creatorAvatar}
                   alt={reel.creatorName}
-                  className={`w-7 h-7 rounded-full object-cover border border-emerald-400 transition-opacity ${
+                  className={`w-7 h-7 rounded-full object-cover border border-emerald-400 group-hover/creator:border-white transition-all ${
                     imgLoaded ? 'opacity-100' : 'opacity-0'
                   }`}
                 />
@@ -206,13 +268,51 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
             </div>
             <div className="min-w-0 flex-1">
               {imgLoaded ? (
-                <p className="text-xs font-semibold text-white truncate drop-shadow-sm group-hover/creator:text-emerald-400 transition-colors">
-                  {reel.title} • {reel.timeAgo}
-                </p>
+                <>
+                  <p className="text-xs font-extrabold text-white truncate drop-shadow-sm group-hover/creator:text-emerald-400 group-hover/creator:underline transition-colors">
+                    {reel.creatorName}
+                  </p>
+                  <div className="text-[10px] font-medium text-neutral-300/90 truncate drop-shadow-sm flex items-center gap-1.5 mt-0.5">
+                    <button
+                      type="button"
+                      onClick={handleCategoryClick}
+                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-black border transition-all cursor-pointer hover:brightness-125 shrink-0 ${
+                        categoryMeta.badgeBg
+                      } ${categoryMeta.badgeBorder} ${categoryMeta.badgeText}`}
+                      title={
+                        lang === 'bn'
+                          ? `${categoryMeta.labelBn} ক্যাটাগরি ফিল্টার করুন`
+                          : `Filter by ${categoryMeta.labelEn}`
+                      }
+                    >
+                      <span>{categoryMeta.icon}</span>
+                      <span>{lang === 'bn' ? categoryMeta.labelBn : categoryMeta.labelEn}</span>
+                    </button>
+                    <span className="text-neutral-500 text-[8px] shrink-0">•</span>
+                    <span className="truncate">{reel.title}</span>
+                  </div>
+                </>
               ) : (
                 <div className="h-3 bg-neutral-800 rounded w-24 animate-pulse" />
               )}
             </div>
+          </button>
+
+          {/* View Count Indicator */}
+          <div
+            data-testid="reel-view-count"
+            className={`shrink-0 px-2 py-0.5 rounded-full bg-black/65 backdrop-blur-md border text-[10px] font-bold flex items-center gap-1 tabular-nums shadow-sm transition-all duration-300 pointer-events-none ${
+              viewJustIncremented
+                ? 'border-emerald-400 text-emerald-300 scale-110 shadow-emerald-500/30'
+                : 'border-white/15 text-slate-100'
+            }`}
+            title={lang === 'bn' ? 'মোট ভিউ' : 'Total views'}
+          >
+            <Eye className="w-3 h-3 text-emerald-400 shrink-0" />
+            <span>{toBengaliNumber(viewsCount.toLocaleString('en-US'), lang)}</span>
+            <span className="text-[9px] text-slate-300 font-medium">
+              {lang === 'bn' ? 'ভিউ' : 'views'}
+            </span>
           </div>
         </div>
       </div>
@@ -336,20 +436,21 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
           <div className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-neutral-800/60 text-slate-200">
             <Share2 className="w-4 h-4" />
           </div>
-          <span className="text-[10px] font-medium text-slate-300">
-            {lang === 'bn' ? 'শেয়ার' : 'Share'}
+          <span className="text-[10px] font-medium text-slate-300 tabular-nums">
+            {reel.sharesCount ? toBengaliNumber(reel.sharesCount, lang) : (lang === 'bn' ? 'শেয়ার' : 'Share')}
           </span>
         </button>
 
-        {/* Gift Button matching Prompt: 🎁 গিফট */}
-        {isGiftsEnabled && (
+        {/* Gift Button: strictly hidden on user's own reels */}
+        {isGiftsEnabled && !isOwnReel && (
           <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               onOpenGift(reel);
             }}
             className="flex flex-col items-center gap-0.5 cursor-pointer"
-            title="গিফট পাঠান / Send Gift"
+            title={lang === 'bn' ? 'গিফট পাঠান' : 'Send Gift'}
           >
             <div className="w-8 h-8 rounded-xl bg-[#ff2d55]/20 border border-[#ff2d55]/60 hover:bg-[#ff2d55] text-white flex items-center justify-center shadow-md transition active:scale-95 text-xs">
               🎁
@@ -360,20 +461,21 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
           </button>
         )}
 
-        {/* Action Button: + পয়েন্ট বা শুধু দেখা */}
+        {/* Action Button: + পয়েন্ট বা শুধু দেখা (Own reels never earn points) */}
         {isEarningActive && allowFeedClaim ? (
           <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               onClaimDirect(reel);
             }}
-            className={`px-2 py-1 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-md transition-all active:scale-95 cursor-pointer ${
+            className={`px-2 py-1.5 rounded-xl text-[10px] font-extrabold flex items-center gap-1 shadow-md transition-all active:scale-95 cursor-pointer tabular-nums ${
               hasWatched
-                ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-500/40'
+                ? 'bg-emerald-950/85 text-emerald-400 border border-emerald-500/40'
                 : isDailyLimitReached
                 ? 'bg-neutral-900/90 text-amber-300 border border-amber-500/40'
                 : reel.isSpecialOffer
-                ? 'bg-gradient-to-r from-amber-400 to-[#00c853] text-black border border-amber-300 shadow-amber-500/30 animate-pulse'
+                ? 'bg-gradient-to-r from-amber-400 to-[#00c853] text-black border border-amber-300 shadow-amber-500/30'
                 : 'bg-[#00c853] hover:bg-[#00e676] text-black shadow-emerald-500/30'
             }`}
             title={
@@ -400,12 +502,13 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
           </button>
         ) : (
           <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               onOpenReel(reel);
             }}
-            className="px-2 py-1 rounded-full text-[9px] font-bold flex items-center gap-0.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700/60 shadow-sm transition active:scale-95 cursor-pointer"
-            title="রিলটি প্লে করুন"
+            className="px-2.5 py-1.5 rounded-xl text-[10px] font-bold flex items-center gap-1 bg-neutral-800/90 hover:bg-neutral-700 text-neutral-200 border border-neutral-700/60 shadow-sm transition active:scale-95 cursor-pointer"
+            title={lang === 'bn' ? 'রিলটি প্লে করুন' : 'Watch reel'}
           >
             <Play className="w-2.5 h-2.5 fill-current" />
             <span>{lang === 'bn' ? 'দেখুন' : 'Watch'}</span>

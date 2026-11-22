@@ -36,7 +36,14 @@
         "dailyReelClaimsCount": { "type": "number" },
         "dailyReelPointsEarned": { "type": "number" },
         "loginOfferClaimed": { "type": "boolean" },
-        "loginOfferCampaignId": { "type": "string", "maxLength": 100 }
+        "loginOfferCampaignId": { "type": "string", "maxLength": 100 },
+        "dailySpinClaimDate": { "type": "string", "maxLength": 40 },
+        "dailySpinClaimsCount": { "type": "number" },
+        "dailyScratchClaimDate": { "type": "string", "maxLength": 40 },
+        "referralsCount": { "type": "number" },
+        "referralEarnedPoints": { "type": "number" },
+        "likedReelIds": { "type": "array", "items": { "type": "string" }, "maxItems": 2000 },
+        "likedCommentIds": { "type": "array", "items": { "type": "string" }, "maxItems": 2000 }
       },
       "required": ["id", "name", "phone", "points", "role", "createdAt"]
     },
@@ -169,6 +176,8 @@
         "chatEnabled": { "type": "boolean" },
         "allowSpeakerRequests": { "type": "boolean" },
         "viewersCount": { "type": "number" },
+        "peakViewersCount": { "type": "number" },
+        "peakAt": { "type": "string", "format": "date-time" },
         "likesCount": { "type": "number" },
         "giftsTotalPoints": { "type": "number" },
         "adminGiftPoints": { "type": "number" },
@@ -375,6 +384,10 @@
         "followers": { "type": "array", "items": { "type": "string" }, "maxItems": 1000 },
         "following": { "type": "array", "items": { "type": "string" }, "maxItems": 1000 },
         "reelsWatchedCount": { "type": "number" },
+        "points": { "type": "number" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "referralsCount": { "type": "number" },
+        "referralEarnedPoints": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "name", "createdAt"]

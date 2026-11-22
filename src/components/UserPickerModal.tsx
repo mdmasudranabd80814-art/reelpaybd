@@ -11,6 +11,21 @@ interface UserPickerModalProps {
   currentUser: User;
 }
 
+const DEMO_USER_IDS = new Set([
+  'usr_bd_01',
+  'system_admin',
+  'creator_sakib',
+  'creator_russell',
+  'creator_tanjila',
+  'user_001',
+  'user_002',
+  'user_003',
+  'user_004',
+  'user_005',
+  'user_006',
+  'user_7788',
+]);
+
 export const UserPickerModal: React.FC<UserPickerModalProps> = ({
   isOpen,
   onClose,
@@ -26,6 +41,8 @@ export const UserPickerModal: React.FC<UserPickerModalProps> = ({
   const filteredUsers = users.filter(
     (u) =>
       u.id !== currentUser.id &&
+      !u.id.startsWith('GUEST-') &&
+      !DEMO_USER_IDS.has(u.id) &&
       (u.name || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 

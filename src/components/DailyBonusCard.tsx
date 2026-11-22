@@ -26,10 +26,7 @@ export const DailyBonusCard: React.FC<DailyBonusCardProps> = ({
   const [animating, setAnimating] = React.useState(false);
 
   const handleClaim = () => {
-    if (!isEnabled) {
-      alert('দৈনিক বোনাস বর্তমানে বন্ধ রয়েছে।');
-      return;
-    }
+    if (!isEnabled) return;
 
     if (!isAuthenticated) {
       onRequireAuth?.();
@@ -59,11 +56,11 @@ export const DailyBonusCard: React.FC<DailyBonusCardProps> = ({
   };
 
   return (
-    <div className="rounded-2xl bg-[#141e18] border border-emerald-950/80 p-3.5 flex items-center justify-between gap-3 shadow-lg">
+    <div className="rounded-2xl bg-[#121e17] border border-emerald-900/50 p-3.5 flex items-center justify-between gap-3 shadow-md">
       <div className="flex items-center gap-3 min-w-0">
-        <div className="w-11 h-11 rounded-xl bg-emerald-950/80 border border-emerald-500/20 flex items-center justify-center shrink-0 text-[#00e676]">
+        <div className="w-11 h-11 rounded-xl bg-emerald-950/90 border border-emerald-500/25 flex items-center justify-center shrink-0 text-[#00e676]">
           {isEnabled ? (
-            <Gift className={`w-5 h-5 ${isClaimedToday ? 'text-emerald-500/50' : 'animate-bounce'}`} />
+            <Gift className={`w-5 h-5 ${isClaimedToday ? 'text-emerald-500/60' : 'text-[#00e676]'}`} />
           ) : (
             <Lock className="w-5 h-5 text-neutral-500" />
           )}
@@ -72,28 +69,29 @@ export const DailyBonusCard: React.FC<DailyBonusCardProps> = ({
           <h2 className="text-sm font-bold text-white leading-tight flex items-center gap-1.5">
             <span>দৈনিক বোনাস</span>
             {!isEnabled && (
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-neutral-800 text-amber-400 font-bold">বন্ধ</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-800 text-amber-400 font-bold">বন্ধ</span>
             )}
           </h2>
-          <p className="text-xs text-slate-400 truncate mt-0.5">
+          <p className="text-xs text-slate-400 truncate mt-0.5 tabular-nums">
             {!isEnabled
               ? 'এডমিন কর্তৃক দৈনিক বোনাস সাময়িকভাবে স্থগিত'
               : isClaimedToday
-              ? `আজকের ${toBengaliNumber(bonusPoints)} পয়েন্ট সংগ্রহ সম্পন্ন!`
-              : `আজ লগইন করে ${toBengaliNumber(bonusPoints)} পয়েন্ট সংগ্রহ করুন`}
+              ? `আজকের ${toBengaliNumber(bonusPoints)} পয়েন্ট সংগ্রহ সম্পন্ন`
+              : `আজ লগইন করে +${toBengaliNumber(bonusPoints)} পয়েন্ট সংগ্রহ করুন`}
           </p>
         </div>
       </div>
 
       <button
+        type="button"
         onClick={handleClaim}
-        disabled={isClaimedToday || !isEnabled}
-        className={`shrink-0 px-3 py-2 rounded-xl text-xs font-bold transition-all duration-150 flex items-center gap-1.5 cursor-pointer ${
+        disabled={isClaimedToday || !isEnabled || animating}
+        className={`shrink-0 min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all duration-150 flex items-center gap-1.5 tabular-nums ${
           !isEnabled
-            ? 'bg-neutral-800 text-neutral-500 border border-neutral-700/50 cursor-not-allowed opacity-70'
+            ? 'bg-neutral-800 text-neutral-500 border border-neutral-700/50 cursor-not-allowed'
             : isClaimedToday
-            ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/40 cursor-default opacity-80'
-            : 'bg-[#00c853] hover:bg-[#00e676] active:scale-95 text-black shadow-md shadow-emerald-500/20'
+            ? 'bg-emerald-950/70 text-emerald-400 border border-emerald-800/50 cursor-default'
+            : 'bg-[#00c853] hover:bg-[#00e676] active:scale-95 text-black shadow-md shadow-emerald-500/20 cursor-pointer'
         }`}
       >
         {!isEnabled ? (
@@ -104,7 +102,7 @@ export const DailyBonusCard: React.FC<DailyBonusCardProps> = ({
             <span>সংগৃহীত</span>
           </>
         ) : (
-          <span>সংগ্রহ করুন +{toBengaliNumber(bonusPoints)}</span>
+          <span>সংগ্রহ +{toBengaliNumber(bonusPoints)}</span>
         )}
       </button>
     </div>

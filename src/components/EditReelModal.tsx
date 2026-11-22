@@ -1,9 +1,10 @@
-import React, { useState, useRef } from 'react';
-import { X, Edit3, Video, UploadCloud, Link as LinkIcon, Sparkles } from 'lucide-react';
-import { Reel } from '../types';
+import React, { useState, useRef, useEffect } from 'react';
+import { X, Edit3, Video, UploadCloud, Link as LinkIcon, Sparkles, UserCheck } from 'lucide-react';
+import { Reel, User } from '../types';
 import { playSuccessChime } from '../utils/audio';
 import { storeVideoInDB, fileToDataUrl, captureVideoThumbnail } from '../utils/videoStorage';
 import { extractYouTubeId } from '../utils/video';
+import { buildCreatorHandle } from '../utils/reelOwner';
 
 interface EditReelModalProps {
   reel: Reel;
@@ -12,6 +13,7 @@ interface EditReelModalProps {
   onUpdateReel: (reelId: string, updatedData: Partial<Reel>) => Promise<void>;
   lang: 'bn' | 'en';
   isMuted: boolean;
+  users?: User[];
 }
 
 export const EditReelModal: React.FC<EditReelModalProps> = ({
@@ -21,6 +23,7 @@ export const EditReelModal: React.FC<EditReelModalProps> = ({
   onUpdateReel,
   lang,
   isMuted,
+  users,
 }) => {
   const [title, setTitle] = useState(reel.title);
   const [category, setCategory] = useState(reel.category);
@@ -32,9 +35,24 @@ export const EditReelModal: React.FC<EditReelModalProps> = ({
   const [isEarningEnabled, setIsEarningEnabled] = useState<boolean>(reel.isEarningEnabled !== false);
   const [isSpecialOffer, setIsSpecialOffer] = useState<boolean>(Boolean(reel.isSpecialOffer));
   const [specialOfferBadge, setSpecialOfferBadge] = useState<string>(reel.specialOfferBadge || '🔥 স্পেশাল অফার');
+  const [selectedOwnerId, setSelectedOwnerId] = useState<string>(reel.userId || '');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [videoPreview, setVideoPreview] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    setTitle(reel.title);
+    setCategory(reel.category);
+    setCaption(reel.caption || '');
+    setVideoUrl(reel.videoUrl || '');
+    setThumbnailUrl(reel.thumbnailUrl || '');
+    setPointsReward(reel.pointsReward ?? 10);
+    setCustomWatchSeconds(reel.customWatchSeconds ?? 15);
+    setIsEarningEnabled(reel.isEarningEnabled !== false);
+    setIsSpecialOffer(Boolean(reel.isSpecialOffer));
+    setSpecialOfferBadge(reel.specialOfferBadge || '🔥 স্পেশাল অফার');
+    setSelectedOwnerId(reel.userId || '');
+  }, [reel.id]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -89,7 +107,19 @@ export const EditReelModal: React.FC<EditReelModalProps> = ({
         .filter((w) => w.startsWith('#'))
         .slice(0, 10);
 
+      const selectedOwner = users?.find((u) => u.id === selectedOwnerId);
+      const ownerPatch: Partial<Reel> = selectedOwner
+        ? {
+            userId: selectedOwner.id,
+            creatorName: selectedOwner.name,
+            creatorAvatar: selectedOwner.avatar || reel.creatorAvatar,
+            creatorHandle: `@${buildCreatorHandle(selectedOwner.name, selectedOwner.phone)}`,
+            isVerified: Boolean(selectedOwner.isVerified),
+          }
+        : {};
+
       await onUpdateReel(reel.id, {
+        ...ownerPatch,
         title: title.trim(),
         category,
         caption: caption.trim(),
@@ -134,6 +164,32 @@ export const EditReelModal: React.FC<EditReelModalProps> = ({
         </div>
 
         <form onSubmit={handleSave} className="space-y-3 text-xs">
+          {/* Owner User Profile Selector (when users list is passed, e.g. Admin) */}
+          {users && users.length > 0 && (
+            <div className="p-2.5 rounded-xl bg-[#0d1611] border border-emerald-900/70 space-y-1.5">
+              <label className="text-emerald-300 font-bold flex items-center gap-1.5 text-[11px]">
+                <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{lang === 'bn' ? 'ভিডিওর ইউজার প্রোফাইল (Creator):' : 'Owner User Profile:'}</span>
+              </label>
+              <select
+                value={selectedOwnerId}
+                onChange={(e) => setSelectedOwnerId(e.target.value)}
+                className="w-full bg-[#14231b] border border-emerald-900 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-emerald-500 font-semibold"
+              >
+                {!users.some((u) => u.id === selectedOwnerId) && (
+                  <option value={selectedOwnerId}>
+                    {reel.creatorName} ({selectedOwnerId || 'unassigned'})
+                  </option>
+                )}
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} {u.role === 'admin' ? '(Admin)' : ''} • {u.email || u.phone || u.id.slice(0, 8)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Title */}
           <div>
             <label className="text-neutral-400 block mb-1">
