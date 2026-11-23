@@ -4,6 +4,7 @@ import { ChatSession, ChatMessage, User, Reel } from '../types';
 import { useFirebase } from '../hooks/useFirebase';
 import { orderBy, limit, serverTimestamp } from 'firebase/firestore';
 import { toBengaliNumber } from '../utils/bengali';
+import { vibrateLight } from '../utils/haptics';
 
 interface ChatModalProps {
   isOpen: boolean;
@@ -60,6 +61,7 @@ export const ChatModal: React.FC<ChatModalProps> = ({
 
     const msgText = inputText.trim();
     setInputText('');
+    vibrateLight();
 
     const newMsg: Partial<ChatMessage> = {
       sessionId: session.id,

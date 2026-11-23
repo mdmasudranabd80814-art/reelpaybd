@@ -69,6 +69,7 @@ import {
   Wrench,
   Copy,
   UserCheck,
+  BarChart3,
 } from 'lucide-react';
 import { useFirebase } from '../hooks/useFirebase';
 import { orderBy, limit } from 'firebase/firestore';
@@ -80,6 +81,7 @@ import {
   ChatSession,
   ChatMessage,
   TaskItem,
+  TaskRequirementType,
   EarningSettings,
   DEFAULT_EARNING_SETTINGS,
   SiteSettings,
@@ -98,7 +100,10 @@ import { extractYouTubeId } from '../utils/video';
 import { getUserLevel } from '../utils/levels';
 import { calculateGiftSplit } from '../utils/gifts';
 import { buildCreatorHandle } from '../utils/reelOwner';
+import { REEL_UPLOAD_CATEGORIES } from '../utils/categories';
+import { buildScaledSpinPrizes, normalizeTaskOffer } from '../utils/offers';
 import { LiveViewerPeakChart } from './LiveViewerPeakChart';
+import { AdminAnalyticsTab } from './AdminAnalyticsTab';
 
 export interface AdminPanelProps {
   users: User[];
@@ -192,7 +197,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   isAuthorizedAdmin = false,
 }) => {
   // Navigation Tabs inside Admin Panel
-  const [activeAdminTab, setActiveAdminTab] = useState<'overview' | 'reels' | 'users' | 'earning' | 'live' | 'payments' | 'settings' | 'withdrawals' | 'deposits' | 'chats' | 'tasks'>('reels');
+  const [activeAdminTab, setActiveAdminTab] = useState<'overview' | 'analytics' | 'reels' | 'users' | 'earning' | 'live' | 'payments' | 'settings' | 'withdrawals' | 'deposits' | 'chats' | 'tasks'>('reels');
   
   // Local Earning & Site Settings State
   const [localEarning, setLocalEarning] = useState<EarningSettings>(() => earningSettings || DEFAULT_EARNING_SETTINGS);
@@ -237,9 +242,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   useEffect(() => {
     if (earningSettings) {
-      setLocalEarning(earningSettings);
+      setLocalEarning({ ...DEFAULT_EARNING_SETTINGS, ...earningSettings });
     }
   }, [earningSettings]);
+
+  useEffect(() => {
+    setSpinMaxInput(String(spinMaxPrize));
+  }, [spinMaxPrize]);
+
+  useEffect(() => {
+    setScratchPrizeInput(String(scratchCardPrize));
+  }, [scratchCardPrize]);
 
   useEffect(() => {
     if (siteSettings) {
@@ -264,10 +277,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [showAddTask, setShowAddTask] = useState(false);
   const [editingTask, setEditingTask] = useState<TaskItem | null>(null);
   const [taskTitle, setTaskTitle] = useState('');
+  const [taskDescription, setTaskDescription] = useState('');
+  const [taskBadgeText, setTaskBadgeText] = useState('');
   const [taskPoints, setTaskPoints] = useState<number>(50);
   const [taskCategory, setTaskCategory] = useState<string>('সোশ্যাল');
   const [taskActionUrl, setTaskActionUrl] = useState<string>('');
   const [taskIconName, setTaskIconName] = useState<string>('Send');
+  const [taskRequirementType, setTaskRequirementType] = useState<TaskRequirementType>('instant');
+  const [taskRequirementValue, setTaskRequirementValue] = useState<number>(1);
+  const [taskIsRepeatableDaily, setTaskIsRepeatableDaily] = useState<boolean>(false);
+  const [taskIsActive, setTaskIsActive] = useState<boolean>(true);
+  const [taskSortOrder, setTaskSortOrder] = useState<number>(10);
 
   // Earn Wheel & Scratch Card Admin Control State
   const [spinMaxInput, setSpinMaxInput] = useState<string>(String(spinMaxPrize));
@@ -391,7 +411,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [targetUserId, setTargetUserId] = useState<string>(currentUserUid || '');
   const [newTitle, setNewTitle] = useState('');
   const [newCreator, setNewCreator] = useState('');
-  const [newCategory, setNewCategory] = useState<'সকল' | 'ট্রেন্ডিং' | 'কমেডি' | 'গেমিং' | 'রান্না' | 'শিক্ষা'>('ট্রেন্ডিং');
+  const [newCategory, setNewCategory] = useState<Reel['category']>('কমেডি');
   const [newPointsReward, setNewPointsReward] = useState<number>(15);
   const [newCaption, setNewCaption] = useState('');
   const [newVideoUrl, setNewVideoUrl] = useState('');
@@ -592,7 +612,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       if (!finalThumbUrl) {
         finalThumbUrl = ytId
           ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`
-          : 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=600&auto=format&fit=crop&q=80';
+          : '/images/ai_comedian_stage.jpg';
       }
 
       if (!finalVideoUrl) {
@@ -812,7 +832,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-1 bg-[#101914] p-1.5 rounded-2xl border border-emerald-950/70">
         <button
           onClick={() => setActiveAdminTab('reels')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
+          className={`px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer whitespace-nowrap ${
             activeAdminTab === 'reels'
               ? 'bg-[#00c853] text-black shadow-lg shadow-emerald-500/25'
               : 'text-neutral-300 hover:text-white hover:bg-neutral-800'
@@ -820,6 +840,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         >
           <Video className="w-3.5 h-3.5" />
           <span>রিলস কন্ট্রোল ({toBengaliNumber(reels.length)})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveAdminTab('analytics')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer whitespace-nowrap ${
+            activeAdminTab === 'analytics'
+              ? 'bg-[#00c853] text-black shadow-lg shadow-emerald-500/25'
+              : 'text-emerald-300 hover:text-white hover:bg-neutral-800'
+          }`}
+        >
+          <BarChart3 className="w-3.5 h-3.5" />
+          <span>Analytics (অ্যানালিটিক্স)</span>
         </button>
 
         <button
@@ -1120,15 +1152,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <label className="text-xs text-neutral-400 block mb-1">ক্যাটাগরি:</label>
                     <select
                       value={newCategory}
-                      onChange={(e) => setNewCategory(e.target.value as any)}
+                      onChange={(e) => setNewCategory(e.target.value as Reel['category'])}
                       className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
                     >
-                      <option value="সকল">সকল</option>
-                      <option value="ট্রেন্ডিং">ট্রেন্ডিং</option>
-                      <option value="কমেডি">কমেডি</option>
-                      <option value="গেমিং">গেমিং</option>
-                      <option value="রান্না">রান্না</option>
-                      <option value="শিক্ষা">শিক্ষা</option>
+                      {REEL_UPLOAD_CATEGORIES.map((cat) => (
+                        <option key={cat.value} value={cat.value}>
+                          {cat.labelBn}
+                        </option>
+                      ))}
                     </select>
                   </div>
                   <div>
@@ -2054,6 +2085,179 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
 
+          {/* 2.4 GLOBAL DAILY TOTAL EARNING LIMIT CONTROL (ALL SOURCES) */}
+          <div className={`rounded-2xl p-4 border shadow-lg space-y-4 transition-all ${
+            localEarning.isDailyTotalLimitEnabled !== false
+              ? 'bg-gradient-to-r from-[#1a2211] to-[#0d1611] border-amber-500/45'
+              : 'bg-[#141f19] border-emerald-950'
+          }`}>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-emerald-950">
+              <div className="flex items-start gap-2.5">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                  localEarning.isDailyTotalLimitEnabled !== false
+                    ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+                    : 'bg-neutral-800 border-neutral-700 text-neutral-400'
+                }`}>
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-sm font-black text-white">
+                      🛑 গ্লোবাল দৈনিক মোট উপার্জন লিমিট (Global Daily Earning Cap)
+                    </h4>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-black border ${
+                      localEarning.isDailyTotalLimitEnabled !== false
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                        : 'bg-neutral-800 text-neutral-400 border-neutral-700'
+                    }`}>
+                      {localEarning.isDailyTotalLimitEnabled !== false
+                        ? `সক্রিয় (সর্বোচ্চ ${toBengaliNumber(localEarning.dailyMaxTotalPoints ?? 250)} Pts/দিন)`
+                        : 'বন্ধ (শুধু সেকশন-ভিত্তিক লিমিট)'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-neutral-400 mt-0.5">
+                    রিল দেখা, স্পিন, স্ক্র্যাচ কার্ড, দৈনিক বোনাস ও টাস্ক/অফার মিলিয়ে একজন ইউজার প্রতিদিন সর্বোচ্চ কত পয়েন্ট উপার্জন করতে পারবে তা নির্ধারণ করুন
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const nextEnabled = localEarning.isDailyTotalLimitEnabled === false;
+                  const updated: EarningSettings = {
+                    ...localEarning,
+                    isDailyTotalLimitEnabled: nextEnabled,
+                  };
+                  setLocalEarning(updated);
+                  if (onUpdateEarningSettings) onUpdateEarningSettings(updated);
+                  playSuccessChime();
+                }}
+                className={`px-4 py-2 rounded-xl font-black text-xs transition-all cursor-pointer shrink-0 active:scale-95 shadow-md ${
+                  localEarning.isDailyTotalLimitEnabled !== false
+                    ? 'bg-amber-400 hover:bg-amber-300 text-black'
+                    : 'bg-neutral-700 hover:bg-neutral-600 text-white'
+                }`}
+              >
+                {localEarning.isDailyTotalLimitEnabled !== false ? '✅ গ্লোবাল লিমিট চালু' : '🚫 লিমিট বন্ধ (চালু করুন)'}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Global Daily Max Total Points */}
+              <div className="bg-[#0e1712] p-3.5 rounded-xl border border-emerald-950 space-y-2">
+                <label className="text-xs font-bold text-amber-300 flex items-center justify-between">
+                  <span>🪙 দৈনিক সর্বোচ্চ মোট পয়েন্ট লিমিট (সকল উৎস):</span>
+                  <span className="text-emerald-400 font-extrabold text-sm font-mono">
+                    {(localEarning.dailyMaxTotalPoints ?? 250) > 0
+                      ? `${toBengaliNumber(localEarning.dailyMaxTotalPoints ?? 250)} Pts/দিন`
+                      : 'আনলিমিটেড'}
+                  </span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100000"
+                    value={localEarning.dailyMaxTotalPoints ?? 250}
+                    onChange={(e) => {
+                      const raw = parseInt(e.target.value, 10);
+                      const val = Number.isNaN(raw) ? 0 : Math.max(0, raw);
+                      setLocalEarning(prev => ({ ...prev, dailyMaxTotalPoints: val }));
+                    }}
+                    className="w-28 bg-[#14231b] border border-emerald-900 rounded-xl px-3 py-2 text-sm text-white font-black text-center focus:outline-none focus:border-amber-400"
+                  />
+                  <span className="text-xs text-neutral-400">পয়েন্ট (সকল অফার/টাস্ক/রিলস মিলিয়ে)</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {[100, 200, 250, 500, 1000, 2000].map((pts) => (
+                    <button
+                      key={pts}
+                      type="button"
+                      onClick={() => {
+                        const updated = { ...localEarning, isDailyTotalLimitEnabled: true, dailyMaxTotalPoints: pts };
+                        setLocalEarning(updated);
+                        if (onUpdateEarningSettings) onUpdateEarningSettings(updated);
+                        playPopSound();
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                        (localEarning.dailyMaxTotalPoints ?? 250) === pts
+                          ? 'bg-amber-400 text-black shadow-md'
+                          : 'bg-[#14231b] text-neutral-300 hover:text-white border border-emerald-900/60'
+                      }`}
+                    >
+                      {toBengaliNumber(pts)} Pts
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Daily Task/Offer Claims Limit */}
+              <div className="bg-[#0e1712] p-3.5 rounded-xl border border-emerald-950 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-emerald-300">
+                    🎯 দৈনিক সর্বোচ্চ অফার / টাস্ক ক্লেইম লিমিট:
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={localEarning.isDailyTaskLimitEnabled !== false}
+                      onChange={(e) => {
+                        const updated = { ...localEarning, isDailyTaskLimitEnabled: e.target.checked };
+                        setLocalEarning(updated);
+                        if (onUpdateEarningSettings) onUpdateEarningSettings(updated);
+                      }}
+                      className="rounded text-emerald-500 focus:ring-0"
+                    />
+                    <span className="text-[11px] font-bold text-emerald-400">
+                      {localEarning.isDailyTaskLimitEnabled !== false ? 'চালু' : 'বন্ধ'}
+                    </span>
+                  </label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    max="200"
+                    value={localEarning.dailyMaxTaskClaims ?? 5}
+                    onChange={(e) => {
+                      const raw = parseInt(e.target.value, 10);
+                      const val = Number.isNaN(raw) ? 0 : Math.max(0, raw);
+                      setLocalEarning(prev => ({ ...prev, dailyMaxTaskClaims: val }));
+                    }}
+                    className="w-24 bg-[#14231b] border border-emerald-900 rounded-xl px-3 py-2 text-sm text-white font-black text-center focus:outline-none focus:border-emerald-400"
+                  />
+                  <span className="text-xs text-neutral-400">টি অফার/দিন (০ = আনলিমিটেড)</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {[2, 3, 5, 10, 0].map((cnt) => (
+                    <button
+                      key={cnt}
+                      type="button"
+                      onClick={() => {
+                        const updated = {
+                          ...localEarning,
+                          isDailyTaskLimitEnabled: cnt > 0,
+                          dailyMaxTaskClaims: cnt,
+                        };
+                        setLocalEarning(updated);
+                        if (onUpdateEarningSettings) onUpdateEarningSettings(updated);
+                        playPopSound();
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                        (localEarning.dailyMaxTaskClaims ?? 5) === cnt
+                          ? 'bg-[#00c853] text-black shadow-md'
+                          : 'bg-[#14231b] text-neutral-300 hover:text-white border border-emerald-900/60'
+                      }`}
+                    >
+                      {cnt === 0 ? 'আনলিমিটেড' : `${toBengaliNumber(cnt)}টি/দিন`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* 2.5 DAILY REEL & POINT EARNING LIMIT CONTROL */}
           <div className={`rounded-2xl p-4 border shadow-lg space-y-4 transition-all ${
             localEarning.isDailyReelLimitEnabled !== false
@@ -2486,9 +2690,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <span className="text-xs text-neutral-400">দৈনিক বোনাস পয়েন্ট:</span>
                   <input
                     type="number"
-                    min="1"
+                    min="0"
                     value={localEarning.dailyBonusPoints}
-                    onChange={(e) => setLocalEarning(prev => ({ ...prev, dailyBonusPoints: parseInt(e.target.value, 10) || 50 }))}
+                    onChange={(e) => {
+                      const raw = parseInt(e.target.value, 10);
+                      setLocalEarning(prev => ({ ...prev, dailyBonusPoints: Number.isNaN(raw) ? 0 : Math.max(0, raw) }));
+                    }}
                     className="w-24 bg-[#14231b] border border-emerald-900 rounded-lg px-2.5 py-1 text-xs text-white font-bold text-center focus:border-emerald-500"
                   />
                   <span className="text-xs text-neutral-400">পয়েন্ট</span>
@@ -2519,9 +2726,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <span className="text-xs text-neutral-400">সর্বোচ্চ পুরস্কার পয়েন্ট:</span>
                     <input
                       type="number"
-                      min="10"
+                      min="1"
                       value={localEarning.spinMaxPrize}
-                      onChange={(e) => setLocalEarning(prev => ({ ...prev, spinMaxPrize: parseInt(e.target.value, 10) || 100 }))}
+                      onChange={(e) => {
+                        const raw = parseInt(e.target.value, 10);
+                        const val = Number.isNaN(raw) ? 10 : Math.max(1, raw);
+                        setLocalEarning(prev => ({
+                          ...prev,
+                          spinMaxPrize: val,
+                          spinPrizes: buildScaledSpinPrizes(val),
+                        }));
+                      }}
                       className="w-24 bg-[#14231b] border border-emerald-900 rounded-lg px-2.5 py-1 text-xs text-white font-bold text-center focus:border-emerald-500"
                     />
                   </div>
@@ -2547,7 +2762,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         type="number"
                         min="1"
                         value={localEarning.spinVideosRequired ?? 2}
-                        onChange={(e) => setLocalEarning(prev => ({ ...prev, spinVideosRequired: parseInt(e.target.value, 10) || 2 }))}
+                        onChange={(e) => {
+                          const raw = parseInt(e.target.value, 10);
+                          setLocalEarning(prev => ({ ...prev, spinVideosRequired: Number.isNaN(raw) ? 1 : Math.max(1, raw) }));
+                        }}
                         className="w-24 bg-[#14231b] border border-emerald-900 rounded-lg px-2.5 py-1 text-xs text-white font-bold text-center focus:border-emerald-500"
                       />
                     </div>
@@ -2556,13 +2774,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       <span className="text-neutral-400">দৈনিক সর্বোচ্চ স্পিন:</span>
                       <input
                         type="number"
-                        min="1"
+                        min="0"
                         value={localEarning.dailyMaxSpins ?? 5}
-                        onChange={(e) => setLocalEarning(prev => ({ ...prev, dailyMaxSpins: parseInt(e.target.value, 10) || 5 }))}
+                        onChange={(e) => {
+                          const raw = parseInt(e.target.value, 10);
+                          setLocalEarning(prev => ({ ...prev, dailyMaxSpins: Number.isNaN(raw) ? 0 : Math.max(0, raw) }));
+                        }}
                         className="w-24 bg-[#14231b] border border-emerald-900 rounded-lg px-2.5 py-1 text-xs text-white font-bold text-center focus:border-emerald-500"
                       />
                     </div>
                   )}
+
+                  <div className="pt-1">
+                    <span className="text-[10px] text-neutral-400 block mb-1">চাকার ৮টি স্লটের পয়েন্ট (কমা দিয়ে কাস্টমাইজ):</span>
+                    <input
+                      type="text"
+                      value={(localEarning.spinPrizes || []).join(', ')}
+                      onChange={(e) => {
+                        const nums = e.target.value
+                          .split(',')
+                          .map((s) => parseInt(s.trim(), 10))
+                          .filter((n) => !Number.isNaN(n) && n >= 0)
+                          .slice(0, 12);
+                        if (nums.length > 0) {
+                          setLocalEarning(prev => ({ ...prev, spinPrizes: nums, spinMaxPrize: Math.max(...nums) }));
+                        }
+                      }}
+                      className="w-full bg-[#14231b] border border-emerald-900 rounded-lg px-2.5 py-1.5 text-[11px] font-mono text-emerald-300 focus:border-emerald-500"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -2589,9 +2829,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <span className="text-xs text-neutral-400">নিশ্চিত পুরস্কার পয়েন্ট:</span>
                   <input
                     type="number"
-                    min="5"
+                    min="0"
                     value={localEarning.scratchCardPrize}
-                    onChange={(e) => setLocalEarning(prev => ({ ...prev, scratchCardPrize: parseInt(e.target.value, 10) || 35 }))}
+                    onChange={(e) => {
+                      const raw = parseInt(e.target.value, 10);
+                      setLocalEarning(prev => ({ ...prev, scratchCardPrize: Number.isNaN(raw) ? 0 : Math.max(0, raw) }));
+                    }}
                     className="w-24 bg-[#14231b] border border-emerald-900 rounded-lg px-2.5 py-1 text-xs text-white font-bold text-center focus:border-emerald-500"
                   />
                   <span className="text-xs text-neutral-400">পয়েন্ট</span>
@@ -2599,11 +2842,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
 
               {/* Referral System Control */}
-              <div className="p-3.5 rounded-xl bg-[#0e1712] border border-emerald-950 space-y-2">
+              <div className="p-3.5 rounded-xl bg-[#0e1712] border border-emerald-950 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-white text-xs flex items-center gap-1.5">
                     <Share2 className="w-4 h-4 text-emerald-400" />
-                    <span>রেফারাল সিস্টেম (Referral Program):</span>
+                    <span>রেফারাল সিস্টেম ও শর্ত কন্ট্রোল:</span>
                   </span>
                   <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
@@ -2617,15 +2860,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </span>
                   </label>
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="grid grid-cols-3 gap-2 text-xs">
                   <div>
                     <span className="text-[10px] text-neutral-400 block mb-0.5">রেফারকারী পাবে:</span>
                     <input
                       type="number"
                       min="0"
                       value={localEarning.referralRewardPoints}
-                      onChange={(e) => setLocalEarning(prev => ({ ...prev, referralRewardPoints: parseInt(e.target.value, 10) || 50 }))}
-                      className="w-full bg-[#14231b] border border-emerald-900 rounded-lg px-2.5 py-1 text-xs text-white font-bold text-center focus:border-emerald-500"
+                      onChange={(e) => {
+                        const raw = parseInt(e.target.value, 10);
+                        setLocalEarning(prev => ({ ...prev, referralRewardPoints: Number.isNaN(raw) ? 0 : Math.max(0, raw) }));
+                      }}
+                      className="w-full bg-[#14231b] border border-emerald-900 rounded-lg px-2 py-1 text-xs text-white font-bold text-center focus:border-emerald-500"
                     />
                   </div>
                   <div>
@@ -2634,11 +2880,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       type="number"
                       min="0"
                       value={localEarning.referredUserRewardPoints}
-                      onChange={(e) => setLocalEarning(prev => ({ ...prev, referredUserRewardPoints: parseInt(e.target.value, 10) || 20 }))}
-                      className="w-full bg-[#14231b] border border-emerald-900 rounded-lg px-2.5 py-1 text-xs text-white font-bold text-center focus:border-emerald-500"
+                      onChange={(e) => {
+                        const raw = parseInt(e.target.value, 10);
+                        setLocalEarning(prev => ({ ...prev, referredUserRewardPoints: Number.isNaN(raw) ? 0 : Math.max(0, raw) }));
+                      }}
+                      className="w-full bg-[#14231b] border border-emerald-900 rounded-lg px-2 py-1 text-xs text-white font-bold text-center focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-neutral-400 block mb-0.5">দৈনিক রেফার লিমিট:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={localEarning.dailyMaxReferrals ?? 10}
+                      onChange={(e) => {
+                        const raw = parseInt(e.target.value, 10);
+                        setLocalEarning(prev => ({ ...prev, dailyMaxReferrals: Number.isNaN(raw) ? 0 : Math.max(0, raw) }));
+                      }}
+                      className="w-full bg-[#14231b] border border-emerald-900 rounded-lg px-2 py-1 text-xs text-white font-bold text-center focus:border-emerald-500"
                     />
                   </div>
                 </div>
+                <label className="flex items-center gap-2 pt-1 cursor-pointer text-[11px] text-neutral-300">
+                  <input
+                    type="checkbox"
+                    checked={localEarning.requireReelWatchForReferral !== false}
+                    onChange={(e) => setLocalEarning(prev => ({ ...prev, requireReelWatchForReferral: e.target.checked }))}
+                    className="rounded text-emerald-500 focus:ring-0"
+                  />
+                  <span>বন্ধু ১টি রিল দেখার পরই রেফার বোনাস আনলক হবে (অ্যান্টি-ফেক চেক)</span>
+                </label>
               </div>
 
               {/* Tasks Center Control */}
@@ -2646,7 +2917,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-white text-xs flex items-center gap-1.5">
                     <PlayCircle className="w-4 h-4 text-emerald-400" />
-                    <span>টাস্ক সেন্টার (Tasks Center):</span>
+                    <span>টাস্ক ও অফার সেন্টার (Tasks Center):</span>
                   </span>
                   <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
@@ -2660,7 +2931,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </span>
                   </label>
                 </div>
-                <p className="text-[11px] text-neutral-400">সোশ্যাল লিংক ও ভিজিট টাস্কের পয়েন্ট আর্নিং সক্রিয়/নিষ্ক্রিয় করুন</p>
+                <p className="text-[11px] text-neutral-400">সোশ্যাল, রেফারাল ও স্পেশাল অফার টাস্ক চালু/বন্ধ এবং &apos;টাস্ক ও অফার&apos; ট্যাব থেকে অফার ম্যানেজ করুন</p>
               </div>
 
               {/* Level Multipliers Control */}
@@ -4311,14 +4582,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
-      {/* TAB 7: TASKS & SOCIAL LINKS CONTROL */}
+      {activeAdminTab === 'analytics' && (
+        <AdminAnalyticsTab
+          withdrawals={withdrawals}
+          users={users}
+          reels={reels}
+          onNavigateTab={(tab) => setActiveAdminTab(tab)}
+        />
+      )}
+
+      {/* TAB 7: TASKS & CUSTOM OFFERS MANAGEMENT */}
       {activeAdminTab === 'tasks' && (
         <div className="space-y-4">
           {/* Spin Wheel & Scratch Card Admin Control Box */}
           <div className="rounded-2xl bg-gradient-to-br from-[#12241b] to-[#0c1812] border border-emerald-900/80 p-4 shadow-lg space-y-3">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-emerald-400" />
-              <span>🎮 'আয় করুন' সেকশন গেমের পয়েন্ট কাস্টমাইজেশন (স্পিন হুইল ও স্ক্র্যাচ কার্ড)</span>
+              <span>🎮 &apos;আয় করুন&apos; সেকশন গেমের পয়েন্ট কাস্টমাইজেশন (স্পিন হুইল ও স্ক্র্যাচ কার্ড)</span>
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               <div className="bg-[#0b140f] p-3 rounded-xl border border-emerald-950 space-y-2">
@@ -4328,11 +4608,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <div className="flex gap-2">
                   <input
                     type="number"
+                    min="1"
                     value={spinMaxInput}
                     onChange={(e) => setSpinMaxInput(e.target.value)}
                     className="flex-1 bg-[#132219] border border-emerald-900 rounded-lg px-3 py-1.5 text-xs text-white font-bold outline-none focus:border-emerald-500"
                   />
                   <button
+                    type="button"
                     onClick={() => {
                       const val = parseInt(spinMaxInput, 10);
                       if (val && val > 0 && onUpdateSpinMaxPrize) {
@@ -4354,11 +4636,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <div className="flex gap-2">
                   <input
                     type="number"
+                    min="1"
                     value={scratchPrizeInput}
                     onChange={(e) => setScratchPrizeInput(e.target.value)}
                     className="flex-1 bg-[#132219] border border-emerald-900 rounded-lg px-3 py-1.5 text-xs text-white font-bold outline-none focus:border-emerald-500"
                   />
                   <button
+                    type="button"
                     onClick={() => {
                       const val = parseInt(scratchPrizeInput, 10);
                       if (val && val > 0 && onUpdateScratchPrize) {
@@ -4375,75 +4659,177 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
 
-          <div className="rounded-2xl bg-[#141f19] border border-emerald-950 p-4 shadow-lg">
-            <div className="flex items-center justify-between">
+          <div className="rounded-2xl bg-[#141f19] border border-emerald-950 p-4 shadow-lg space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <PlayCircle className="w-4 h-4 text-emerald-400" />
-                  <span>🎯 টাস্ক হাব ও সোশ্যাল মিডিয়া লিংক ম্যানেজমেন্ট</span>
+                  <span>🎯 টাস্ক ও কাস্টম অফার ম্যানেজমেন্ট (সব অফার নিয়ন্ত্রণ)</span>
                 </h3>
                 <p className="text-xs text-neutral-400 mt-0.5">
-                  টেলিগ্রাম, ইউটিউব, ফেসবুক বা কাস্টম লিংকের নতুন টাস্ক যোগ করুন ও পয়েন্ট কাস্টমাইজ করুন
+                  রেফারাল অফার, সোশ্যাল লিংক, রিল ওয়াচ চ্যালেঞ্জ বা স্পেশাল অফার ইচ্ছামতো শর্ত ও পয়েন্ট দিয়ে যোগ করুন
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => {
+                  const willOpen = !(showAddTask || editingTask);
                   setEditingTask(null);
                   setTaskTitle('');
+                  setTaskDescription('');
+                  setTaskBadgeText('');
                   setTaskPoints(50);
                   setTaskCategory('সোশ্যাল');
                   setTaskActionUrl('');
                   setTaskIconName('Send');
-                  setShowAddTask(!showAddTask);
+                  setTaskRequirementType('instant');
+                  setTaskRequirementValue(1);
+                  setTaskIsRepeatableDaily(false);
+                  setTaskIsActive(true);
+                  setTaskSortOrder((tasks?.length || 0) + 1);
+                  setShowAddTask(willOpen);
                 }}
-                className="px-3.5 py-1.5 rounded-xl bg-[#00c853] hover:bg-[#00e676] text-black text-xs font-bold transition cursor-pointer shadow-md"
+                className="px-3.5 py-2 rounded-xl bg-[#00c853] hover:bg-[#00e676] text-black text-xs font-extrabold transition cursor-pointer shadow-md shrink-0"
               >
-                {showAddTask ? 'বন্ধ করুন' : '+ নতুন টাস্ক যোগ করুন'}
+                {showAddTask || editingTask ? 'ফর্ম বন্ধ করুন ✕' : '+ নতুন অফার / টাস্ক যোগ করুন'}
               </button>
             </div>
+
+            {/* 1-Click Quick Offer Templates */}
+            {!(showAddTask || editingTask) && (
+              <div className="pt-2 border-t border-emerald-950/70">
+                <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block mb-1.5">
+                  দ্রুত অফার টেমপ্লেট (এক ক্লিকে ফর্ম পূরণ করুন):
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    {
+                      label: '📢 টেলিগ্রাম/সোশ্যাল অফার',
+                      title: 'টেলিগ্রাম চ্যানেলে জয়েন করুন',
+                      desc: 'চ্যানেলে জয়েন করে অফার বোনাস বুঝে নিন।',
+                      badge: 'সোশ্যাল অফার',
+                      pts: 100,
+                      cat: 'সোশ্যাল',
+                      icon: 'Send',
+                      reqType: 'instant' as TaskRequirementType,
+                      reqVal: 1,
+                      daily: false,
+                      url: 'https://t.me/',
+                    },
+                    {
+                      label: '👥 রেফারাল চ্যালেঞ্জ অফার',
+                      title: '৩ জন বন্ধুকে রেফার করুন (মেগা বোনাস)',
+                      desc: 'কমপক্ষে ৩ জন সফল রেফার সম্পন্ন করলেই এই বোনাস আনলক হবে।',
+                      badge: 'রেফার শর্ত',
+                      pts: 300,
+                      cat: 'রেফারাল',
+                      icon: 'Users',
+                      reqType: 'referral_count' as TaskRequirementType,
+                      reqVal: 3,
+                      daily: false,
+                      url: '',
+                    },
+                    {
+                      label: '🎬 রিল ওয়াচ অফার',
+                      title: '১০টি রিল সম্পূর্ণ দেখুন',
+                      desc: 'আজকের ফিড থেকে ১০টি রিল দেখলে অতিরিক্ত বোনাস পাবেন।',
+                      badge: 'ওয়াচ অফার',
+                      pts: 80,
+                      cat: 'দৈনিক',
+                      icon: 'PlayCircle',
+                      reqType: 'reels_watched' as TaskRequirementType,
+                      reqVal: 10,
+                      daily: true,
+                      url: '',
+                    },
+                    {
+                      label: '🔥 স্পেশাল লিংক / অ্যাপ অফার',
+                      title: 'স্পেশাল পার্টনার অফার ভিজিট করুন',
+                      desc: 'লিংক ভিজিট করে বিশেষ অফার বোনাস সংগ্রহ করুন।',
+                      badge: '🔥 হট অফার',
+                      pts: 150,
+                      cat: 'স্পেশাল',
+                      icon: 'Flame',
+                      reqType: 'instant' as TaskRequirementType,
+                      reqVal: 1,
+                      daily: false,
+                      url: 'https://',
+                    },
+                  ].map((tpl, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => {
+                        setEditingTask(null);
+                        setTaskTitle(tpl.title);
+                        setTaskDescription(tpl.desc);
+                        setTaskBadgeText(tpl.badge);
+                        setTaskPoints(tpl.pts);
+                        setTaskCategory(tpl.cat);
+                        setTaskIconName(tpl.icon);
+                        setTaskRequirementType(tpl.reqType);
+                        setTaskRequirementValue(tpl.reqVal);
+                        setTaskIsRepeatableDaily(tpl.daily);
+                        setTaskIsActive(true);
+                        setTaskSortOrder((tasks?.length || 0) + 1);
+                        setTaskActionUrl(tpl.url);
+                        setShowAddTask(true);
+                      }}
+                      className="px-2.5 py-1.5 rounded-xl bg-[#0d1611] hover:bg-[#17281e] border border-emerald-900/60 text-emerald-300 text-[11px] font-bold transition cursor-pointer"
+                    >
+                      {tpl.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {(showAddTask || editingTask) && (
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (!taskTitle.trim()) {
-                    showPanelToast('টাস্কের শিরোনাম লিখুন।', 'error');
+                    showPanelToast('অফার বা টাস্কের শিরোনাম লিখুন।', 'error');
                     return;
                   }
+                  const cleanPayload = {
+                    title: taskTitle.trim(),
+                    description: taskDescription.trim() || undefined,
+                    badgeText: taskBadgeText.trim() || undefined,
+                    rewardPoints: Math.max(0, Number(taskPoints) || 0),
+                    category: taskCategory.trim() || 'সোশ্যাল',
+                    actionUrl: taskActionUrl.trim() || undefined,
+                    iconName: taskIconName || 'Gift',
+                    requirementType: taskRequirementType,
+                    requirementValue: Math.max(1, Number(taskRequirementValue) || 1),
+                    isRepeatableDaily: taskRequirementType === 'daily_checkin' ? true : taskIsRepeatableDaily,
+                    isActive: taskIsActive,
+                    sortOrder: Number(taskSortOrder) || 99,
+                  };
                   if (editingTask && onEditTask) {
                     onEditTask({
                       ...editingTask,
-                      title: taskTitle.trim(),
-                      rewardPoints: Number(taskPoints) || 50,
-                      category: taskCategory.trim() || 'সোশ্যাল',
-                      actionUrl: taskActionUrl.trim() || undefined,
-                      iconName: taskIconName,
+                      ...cleanPayload,
                     });
                     playSuccessChime();
                     setEditingTask(null);
                     setShowAddTask(false);
                   } else if (onAddTask) {
-                    onAddTask({
-                      title: taskTitle.trim(),
-                      rewardPoints: Number(taskPoints) || 50,
-                      category: taskCategory.trim() || 'সোশ্যাল',
-                      actionUrl: taskActionUrl.trim() || undefined,
-                      iconName: taskIconName,
-                    });
+                    onAddTask(cleanPayload);
                     playSuccessChime();
                     setShowAddTask(false);
                   }
                 }}
                 className="mt-4 space-y-3 pt-3 border-t border-emerald-950"
               >
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
-                    <label className="text-xs text-neutral-300 font-bold block mb-1">টাস্কের শিরোনাম *:</label>
+                    <label className="text-xs text-neutral-300 font-bold block mb-1">অফার / টাস্কের শিরোনাম *:</label>
                     <input
                       type="text"
                       value={taskTitle}
                       onChange={(e) => setTaskTitle(e.target.value)}
-                      placeholder="যেমন: আমাদের অফিসিয়াল টেলিগ্রাম চ্যানেলে যোগ দিন"
+                      placeholder="যেমন: আমাদের টেলিগ্রাম চ্যানেলে যোগ দিন"
                       className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
                       required
                     />
@@ -4452,38 +4838,163 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <label className="text-xs text-neutral-300 font-bold block mb-1">রিওয়ার্ড পয়েন্ট *:</label>
                     <input
                       type="number"
-                      min="1"
+                      min="0"
                       value={taskPoints}
-                      onChange={(e) => setTaskPoints(parseInt(e.target.value, 10) || 10)}
+                      onChange={(e) => {
+                        const raw = parseInt(e.target.value, 10);
+                        setTaskPoints(Number.isNaN(raw) ? 0 : Math.max(0, raw));
+                      }}
                       className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500 font-bold"
                       required
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-neutral-300 font-bold block mb-1">অফারের বিবরণ / শর্ত নির্দেশনা (ঐচ্ছিক):</label>
+                  <input
+                    type="text"
+                    value={taskDescription}
+                    onChange={(e) => setTaskDescription(e.target.value)}
+                    placeholder="যেমন: রেফার কোডে ১ জন বন্ধু জয়েন করে রিল দেখলে বোনাস পাবেন"
+                    className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <div>
                     <label className="text-xs text-neutral-300 font-bold block mb-1">ক্যাটাগরি:</label>
                     <select
-                      value={taskCategory}
-                      onChange={(e) => setTaskCategory(e.target.value)}
+                      value={['সোশ্যাল', 'দৈনিক', 'স্পেশাল', 'রেফারাল'].includes(taskCategory) ? taskCategory : 'কাস্টম'}
+                      onChange={(e) => {
+                        if (e.target.value === 'কাস্টম') {
+                          if (['সোশ্যাল', 'দৈনিক', 'স্পেশাল', 'রেফারাল'].includes(taskCategory)) {
+                            setTaskCategory('বিশেষ অফার');
+                          }
+                        } else {
+                          setTaskCategory(e.target.value);
+                        }
+                      }}
                       className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
                     >
                       <option value="সোশ্যাল">সোশ্যাল (Social)</option>
                       <option value="দৈনিক">দৈনিক (Daily)</option>
-                      <option value="স্পেশাল">স্পেশাল (Special)</option>
+                      <option value="স্পেশাল">স্পেশাল অফার (Special)</option>
                       <option value="রেফারাল">রেফারাল (Referral)</option>
+                      <option value="কাস্টম">কাস্টম ক্যাটাগরি (Custom)</option>
                     </select>
+                    {!['সোশ্যাল', 'দৈনিক', 'স্পেশাল', 'রেফারাল'].includes(taskCategory) && (
+                      <input
+                        type="text"
+                        value={taskCategory}
+                        onChange={(e) => setTaskCategory(e.target.value)}
+                        placeholder="কাস্টম ক্যাটাগরির নাম লিখুন..."
+                        className="mt-1.5 w-full bg-[#0d1611] border border-emerald-700/70 rounded-xl px-3 py-1.5 text-xs text-white outline-none focus:border-emerald-400"
+                      />
+                    )}
                   </div>
                   <div>
-                    <label className="text-xs text-neutral-300 font-bold block mb-1">সোশ্যাল মিডিয়া / অ্যাকশন লিংক (URL):</label>
+                    <label className="text-xs text-neutral-300 font-bold block mb-1">ব্যাজ লেবেল (ঐচ্ছিক):</label>
                     <input
-                      type="url"
-                      value={taskActionUrl}
-                      onChange={(e) => setTaskActionUrl(e.target.value)}
-                      placeholder="https://t.me/yourchannel বা https://youtube.com/..."
-                      className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500 font-mono"
+                      type="text"
+                      value={taskBadgeText}
+                      onChange={(e) => setTaskBadgeText(e.target.value)}
+                      placeholder="যেমন: 🔥 হট অফার / VIP"
+                      className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
                     />
+                  </div>
+                  <div>
+                    <label className="text-xs text-neutral-300 font-bold block mb-1">আইকন:</label>
+                    <select
+                      value={taskIconName}
+                      onChange={(e) => setTaskIconName(e.target.value)}
+                      className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                    >
+                      <option value="Send">Telegram / Send</option>
+                      <option value="Youtube">YouTube / Video</option>
+                      <option value="Users">Referral / Users</option>
+                      <option value="PlayCircle">Reel / Play</option>
+                      <option value="Gift">Gift / Bonus</option>
+                      <option value="Flame">Hot Offer / Flame</option>
+                      <option value="Sparkles">Special / Sparkles</option>
+                      <option value="Share2">Share / Social</option>
+                      <option value="Award">Reward / Award</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Offer Verification / Requirement Rules */}
+                <div className="p-3 rounded-xl bg-[#0d1611] border border-emerald-900/50 space-y-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="text-xs text-emerald-300 font-bold block mb-1">
+                        🔒 অফার আনলক শর্ত (Verification Rule):
+                      </label>
+                      <select
+                        value={taskRequirementType}
+                        onChange={(e) => setTaskRequirementType(e.target.value as TaskRequirementType)}
+                        className="w-full bg-[#132219] border border-emerald-900 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500 font-bold"
+                      >
+                        <option value="instant">সরাসরি / লিংক ভিজিট অফার (Instant)</option>
+                        <option value="referral_count">সফল রেফার শর্ত (রেফার ছাড়া পয়েন্ট নয়)</option>
+                        <option value="reels_watched">রিল দেখা শর্ত (নির্দিষ্ট রিল দেখলে আনলক)</option>
+                        <option value="daily_checkin">দৈনিক চেক-ইন অফার (প্রতিদিন ১ বার)</option>
+                      </select>
+                    </div>
+
+                    {(taskRequirementType === 'referral_count' || taskRequirementType === 'reels_watched') && (
+                      <div>
+                        <label className="text-xs text-amber-300 font-bold block mb-1">
+                          {taskRequirementType === 'referral_count'
+                            ? 'সর্বনিম্ন কতজন সফল রেফার প্রয়োজন:'
+                            : 'সর্বনিম্ন কতটি রিল দেখা প্রয়োজন:'}
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={taskRequirementValue}
+                          onChange={(e) => {
+                            const raw = parseInt(e.target.value, 10);
+                            setTaskRequirementValue(Number.isNaN(raw) ? 1 : Math.max(1, raw));
+                          }}
+                          className="w-full bg-[#132219] border border-emerald-900 rounded-xl px-3 py-2 text-xs text-white font-bold outline-none focus:border-amber-400"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-center pt-1">
+                    <div>
+                      <label className="text-xs text-neutral-300 font-bold block mb-1">সোশ্যাল / অ্যাকশন লিংক (ঐচ্ছিক URL):</label>
+                      <input
+                        type="url"
+                        value={taskActionUrl}
+                        onChange={(e) => setTaskActionUrl(e.target.value)}
+                        placeholder="https://t.me/yourchannel বা https://youtube.com/..."
+                        className="w-full bg-[#132219] border border-emerald-900 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500 font-mono"
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-4 pt-3 sm:pt-5">
+                      <label className="flex items-center gap-2 text-xs text-neutral-200 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={taskRequirementType === 'daily_checkin' ? true : taskIsRepeatableDaily}
+                          disabled={taskRequirementType === 'daily_checkin'}
+                          onChange={(e) => setTaskIsRepeatableDaily(e.target.checked)}
+                          className="rounded text-emerald-500 focus:ring-0"
+                        />
+                        <span>প্রতিদিন রিসেট হবে (Daily)</span>
+                      </label>
+                      <label className="flex items-center gap-2 text-xs text-emerald-300 font-bold cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={taskIsActive}
+                          onChange={(e) => setTaskIsActive(e.target.checked)}
+                          className="rounded text-emerald-500 focus:ring-0"
+                        />
+                        <span>অফার চালু (Active)</span>
+                      </label>
+                    </div>
                   </div>
                 </div>
 
@@ -4492,7 +5003,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     type="submit"
                     className="flex-1 py-2.5 rounded-xl bg-[#00c853] hover:bg-[#00e676] text-black font-extrabold text-xs transition cursor-pointer shadow-lg shadow-emerald-500/20"
                   >
-                    {editingTask ? 'টাস্ক আপডেট করুন 💾' : 'নতুন টাস্ক পাবলিশ করুন 🚀'}
+                    {editingTask ? 'অফার / টাস্ক আপডেট করুন 💾' : 'নতুন অফার / টাস্ক পাবলিশ করুন 🚀'}
                   </button>
                   <button
                     type="button"
@@ -4509,74 +5020,140 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             )}
           </div>
 
-          {/* Active Tasks List */}
+          {/* Active & Paused Offers List */}
           <div className="rounded-2xl bg-[#141f19] border border-emerald-950 p-4 shadow-lg">
             <h3 className="text-sm font-bold text-white flex items-center justify-between mb-3">
               <span className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-emerald-400" />
-                <span>সক্রিয় টাস্কসমূহ ({(tasks || []).length})</span>
+                <span>সকল অফার ও টাস্কসমূহ ({(tasks || []).length})</span>
               </span>
-              <span className="text-xs text-neutral-400 font-normal">সকল ইউজার এই টাস্কগুলো দেখতে পাবে</span>
+              <span className="text-xs text-neutral-400 font-normal">
+                সক্রিয়: {toBengaliNumber((tasks || []).filter((t) => t.isActive !== false).length)}টি
+              </span>
             </h3>
 
             {(tasks || []).length === 0 ? (
-              <p className="text-center py-8 text-neutral-500 text-xs">কোনো টাস্ক পাওয়া যায়নি।</p>
+              <p className="text-center py-8 text-neutral-500 text-xs">কোনো অফার বা টাস্ক পাওয়া যায়নি।</p>
             ) : (
-              <div className="space-y-2">
-                {(tasks || []).map((t) => (
-                  <div
-                    key={t.id}
-                    className="p-3.5 rounded-2xl bg-[#0e1712] border border-emerald-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md hover:border-emerald-800/40 transition"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-white text-xs sm:text-sm">{t.title}</span>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 font-bold border border-emerald-800/40">
-                          {t.category}
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400 mt-1">
-                        <span className="text-emerald-400 font-extrabold">+{toBengaliNumber(t.rewardPoints)} Pts</span>
-                        {t.actionUrl && (
-                          <span className="text-neutral-500 font-mono text-[10px] truncate max-w-[200px]">
-                            🔗 {t.actionUrl}
-                          </span>
-                        )}
-                      </div>
-                    </div>
+              <div className="space-y-2.5">
+                {(tasks || []).map((rawTask) => {
+                  const t = normalizeTaskOffer(rawTask);
+                  const reqBadge =
+                    t.requirementType === 'referral_count'
+                      ? `🔒 শর্ত: ${toBengaliNumber(t.requirementValue)} রেফার`
+                      : t.requirementType === 'reels_watched'
+                      ? `🎬 শর্ত: ${toBengaliNumber(t.requirementValue)} রিল`
+                      : t.requirementType === 'daily_checkin'
+                      ? '📅 দৈনিক চেক-ইন'
+                      : '⚡ ইনস্ট্যান্ট';
 
-                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                      <button
-                        onClick={() => {
-                          setEditingTask(t);
-                          setTaskTitle(t.title);
-                          setTaskPoints(t.rewardPoints);
-                          setTaskCategory(t.category);
-                          setTaskActionUrl(t.actionUrl || '');
-                          setTaskIconName(t.iconName || 'Send');
-                          setShowAddTask(true);
-                        }}
-                        className="px-3 py-1.5 rounded-xl bg-neutral-800 hover:bg-emerald-600 hover:text-black text-emerald-300 text-xs font-bold transition cursor-pointer flex items-center gap-1"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        <span>এডিট</span>
-                      </button>
-                      <button
-                        onClick={() => {
-                          triggerConfirm(
-                            'টাস্ক মুছে ফেলতে চান?',
-                            `আপনি কি নিশ্চিত যে "${t.title}" টাস্কটি মুছে ফেলতে চান? এটি আয়ের পৃষ্ঠা থেকে অপসারণ করা হবে।`,
-                            () => onDeleteTask && onDeleteTask(t.id)
-                          );
-                        }}
-                        className="px-3 py-1.5 rounded-xl bg-rose-950/60 hover:bg-rose-600 hover:text-white text-rose-300 text-xs font-bold transition border border-rose-900/40 cursor-pointer flex items-center gap-1"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>ডিলিট</span>
-                      </button>
+                  return (
+                    <div
+                      key={t.id}
+                      className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md transition ${
+                        t.isActive
+                          ? 'bg-[#0e1712] border-emerald-950 hover:border-emerald-800/40'
+                          : 'bg-[#0b100d] border-neutral-800/80 opacity-75'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-bold text-white text-xs sm:text-sm">{t.title}</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 font-bold border border-emerald-800/40">
+                            {t.category}
+                          </span>
+                          {t.badgeText && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 font-bold border border-amber-500/30">
+                              {t.badgeText}
+                            </span>
+                          )}
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                            t.isActive
+                              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                              : 'bg-neutral-800 text-neutral-400 border-neutral-700'
+                          }`}>
+                            {t.isActive ? 'সক্রিয়' : 'বন্ধ'}
+                          </span>
+                        </div>
+                        {t.description && (
+                          <p className="text-[11px] text-neutral-400 line-clamp-2">{t.description}</p>
+                        )}
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
+                          <span className="text-emerald-400 font-extrabold">+{toBengaliNumber(t.rewardPoints)} Pts</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-[#14231b] text-cyan-300 border border-emerald-900/50 font-semibold">
+                            {reqBadge}
+                          </span>
+                          {t.isRepeatableDaily && (
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-800/40 font-semibold">
+                              প্রতিদিন
+                            </span>
+                          )}
+                          {t.actionUrl && (
+                            <span className="text-neutral-500 font-mono text-[10px] truncate max-w-[180px]">
+                              🔗 {t.actionUrl}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5 shrink-0 self-end sm:self-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onEditTask) {
+                              onEditTask({ ...t, isActive: !t.isActive });
+                              playPopSound();
+                            }
+                          }}
+                          className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                            t.isActive
+                              ? 'bg-amber-950/60 hover:bg-amber-900/70 text-amber-300 border border-amber-700/40'
+                              : 'bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-300 border border-emerald-700/40'
+                          }`}
+                        >
+                          {t.isActive ? 'বন্ধ করুন' : 'চালু করুন'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingTask(t);
+                            setTaskTitle(t.title);
+                            setTaskDescription(t.description || '');
+                            setTaskBadgeText(t.badgeText || '');
+                            setTaskPoints(t.rewardPoints);
+                            setTaskCategory(t.category);
+                            setTaskActionUrl(t.actionUrl || '');
+                            setTaskIconName(t.iconName || 'Send');
+                            setTaskRequirementType(t.requirementType);
+                            setTaskRequirementValue(t.requirementValue);
+                            setTaskIsRepeatableDaily(t.isRepeatableDaily);
+                            setTaskIsActive(t.isActive);
+                            setTaskSortOrder(t.sortOrder ?? 10);
+                            setShowAddTask(true);
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-neutral-800 hover:bg-emerald-600 hover:text-black text-emerald-300 text-xs font-bold transition cursor-pointer flex items-center gap-1"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>এডিট</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            triggerConfirm(
+                              'অফার / টাস্ক মুছে ফেলতে চান?',
+                              `আপনি কি নিশ্চিত যে "${t.title}" অফারটি মুছে ফেলতে চান? এটি আয়ের পৃষ্ঠা থেকে অপসারণ করা হবে।`,
+                              () => onDeleteTask && onDeleteTask(t.id)
+                            );
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-rose-950/60 hover:bg-rose-600 hover:text-white text-rose-300 text-xs font-bold transition border border-rose-900/40 cursor-pointer flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>ডিলিট</span>
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

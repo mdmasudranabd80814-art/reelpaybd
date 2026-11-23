@@ -34,6 +34,7 @@ import {
 import { increment, orderBy, limit, where } from 'firebase/firestore';
 import { toBengaliNumber } from '../utils/bengali';
 import { playPopSound, playSuccessChime } from '../utils/audio';
+import { vibrateLike, vibrateError } from '../utils/haptics';
 import { useFirebase } from '../hooks/useFirebase';
 import { GIFTS_LIST } from '../data/initialData';
 import {
@@ -889,6 +890,7 @@ export const LiveStreamSheet: React.FC<LiveStreamSheetProps> = ({
     }
     if (!liveStreamId || !stream) return;
     if (!isMuted) playPopSound();
+    vibrateLike(true);
 
     const icons = ['❤️', '🔥', '✨', '💚', '👏'];
     const newIcon = {
@@ -920,6 +922,7 @@ export const LiveStreamSheet: React.FC<LiveStreamSheetProps> = ({
   const handleQuickGiftSend = (gift: GiftItem) => {
     if (!stream) return;
     if (isHost) {
+      vibrateError();
       flashStudioNotice(
         lang === 'bn'
           ? '⚠️ নিজের লাইভে নিজে গিফট পাঠানো যাবে না।'

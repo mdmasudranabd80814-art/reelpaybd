@@ -21,6 +21,7 @@ import {
 } from '../types';
 import { toBengaliNumber, formatTaka } from '../utils/bengali';
 import { playSuccessChime } from '../utils/audio';
+import { vibrateLight, vibrateError } from '../utils/haptics';
 import { BalanceCard } from './BalanceCard';
 import { getUserLevel } from '../utils/levels';
 
@@ -113,6 +114,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
   const pointsRequired = amountBDT * (pointRate || 10);
 
   const handleQuickAmount = (amt: number) => {
+    vibrateLight();
     setAmountBDT(amt);
     setErrorMsg('');
   };
@@ -123,11 +125,13 @@ export const WalletView: React.FC<WalletViewProps> = ({
     setSuccessMsg('');
 
     if (!isWithdrawalsEnabled) {
+      vibrateError();
       setErrorMsg('উইথড্রয়াল সিস্টেম সাময়িকভাবে বন্ধ রয়েছে।');
       return;
     }
 
     if (!selectedMethod) {
+      vibrateError();
       setErrorMsg('অনুগ্রহ করে একটি পেমেন্ট মাধ্যম নির্বাচন করুন।');
       return;
     }
@@ -135,40 +139,48 @@ export const WalletView: React.FC<WalletViewProps> = ({
     const cleanAcc = accountNumber.trim();
     if (selectedMethod.category === 'mobile_banking') {
       if (!cleanAcc || cleanAcc.length < 11) {
+        vibrateError();
         setErrorMsg(`সঠিক ১১ ডিজিটের ${selectedMethod.nameBn} নম্বর দিন (যেমন: 01XXXXXXXXX)`);
         return;
       }
     } else if (selectedMethod.category === 'bank') {
       if (!cleanAcc || cleanAcc.length < 6 || !accountHolderName.trim()) {
+        vibrateError();
         setErrorMsg('ব্যাংক অ্যাকাউন্ট নম্বর এবং অ্যাকাউন্ট হোল্ডারের নাম সঠিকভাবে দিন।');
         return;
       }
     } else if (selectedMethod.category === 'card') {
       if (!cleanAcc || cleanAcc.length < 8 || !accountHolderName.trim()) {
+        vibrateError();
         setErrorMsg('সঠিক কার্ড নম্বর এবং কার্ড হোল্ডারের নাম দিন।');
         return;
       }
     } else if (!cleanAcc || cleanAcc.length < 4) {
+      vibrateError();
       setErrorMsg('সঠিক অ্যাকাউন্ট বা পেমেন্ট তথ্য দিন।');
       return;
     }
 
     if (!Number.isFinite(amountBDT) || !Number.isInteger(amountBDT) || amountBDT <= 0) {
+      vibrateError();
       setErrorMsg('অনুগ্রহ করে সঠিক পূর্ণ সংখ্যার টাকার পরিমাণ লিখুন।');
       return;
     }
 
     if (amountBDT < minWithdrawal) {
+      vibrateError();
       setErrorMsg(`সর্বনিম্ন উত্তোলন পরিমাণ ৳${toBengaliNumber(minWithdrawal, lang)} টাকা`);
       return;
     }
 
     if (maxWithdrawal > 0 && amountBDT > maxWithdrawal) {
+      vibrateError();
       setErrorMsg(`সর্বোচ্চ উত্তোলন সীমা ৳${toBengaliNumber(maxWithdrawal, lang)} টাকা`);
       return;
     }
 
     if (amountBDT > availableBDT) {
+      vibrateError();
       setErrorMsg(`আপনার ব্যালেন্সে পর্যাপ্ত পয়েন্ট নেই! আপনার আছে ৳${toBengaliNumber(availableBDT, lang)}`);
       return;
     }

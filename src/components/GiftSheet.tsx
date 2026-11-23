@@ -5,6 +5,7 @@ import { GIFTS_LIST } from '../data/initialData';
 import { toBengaliNumber } from '../utils/bengali';
 import { calculateGiftSplit } from '../utils/gifts';
 import { playSuccessChime } from '../utils/audio';
+import { vibrateError } from '../utils/haptics';
 import confetti from 'canvas-confetti';
 
 interface GiftSheetProps {
@@ -42,6 +43,7 @@ export const GiftSheet: React.FC<GiftSheetProps> = ({
   const handleSend = (gift: GiftItem) => {
     setGiftError('');
     if (isSelfTarget) {
+      vibrateError();
       setGiftError(
         lang === 'bn'
           ? 'নিজের ভিডিও বা লাইভে গিফট পাঠানো যাবে না! গিফট শুধুমাত্র অন্য ইউজারদের জন্য।'
@@ -50,6 +52,7 @@ export const GiftSheet: React.FC<GiftSheetProps> = ({
       return;
     }
     if (userPoints < gift.costPoints) {
+      vibrateError();
       setGiftError(
         lang === 'bn'
           ? 'পয়েন্ট পর্যাপ্ত নয়! আগে পয়েন্ট জমা করুন।'

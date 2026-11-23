@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { toBengaliNumber } from '../utils/bengali';
 import { playSuccessChime } from '../utils/audio';
+import { vibrateLight, vibrateError } from '../utils/haptics';
 import {
   DepositRequest,
   PaymentMethodConfig,
@@ -91,6 +92,7 @@ export const DepositSheet: React.FC<DepositSheetProps> = ({
   const handleCopy = () => {
     if (!selectedMethod?.accountNumber) return;
     navigator.clipboard.writeText(selectedMethod.accountNumber);
+    vibrateLight();
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -100,16 +102,19 @@ export const DepositSheet: React.FC<DepositSheetProps> = ({
     setErrorMsg('');
 
     if (!isDepositsEnabled) {
+      vibrateError();
       setErrorMsg(lang === 'bn' ? 'ডিপোজিট সাময়িকভাবে বন্ধ আছে।' : 'Deposits are currently paused.');
       return;
     }
 
     if (!selectedMethod) {
+      vibrateError();
       setErrorMsg(lang === 'bn' ? 'পেমেন্ট মাধ্যম নির্বাচন করুন।' : 'Select a payment method.');
       return;
     }
 
     if (!amountBDT || amountBDT < minDeposit) {
+      vibrateError();
       setErrorMsg(
         lang === 'bn'
           ? `সর্বনিম্ন ডিপোজিট ৳${toBengaliNumber(minDeposit)} টাকা`
@@ -119,6 +124,7 @@ export const DepositSheet: React.FC<DepositSheetProps> = ({
     }
 
     if (!senderNumber.trim() || !trxId.trim()) {
+      vibrateError();
       setErrorMsg(
         lang === 'bn' ? 'সবগুলো তথ্য সঠিকভাবে পূরণ করুন' : 'Please fill all fields correctly'
       );

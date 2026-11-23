@@ -5,6 +5,7 @@ import { playSuccessChime } from '../utils/audio';
 import { storeVideoInDB, fileToDataUrl, captureVideoThumbnail } from '../utils/videoStorage';
 import { extractYouTubeId } from '../utils/video';
 import { buildCreatorHandle } from '../utils/reelOwner';
+import { REEL_UPLOAD_CATEGORIES } from '../utils/categories';
 
 interface EditReelModalProps {
   reel: Reel;
@@ -211,15 +212,14 @@ export const EditReelModal: React.FC<EditReelModalProps> = ({
             </label>
             <select
               value={category}
-              onChange={(e) => setCategory(e.target.value as any)}
+              onChange={(e) => setCategory(e.target.value as Reel['category'])}
               className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-emerald-500"
             >
-              <option value="সকল">{lang === 'bn' ? 'সকল' : 'All'}</option>
-              <option value="ট্রেন্ডিং">{lang === 'bn' ? 'ট্রেন্ডিং' : 'Trending'}</option>
-              <option value="কমেডি">{lang === 'bn' ? 'কমেডি' : 'Comedy'}</option>
-              <option value="গেমিং">{lang === 'bn' ? 'গেমিং' : 'Gaming'}</option>
-              <option value="রান্না">{lang === 'bn' ? 'রান্না' : 'Cooking'}</option>
-              <option value="শিক্ষা">{lang === 'bn' ? 'শিক্ষা' : 'Education'}</option>
+              {REEL_UPLOAD_CATEGORIES.map((cat) => (
+                <option key={cat.value} value={cat.value}>
+                  {lang === 'bn' ? cat.labelBn : cat.labelEn}
+                </option>
+              ))}
             </select>
           </div>
 

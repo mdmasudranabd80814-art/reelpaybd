@@ -3,7 +3,8 @@ import { Play, Heart, MessageCircle, Share2, Check, Sparkles, Flame, Eye, Bookma
 import { Reel, EarningSettings } from '../types';
 import { toBengaliNumber } from '../utils/bengali';
 import { playPopSound } from '../utils/audio';
-import { extractYouTubeId } from '../utils/video';
+import { extractYouTubeId, extractVimeoId, normalizeVideoUrl } from '../utils/video';
+import { getVideoFromDB } from '../utils/videoStorage';
 import { getCategoryMeta } from '../utils/categories';
 
 interface ReelFeedCardProps {
@@ -29,6 +30,9 @@ interface ReelFeedCardProps {
   currentUserId?: string;
   onSelectCategory?: (category: Reel['category']) => void;
   activeCategory?: string;
+  watchProgress?: number;
+  onWatchProgressChange?: (reelId: string, progressPercent: number) => void;
+  isModalOpen?: boolean;
 }
 
 export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
@@ -44,7 +48,6 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
   onShare,
   lang,
   isMuted,
-  levelProgress,
   earningSettings,
   isDailyLimitReached = false,
   isSaved = false,
@@ -54,12 +57,68 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
   currentUserId,
   onSelectCategory,
   activeCategory,
+  watchProgress: externalWatchProgress = 0,
+  onWatchProgressChange,
+  isModalOpen = false,
 }) => {
   const [isSpringing, setIsSpringing] = React.useState(false);
   const [isBookmarkSpringing, setIsBookmarkSpringing] = React.useState(false);
   const [showIncrement, setShowIncrement] = React.useState(false);
   const [incrementKey, setIncrementKey] = React.useState(0);
   const [imgLoaded, setImgLoaded] = React.useState(false);
+  const [thumbFailed, setThumbFailed] = React.useState(false);
+
+  // Viewport & preview playback state
+  const cardContainerRef = React.useRef<HTMLDivElement>(null);
+  const videoRef = React.useRef<HTMLVideoElement>(null);
+  const [isNearView, setIsNearView] = React.useState(false);
+  const [isIntersecting, setIsIntersecting] = React.useState(false);
+  const [isActiveInView, setIsActiveInView] = React.useState(false);
+  const [isHovered, setIsHovered] = React.useState(false);
+  const [isPageVisible, setIsPageVisible] = React.useState(() =>
+    typeof document !== 'undefined' ? document.visibilityState === 'visible' : true
+  );
+  const [videoSrc, setVideoSrc] = React.useState<string>('');
+  const [videoReady, setVideoReady] = React.useState(false);
+  const [videoFailed, setVideoFailed] = React.useState(false);
+  const [isPlaying, setIsPlaying] = React.useState(false);
+
+  // Watch progress & milestone ripple state
+  const [localProgress, setLocalProgress] = React.useState<number>(() =>
+    hasWatched ? 100 : Math.max(0, Math.min(100, externalWatchProgress))
+  );
+  const [milestoneMetInline, setMilestoneMetInline] = React.useState(false);
+  const [showMilestoneRipple, setShowMilestoneRipple] = React.useState(false);
+  const [rippleKey, setRippleKey] = React.useState(0);
+  const rippleTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevHasWatchedRef = React.useRef<boolean>(hasWatched);
+  const pendingModalRippleRef = React.useRef<boolean>(false);
+  const lastReportedProgressRef = React.useRef<number>(localProgress);
+  const prevLocalProgressRef = React.useRef<number>(localProgress);
+  const onWatchProgressChangeRef = React.useRef(onWatchProgressChange);
+  React.useEffect(() => {
+    onWatchProgressChangeRef.current = onWatchProgressChange;
+  }, [onWatchProgressChange]);
+
+  const triggerMilestoneRipple = React.useCallback(() => {
+    if (rippleTimeoutRef.current) {
+      clearTimeout(rippleTimeoutRef.current);
+    }
+    setRippleKey((prev) => prev + 1);
+    setShowMilestoneRipple(true);
+    rippleTimeoutRef.current = setTimeout(() => {
+      setShowMilestoneRipple(false);
+      rippleTimeoutRef.current = null;
+    }, 1150);
+  }, []);
+
+  React.useEffect(() => {
+    return () => {
+      if (rippleTimeoutRef.current) {
+        clearTimeout(rippleTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const categoryMeta = getCategoryMeta(reel.category);
 
@@ -90,13 +149,232 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
   const videoEarningOn = earningSettings ? earningSettings.isVideoWatchEarningEnabled : true;
   const allowFeedClaim = earningSettings ? earningSettings.allowDirectFeedClaim : true;
   const scope = earningSettings?.videoEarningScope || 'all_reels';
-  
+
   const isReelEligible = scope === 'offer_reels_only'
     ? Boolean(reel.isEarningEnabled || reel.isSpecialOffer)
     : (reel.isEarningEnabled !== false);
 
   const isEarningActive = masterEarningOn && videoEarningOn && isReelEligible && !isOwnReel;
   const rewardPoints = reel.pointsReward || earningSettings?.defaultVideoRewardPoints || 10;
+  const milestoneSeconds = (reel.customWatchSeconds && reel.customWatchSeconds > 0)
+    ? reel.customWatchSeconds
+    : (earningSettings?.videoWatchDurationSeconds || 15);
+
+  // Pause inline preview if browser tab becomes hidden
+  React.useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const handleVisibilityChange = () => {
+      setIsPageVisible(document.visibilityState === 'visible');
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
+  // Observe card visibility for inline video autoplay/pause & active watch tracking
+  React.useEffect(() => {
+    const el = cardContainerRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      setIsNearView(true);
+      setIsIntersecting(true);
+      setIsActiveInView(true);
+      return;
+    }
+
+    const nearObserver = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsNearView(true);
+        }
+      },
+      { rootMargin: '200px 0px' }
+    );
+
+    const activeObserver = new IntersectionObserver(
+      ([entry]) => {
+        const visible = entry.isIntersecting;
+        setIsIntersecting(visible);
+        setIsActiveInView(visible && entry.intersectionRatio >= 0.5);
+      },
+      { rootMargin: '-5% 0px -5% 0px', threshold: [0, 0.25, 0.5, 0.75, 1] }
+    );
+
+    nearObserver.observe(el);
+    activeObserver.observe(el);
+
+    return () => {
+      nearObserver.disconnect();
+      activeObserver.disconnect();
+    };
+  }, []);
+
+  // Resolve inline video source when card approaches viewport
+  React.useEffect(() => {
+    if (!isNearView) return;
+    let cancelled = false;
+    let createdBlobUrl = '';
+
+    const resolveVideo = async () => {
+      setVideoFailed(false);
+      setVideoReady(false);
+
+      if (reel.id) {
+        const dbBlob = await getVideoFromDB(reel.id).catch(() => null);
+        if (dbBlob && !cancelled) {
+          createdBlobUrl = URL.createObjectURL(dbBlob);
+          setVideoSrc(createdBlobUrl);
+          return;
+        }
+      }
+
+      if (reel.videoUrl?.startsWith('local:')) {
+        const localKey = reel.videoUrl.replace('local:', '');
+        const dbBlob = await getVideoFromDB(localKey).catch(() => null);
+        if (dbBlob && !cancelled) {
+          createdBlobUrl = URL.createObjectURL(dbBlob);
+          setVideoSrc(createdBlobUrl);
+          return;
+        }
+      }
+
+      if (!cancelled) {
+        const sanitized = normalizeVideoUrl(reel.videoUrl);
+        setVideoSrc(sanitized || reel.videoUrl || '');
+      }
+    };
+
+    resolveVideo();
+
+    return () => {
+      cancelled = true;
+      if (createdBlobUrl) {
+        URL.revokeObjectURL(createdBlobUrl);
+      }
+    };
+  }, [isNearView, reel.id, reel.videoUrl]);
+
+  const ytId = extractYouTubeId(reel.videoUrl);
+  const vimeoId = extractVimeoId(videoSrc || reel.videoUrl);
+  const isImageMotionReel = !reel.videoUrl && !videoSrc;
+  const isNativeVideo = Boolean(videoSrc && !ytId && !vimeoId && !videoFailed);
+  const shouldPlayPreview =
+    (isActiveInView || (isHovered && isIntersecting)) && !isModalOpen && isPageVisible;
+
+  // Control inline muted video playback when entering/leaving viewport
+  React.useEffect(() => {
+    const videoEl = videoRef.current;
+    if (!videoEl || !isNativeVideo) {
+      setIsPlaying(false);
+      return;
+    }
+
+    if (shouldPlayPreview) {
+      videoEl.muted = true;
+      if (videoEl.paused) {
+        const playPromise = videoEl.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(() => {});
+        }
+      }
+    } else if (!videoEl.paused) {
+      videoEl.pause();
+    }
+  }, [shouldPlayPreview, isNativeVideo, videoSrc, videoReady]);
+
+  // Sync external progress (e.g. from FullScreenReelModal) upward
+  React.useEffect(() => {
+    if (externalWatchProgress > 0) {
+      setLocalProgress((prev) => Math.max(prev, Math.min(100, externalWatchProgress)));
+    }
+  }, [externalWatchProgress]);
+
+  // Trigger subtle ripple when watch-to-earn reward status flips from false -> true
+  React.useEffect(() => {
+    const wasWatched = prevHasWatchedRef.current;
+    prevHasWatchedRef.current = hasWatched;
+
+    if (hasWatched) {
+      setLocalProgress(100);
+      if (!wasWatched) {
+        if (isModalOpen) {
+          pendingModalRippleRef.current = true;
+        } else {
+          triggerMilestoneRipple();
+        }
+      }
+    }
+  }, [hasWatched, isModalOpen, triggerMilestoneRipple]);
+
+  // Fire deferred ripple right after FullScreenReelModal closes if earned inside modal
+  React.useEffect(() => {
+    if (!isModalOpen && pendingModalRippleRef.current) {
+      pendingModalRippleRef.current = false;
+      const timer = setTimeout(() => {
+        triggerMilestoneRipple();
+      }, 180);
+      return () => clearTimeout(timer);
+    }
+  }, [isModalOpen, triggerMilestoneRipple]);
+
+  // Track watch progress smoothly while previewing/watching in feed
+  const isActivelyTracking = shouldPlayPreview && !hasWatched && localProgress < 100;
+
+  React.useEffect(() => {
+    if (!isActivelyTracking) return;
+
+    const stepPercent = (0.1 / Math.max(1, milestoneSeconds)) * 100;
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      if (isNativeVideo && videoReady && videoRef.current && videoRef.current.paused) return;
+
+      setLocalProgress((prev) => {
+        if (prev >= 100) return 100;
+        return Math.min(100, prev + stepPercent);
+      });
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [
+    isActivelyTracking,
+    milestoneSeconds,
+    isNativeVideo,
+    videoReady,
+  ]);
+
+  // Report watch progress upward and trigger inline milestone ripple after render commit
+  React.useEffect(() => {
+    const prev = prevLocalProgressRef.current;
+    prevLocalProgressRef.current = localProgress;
+
+    if (
+      localProgress > 0 &&
+      (Math.abs(localProgress - lastReportedProgressRef.current) >= 4 || localProgress >= 100)
+    ) {
+      lastReportedProgressRef.current = localProgress;
+      onWatchProgressChangeRef.current?.(reel.id, localProgress);
+    }
+
+    if (
+      prev < 100 &&
+      localProgress >= 100 &&
+      !hasWatched &&
+      !isModalOpen &&
+      isEarningActive &&
+      !isDailyLimitReached
+    ) {
+      setMilestoneMetInline(true);
+      triggerMilestoneRipple();
+    }
+  }, [
+    localProgress,
+    reel.id,
+    hasWatched,
+    isModalOpen,
+    isEarningActive,
+    isDailyLimitReached,
+    triggerMilestoneRipple,
+  ]);
+
+  const effectiveProgress = hasWatched ? 100 : Math.min(100, Math.max(0, localProgress));
 
   const handleLike = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -143,43 +421,95 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
   };
 
   const likesDisplay = Math.max(0, reel.likesCount || 0);
-  const ytId = extractYouTubeId(reel.videoUrl);
-  const displayThumbnail = (ytId && (!reel.thumbnailUrl || reel.thumbnailUrl.includes('unsplash')))
+  const rawThumbnail = (ytId && (!reel.thumbnailUrl || reel.thumbnailUrl.includes('unsplash')))
     ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`
-    : (reel.thumbnailUrl || 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=400&auto=format&fit=crop&q=80');
+    : (reel.thumbnailUrl || '/images/ai_comedy_tea_stall.jpg');
+  const displayThumbnail = thumbFailed ? '/images/ai_comedy_tea_stall.jpg' : rawThumbnail;
+
+  React.useEffect(() => {
+    setThumbFailed(false);
+  }, [reel.id, reel.thumbnailUrl]);
 
   return (
     <div className="flex gap-2.5 items-end mb-4">
       {/* Video Preview Container */}
       <div
+        ref={cardContainerRef}
         onClick={() => onOpenReel(reel)}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
         className="relative flex-1 h-64 sm:h-72 rounded-2xl overflow-hidden bg-[#101914] border border-emerald-950/60 cursor-pointer group shadow-lg"
       >
         {/* Skeleton State */}
-        {!imgLoaded && (
+        {!imgLoaded && !videoReady && (
           <div className="absolute inset-0 bg-neutral-900 animate-pulse flex items-center justify-center">
             <div className="w-10 h-10 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin" />
           </div>
         )}
 
-        {/* Background Image / Video Poster */}
+        {/* Background Image / Video Poster / AI Motion Image */}
         <img
           src={displayThumbnail}
           alt={reel.title}
-          className={`w-full h-full object-cover transition-all duration-500 group-hover:scale-105 ${
-            imgLoaded ? 'opacity-100' : 'opacity-0'
-          }`}
+          className={`w-full h-full object-cover transition-all duration-500 ${
+            isImageMotionReel ? 'animate-ken-burns' : 'group-hover:scale-105'
+          } ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
           style={reel.filter ? { filter: reel.filter } : {}}
           loading="lazy"
           onLoad={() => setImgLoaded(true)}
+          onError={() => {
+            if (!thumbFailed) {
+              setThumbFailed(true);
+            } else {
+              setImgLoaded(true);
+            }
+          }}
         />
+
+        {/* Inline Muted Video Preview */}
+        {isNativeVideo && (
+          <video
+            ref={videoRef}
+            src={videoSrc}
+            poster={displayThumbnail}
+            muted
+            playsInline
+            loop
+            preload={isActiveInView ? 'auto' : 'metadata'}
+            onLoadedData={() => setVideoReady(true)}
+            onCanPlay={(e) => {
+              setVideoReady(true);
+              if (shouldPlayPreview && e.currentTarget.paused) {
+                e.currentTarget.muted = true;
+                e.currentTarget.play().catch(() => {});
+              }
+            }}
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
+            onEnded={() => setIsPlaying(false)}
+            onError={() => {
+              setVideoFailed(true);
+              setIsPlaying(false);
+            }}
+            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 pointer-events-none ${
+              videoReady && !videoFailed ? 'opacity-100' : 'opacity-0'
+            }`}
+            style={reel.filter ? { filter: reel.filter } : {}}
+          />
+        )}
 
         {/* Gradient overlays */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-black/30 pointer-events-none" />
 
         {/* Centered Circular Play Button */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-sm border-2 border-emerald-400/80 flex items-center justify-center text-emerald-400 group-hover:scale-110 group-hover:bg-emerald-500 group-hover:text-black group-hover:border-emerald-300 transition-all duration-200 shadow-lg shadow-black/50">
+          <div
+            className={`w-12 h-12 rounded-full bg-black/40 backdrop-blur-sm border-2 border-emerald-400/80 flex items-center justify-center text-emerald-400 group-hover:scale-110 group-hover:bg-emerald-500 group-hover:text-black group-hover:border-emerald-300 transition-all duration-200 shadow-lg shadow-black/50 ${
+              isNativeVideo && videoReady && isPlaying
+                ? 'opacity-0 group-hover:opacity-100 scale-90'
+                : 'opacity-100'
+            }`}
+          >
             <Play className="w-5 h-5 fill-current ml-0.5" />
           </div>
         </div>
@@ -209,6 +539,12 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
           </button>
 
           <div className="flex items-center gap-1.5 pointer-events-auto">
+            {isImageMotionReel && (
+              <span className="px-2 py-0.5 rounded-lg text-[9px] font-black bg-black/65 backdrop-blur-md text-cyan-300 border border-cyan-400/35 flex items-center gap-1">
+                <Sparkles className="w-2.5 h-2.5" />
+                <span>{lang === 'bn' ? 'AI ভিজ্যুয়াল' : 'AI Visual'}</span>
+              </span>
+            )}
             {isOwnReel ? (
               <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-black/70 backdrop-blur-md text-emerald-300 border border-emerald-500/35">
                 {lang === 'bn' ? 'আপনার রিল' : 'Your Reel'}
@@ -227,12 +563,59 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
           </div>
         </div>
 
-        {/* Progress Bar towards next level/reward matching prompt */}
-        <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/40 backdrop-blur-sm">
-          <div 
-            className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-700 shadow-[0_0_8px_rgba(16,185,129,0.6)]"
-            style={{ width: `${levelProgress}%` }}
-          />
+        {/* Subtle Ripple Animation when Watch-to-Earn Milestone is Met */}
+        {showMilestoneRipple && (
+          <div
+            key={`ripple-${rippleKey}`}
+            className="absolute bottom-0 right-4 z-20 pointer-events-none"
+            aria-hidden="true"
+          >
+            <span className="absolute w-14 h-14 rounded-full border border-emerald-300/65 bg-emerald-400/15 animate-milestone-ripple-1" />
+            <span className="absolute w-14 h-14 rounded-full border border-teal-200/45 bg-emerald-300/10 animate-milestone-ripple-2" />
+          </div>
+        )}
+
+        {/* Subtle Animated Horizontal Watch Progress Bar at Bottom of Video Player */}
+        <div
+          className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none"
+          role="progressbar"
+          aria-label={lang === 'bn' ? 'ভিডিও দেখার অগ্রগতি' : 'Watch progress'}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(effectiveProgress)}
+        >
+          <div className="relative w-full h-[3px] group-hover:h-1 transition-[height] duration-200 bg-black/50 backdrop-blur-xs overflow-hidden">
+            <div
+              className={`relative h-full w-full origin-left transition-transform duration-150 ease-linear ${
+                hasWatched || milestoneMetInline
+                  ? 'bg-gradient-to-r from-emerald-500 via-emerald-400 to-teal-300'
+                  : reel.isSpecialOffer && isEarningActive
+                  ? 'bg-gradient-to-r from-amber-500 via-emerald-400 to-amber-300'
+                  : isEarningActive
+                  ? 'bg-gradient-to-r from-emerald-600 via-emerald-400 to-teal-300'
+                  : 'bg-white/65'
+              }`}
+              style={{ transform: `scaleX(${effectiveProgress / 100})` }}
+            >
+              {isActivelyTracking && effectiveProgress > 2 && effectiveProgress < 100 && (
+                <span className="absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-white/50 to-transparent animate-progress-sheen" />
+              )}
+            </div>
+
+            {showMilestoneRipple && (
+              <span
+                key={`wave-${rippleKey}`}
+                className="absolute inset-0 bg-gradient-to-r from-transparent via-emerald-200/80 to-transparent animate-milestone-wave"
+              />
+            )}
+          </div>
+
+          {effectiveProgress > 1 && effectiveProgress < 100 && isActivelyTracking && (
+            <span
+              className="absolute top-1/2 w-1.5 h-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-200 shadow-[0_0_6px_rgba(110,231,183,0.9)] transition-[left] duration-150 ease-linear"
+              style={{ left: `${effectiveProgress}%` }}
+            />
+          )}
         </div>
 
         {/* Bottom Creator Pill & View Count Social Proof */}
@@ -479,6 +862,10 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
                 : reel.isSpecialOffer
                 ? 'bg-gradient-to-r from-amber-400 to-[#00c853] text-black border border-amber-300 shadow-amber-500/30'
                 : 'bg-[#00c853] hover:bg-[#00e676] text-black shadow-emerald-500/30'
+            } ${
+              milestoneMetInline && !hasWatched && !isDailyLimitReached
+                ? 'ring-2 ring-emerald-300/70 ring-offset-1 ring-offset-black/60'
+                : ''
             }`}
             title={
               hasWatched

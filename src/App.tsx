@@ -13,6 +13,7 @@ import { ChevronRight, Sparkles, Radio, Mic, Video, Loader2, Headphones, Play, U
 import type { StartLivePayload } from './components/GoLiveSetupModal';
 import { GiftItem } from './types';
 import { playCoinSound, playSuccessChime, playPopSound } from './utils/audio';
+import { vibrateLike, vibrateReward, vibrateGift, vibrateSuccess, vibrateLight, vibrateError } from './utils/haptics';
 import { toBengaliNumber } from './utils/bengali';
 import { getUserLevel, getProgressToNextLevel } from './utils/levels';
 import { calculateGiftSplit } from './utils/gifts';
@@ -49,7 +50,15 @@ import { useFirebase, formatFirebaseAuthError } from './hooks/useFirebase';
 import { where, orderBy, increment, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { normalizeVideoUrl } from './utils/video';
 import { downloadReelVideo } from './utils/videoDownload';
-import { buildUserMap, resolveReelWithOwner } from './utils/reelOwner';
+import { buildUserMap, resolveReelWithOwner, resolveMasudRanaCreator, MASUD_RANA_FALLBACK_ID, MASUD_RANA_AVATAR, MASUD_RANA_NAME } from './utils/reelOwner';
+import { generateUnlimitedAiReelsBatch } from './utils/aiReelGenerator';
+import {
+  buildScaledSpinPrizes,
+  getDailyEarningUsage,
+  getOfferRequirementProgress,
+  isTaskCompletedForUser,
+  normalizeTaskOffer,
+} from './utils/offers';
 
 const LoadingSpinner = () => (
   <div className="flex-1 flex items-center justify-center p-12">
@@ -109,6 +118,8 @@ const toPublicProfile = (u: User) => ({
   reelsWatchedCount: u.reelsWatchedCount || 0,
   referralsCount: u.referralsCount || 0,
   referralEarnedPoints: u.referralEarnedPoints || 0,
+  dailyReferralDate: (u.dailyReferralDate || '').slice(0, 20),
+  dailyReferralsCount: Math.max(0, u.dailyReferralsCount || 0),
   createdAt: u.createdAt || new Date().toISOString(),
 });
 
@@ -125,6 +136,7 @@ const DEMO_USER_IDS = new Set<string>([
   'user_005',
   'user_006',
   'user_7788',
+  MASUD_RANA_FALLBACK_ID,
 ]);
 
 const DEMO_REEL_IDS = new Set<string>([
@@ -344,6 +356,17 @@ function UserApp() {
       return [];
     }
   });
+  const [reelWatchProgressMap, setReelWatchProgressMap] = useState<Record<string, number>>({});
+  const handleWatchProgressChange = useCallback((reelId: string, progressPercent: number) => {
+    setReelWatchProgressMap((prev) => {
+      const existing = prev[reelId] || 0;
+      const clamped = Math.max(existing, Math.min(100, progressPercent));
+      if (clamped <= existing || (Math.abs(clamped - existing) < 0.5 && clamped < 100)) {
+        return prev;
+      }
+      return { ...prev, [reelId]: clamped };
+    });
+  }, []);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
   const [tasks, setTasks] = useState<TaskItem[]>(INITIAL_TASKS);
   const [depositRequests, setDepositRequests] = useState<DepositRequest[]>([]);
@@ -504,6 +527,7 @@ function UserApp() {
                 setDocument('public_profiles', firebaseUser.uid, toPublicProfile(updatedUser)).catch(() => {}),
               ]);
               if (!isMuted) playSuccessChime();
+              vibrateReward();
               showToast(
                 lang === 'bn'
                   ? `🎁 এডমিন লগইন অফার! +${toBengaliNumber(offerPoints, lang)} পয়েন্ট আপনার অ্যাকাউন্টে যোগ হয়েছে!`
@@ -531,6 +555,30 @@ function UserApp() {
               }
             } catch {}
 
+            let pendingRefCode = (pendingReg.referredBy || '').trim().toUpperCase();
+            if (!pendingRefCode) {
+              try {
+                pendingRefCode = (localStorage.getItem('rt_pending_ref') || '').trim().toUpperCase();
+              } catch {}
+            }
+
+            let validatedReferredBy = '';
+            const myNewReferralCode = `REEL${Math.floor(1000 + Math.random() * 9000)}`;
+            if (pendingRefCode.length >= 4 && pendingRefCode !== myNewReferralCode) {
+              try {
+                const matchedReferrers = await getCollection('public_profiles', [
+                  where('referralCode', '==', pendingRefCode),
+                ]);
+                const matched = matchedReferrers?.[0] as User | undefined;
+                if (matched && isRealUserId(matched.id) && matched.id !== firebaseUser.uid) {
+                  validatedReferredBy = pendingRefCode;
+                }
+              } catch {}
+              try {
+                localStorage.removeItem('rt_pending_ref');
+              } catch {}
+            }
+
             const safeName = (
               pendingReg.name ||
               firebaseUser.displayName ||
@@ -551,7 +599,8 @@ function UserApp() {
               points: offerPoints,
               role: 'user',
               createdAt: new Date().toISOString().slice(0, 10),
-              referralCode: `REEL${Math.floor(1000 + Math.random() * 9000)}`,
+              referralCode: myNewReferralCode,
+              ...(validatedReferredBy ? { referredBy: validatedReferredBy } : {}),
               isVerified: true,
               totalWithdrawn: 0,
               reelsWatchedCount: 0,
@@ -577,8 +626,13 @@ function UserApp() {
             setIsAuthenticated(true);
             setDocument('public_profiles', firebaseUser.uid, toPublicProfile(newUser)).catch(() => {});
 
+            if (validatedReferredBy && liveSettings.requireReelWatchForReferral === false) {
+              processReferralRewardIfEligible(newUser, liveSettings).catch(() => {});
+            }
+
             if (offerPoints > 0) {
               if (!isMuted) playSuccessChime();
+              vibrateReward();
               showToast(
                 lang === 'bn'
                   ? `🎉 অ্যাকাউন্ট তৈরি হয়েছে! লগইন অফার +${toBengaliNumber(offerPoints, lang)} পয়েন্ট যোগ হয়েছে!`
@@ -622,8 +676,42 @@ function UserApp() {
   }, [firebaseUser, emailVerified, guestId, syncRetryNonce]);
 
   const firestoreReelIdsRef = useRef<Set<string>>(new Set());
+  const aiSeqRef = useRef<number>(1);
+  const feedSentinelRef = useRef<HTMLDivElement | null>(null);
+
+  const masudCreator = React.useMemo(
+    () =>
+      resolveMasudRanaCreator(
+        users,
+        isAuthenticated ? currentUser : null,
+        firebaseUser?.email
+      ),
+    [users, isAuthenticated, currentUser, firebaseUser?.email]
+  );
+
+  const masudCreatorRef = useRef(masudCreator);
+  masudCreatorRef.current = masudCreator;
+
+  const loadMoreInfiniteReels = useCallback((targetCategory?: string) => {
+    const startSeq = aiSeqRef.current;
+    const count = 8;
+    aiSeqRef.current += count;
+    const batch = generateUnlimitedAiReelsBatch({
+      startSequence: startSeq,
+      count,
+      category: targetCategory === '🔴 লাইভ' ? 'সকল' : (targetCategory || 'সকল'),
+      creator: masudCreatorRef.current,
+    });
+    setReels((prev) => {
+      const existingIds = new Set(prev.map((r) => r.id));
+      const uniqueBatch = batch.filter((r) => !existingIds.has(r.id));
+      if (uniqueBatch.length === 0) return prev;
+      return [...prev, ...uniqueBatch];
+    });
+  }, []);
 
   // Public Reels Listener (Viewable in Guest Mode & Verified Mode; paused during unverified gate)
+  // Merges Firestore reels + curated comedy/category INITIAL_REELS + infinite AI reels
   useEffect(() => {
     if (firebaseUser && !emailVerified) return;
 
@@ -643,32 +731,16 @@ function UserApp() {
         }
       })();
 
-      if (data && data.length > 0) {
-        const currentData = (data as Reel[]).filter(
-          (r) => r && r.id && !DEMO_REEL_IDS.has(r.id)
-        );
-        if (currentData.length > 0) {
-          firestoreReelIdsRef.current = new Set(currentData.map((r) => r.id));
-          const loadedReels = currentData
-            .filter((r) => !deleted.includes(r.id))
-            .map((r, idx) => {
-              const patched = edited[r.id] ? { ...r, ...edited[r.id] } : r;
-              return {
-                ...patched,
-                viewsCount: patched.viewsCount || 0,
-                likesCount: patched.likesCount || 0,
-                commentsCount: patched.commentsCount || 0,
-                sharesCount: patched.sharesCount || 0,
-                videoUrl: normalizeVideoUrl(patched.videoUrl, idx) ?? patched.videoUrl,
-              };
-            });
-          setReels(loadedReels);
-          return;
-        }
-      }
+      const remoteData = ((data || []) as Reel[]).filter(
+        (r) => r && r.id && !DEMO_REEL_IDS.has(r.id)
+      );
+      firestoreReelIdsRef.current = new Set(remoteData.map((r) => r.id));
 
-      firestoreReelIdsRef.current = new Set();
-      const fallbackReels = INITIAL_REELS
+      const remoteIds = new Set(remoteData.map((r) => r.id));
+      const combinedBase = [
+        ...remoteData,
+        ...INITIAL_REELS.filter((r) => !remoteIds.has(r.id)),
+      ]
         .filter((r) => !deleted.includes(r.id))
         .map((r, idx) => {
           const patched = edited[r.id] ? { ...r, ...edited[r.id] } : r;
@@ -681,7 +753,25 @@ function UserApp() {
             videoUrl: normalizeVideoUrl(patched.videoUrl, idx) ?? patched.videoUrl,
           };
         });
-      setReels(fallbackReels);
+
+      const baseIds = new Set(combinedBase.map((r) => r.id));
+
+      setReels((prev) => {
+        const existingAiReels = prev.filter(
+          (r) => r.id.startsWith('ai_reel_') && !baseIds.has(r.id) && !deleted.includes(r.id)
+        );
+        if (existingAiReels.length > 0) {
+          return [...combinedBase, ...existingAiReels];
+        }
+        const initialAiBatch = generateUnlimitedAiReelsBatch({
+          startSequence: aiSeqRef.current,
+          count: 10,
+          category: 'সকল',
+          creator: masudCreatorRef.current,
+        });
+        aiSeqRef.current += 10;
+        return [...combinedBase, ...initialAiBatch];
+      });
     }, [orderBy('createdAt', 'desc')]);
 
     return () => {
@@ -765,7 +855,14 @@ function UserApp() {
   useEffect(() => {
     if (!firebaseUser || !emailVerified) return;
     const unsubTasks = firebaseOnSnapshot('tasks', (data) => {
-      setTasks(data && data.length > 0 ? (data as TaskItem[]) : INITIAL_TASKS);
+      if (data && data.length > 0) {
+        const sorted = [...(data as TaskItem[])].sort(
+          (a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99)
+        );
+        setTasks(sorted);
+      } else {
+        setTasks(INITIAL_TASKS);
+      }
     });
     return unsubTasks;
   }, [firebaseUser?.uid, emailVerified]);
@@ -844,6 +941,7 @@ function UserApp() {
     const target = (cat as ReelCategory);
     setSelectedCategory(target);
     if (!isMuted) playPopSound();
+    vibrateLight();
     requestAnimationFrame(() => {
       const el = document.getElementById(`cat-tab-${target}`);
       if (el) {
@@ -852,7 +950,7 @@ function UserApp() {
     });
   }, [isMuted]);
 
-  // Support deep-linked category filtering via ?category= or ?cat= URL parameters
+  // Support deep-linked category & referral code parameters (?category=..., ?ref=...)
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -865,6 +963,10 @@ function UserApp() {
         if (matched) {
           setSelectedCategory(matched);
         }
+      }
+      const refParam = params.get('ref');
+      if (refParam && refParam.trim().length >= 4) {
+        localStorage.setItem('rt_pending_ref', refParam.trim().toUpperCase().slice(0, 20));
       }
     } catch {
       // Ignore URL parsing errors
@@ -948,6 +1050,7 @@ function UserApp() {
   };
 
   const triggerAuthPrompt = (message?: string, title?: string) => {
+    vibrateError();
     setAuthPromptState({
       open: true,
       title,
@@ -964,6 +1067,7 @@ function UserApp() {
         paymentAccountNumber: userData.paymentAccountNumber || '',
         paymentAccountHolder: userData.paymentAccountHolder || '',
         paymentBankName: userData.paymentBankName || '',
+        referredBy: userData.referredBy || '',
       }));
     } catch {}
     return registerWithEmail(email, pass, userData.name);
@@ -979,6 +1083,7 @@ function UserApp() {
           paymentAccountNumber: pendingProfile.paymentAccountNumber || '',
           paymentAccountHolder: pendingProfile.paymentAccountHolder || '',
           paymentBankName: pendingProfile.paymentBankName || '',
+          referredBy: pendingProfile.referredBy || '',
         }));
       } catch {}
     }
@@ -1059,7 +1164,7 @@ function UserApp() {
     applyFastUserMutation(delta);
   };
 
-  // Claim Daily Bonus & Daily Reel Earning Limit Calculations
+  // Claim Daily Bonus & Daily Reel/Total Earning Limit Calculations
   const todayKey = new Date().toISOString().slice(0, 10);
   const isClaimedToday = isAuthenticated && currentUser.dailyClaimedDate === todayKey;
 
@@ -1076,16 +1181,263 @@ function UserApp() {
       (dailyPointsLimit > 0 && dailyPointsUsed >= dailyPointsLimit))
   );
 
+  // Validated Referral Bonus Processor (enforces referral watch rule, daily referrer cap, & referred user bonus)
+  const processReferralRewardIfEligible = async (
+    targetUser: User,
+    settingsObj: EarningSettings = earningSettings
+  ) => {
+    if (
+      !settingsObj.isMasterEarningEnabled ||
+      !settingsObj.isReferralEnabled ||
+      !targetUser.referredBy ||
+      targetUser.referralBonusClaimed ||
+      !isRealUserId(targetUser.id)
+    ) {
+      return;
+    }
+
+    if (
+      settingsObj.requireReelWatchForReferral !== false &&
+      (targetUser.reelsWatchedCount || 0) < 1
+    ) {
+      return;
+    }
+
+    try {
+      const matched = await getCollection('public_profiles', [
+        where('referralCode', '==', targetUser.referredBy.trim().toUpperCase()),
+      ]);
+      if (!matched || matched.length === 0) return;
+
+      const referrer = matched[0] as User;
+      if (!isRealUserId(referrer.id) || referrer.id === targetUser.id) return;
+
+      const refBonus = Math.max(0, Math.round(settingsObj.referralRewardPoints ?? 50));
+      const maxDailyRefs = Math.max(0, Math.round(settingsObj.dailyMaxReferrals ?? 10));
+      const refSameDay = referrer.dailyReferralDate === todayKey;
+      const refDailyCount = refSameDay ? Math.max(0, referrer.dailyReferralsCount || 0) : 0;
+      const referrerUnderCap = maxDailyRefs === 0 || refDailyCount < maxDailyRefs;
+
+      const rawReferredBonus = Math.max(0, Math.round(settingsObj.referredUserRewardPoints ?? 0));
+      const usage = getDailyEarningUsage(targetUser, settingsObj, todayKey);
+      const awardedSelfBonus =
+        rawReferredBonus > 0
+          ? Number.isFinite(usage.remainingTotalPoints)
+            ? Math.min(rawReferredBonus, usage.remainingTotalPoints)
+            : rawReferredBonus
+          : 0;
+
+      // Mark claimed immediately on local state to prevent duplicate fires
+      setCurrentUser((prev) => ({
+        ...prev,
+        referralBonusClaimed: true,
+        ...(awardedSelfBonus > 0
+          ? {
+              points: (prev.points || 0) + awardedSelfBonus,
+              dailyTotalEarnedDate: todayKey,
+              dailyTotalPointsEarned: usage.dailyTotalEarnedToday + awardedSelfBonus,
+            }
+          : {}),
+      }));
+
+      const selfPayload: Record<string, any> = {
+        referralBonusClaimed: true,
+      };
+      if (awardedSelfBonus > 0) {
+        selfPayload.points = increment(awardedSelfBonus);
+        selfPayload.dailyTotalEarnedDate = todayKey;
+        selfPayload.dailyTotalPointsEarned = usage.dailyTotalEarnedToday + awardedSelfBonus;
+      }
+
+      const promises: Promise<any>[] = [
+        updateDocument('users', targetUser.id, selfPayload),
+      ];
+      if (awardedSelfBonus > 0) {
+        promises.push(
+          updateDocument('public_profiles', targetUser.id, {
+            points: increment(awardedSelfBonus),
+          }).catch(() => {})
+        );
+      }
+
+      if (referrerUnderCap && refBonus > 0) {
+        const nextDailyRefCount = refDailyCount + 1;
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === referrer.id
+              ? {
+                  ...u,
+                  points: (u.points || 0) + refBonus,
+                  referralsCount: (u.referralsCount || 0) + 1,
+                  referralEarnedPoints: (u.referralEarnedPoints || 0) + refBonus,
+                  dailyReferralDate: todayKey,
+                  dailyReferralsCount: nextDailyRefCount,
+                }
+              : u
+          )
+        );
+        promises.push(
+          updateDocument('users', referrer.id, {
+            points: increment(refBonus),
+            referralsCount: increment(1),
+            referralEarnedPoints: increment(refBonus),
+            dailyReferralDate: todayKey,
+            dailyReferralsCount: refSameDay ? increment(1) : 1,
+          }),
+          updateDocument('public_profiles', referrer.id, {
+            points: increment(refBonus),
+            referralsCount: increment(1),
+            referralEarnedPoints: increment(refBonus),
+            dailyReferralDate: todayKey,
+            dailyReferralsCount: refSameDay ? increment(1) : 1,
+          }).catch(() => {})
+        );
+        sendNotification(
+          referrer.id,
+          '👥 নতুন সফল রেফারেল!',
+          `অভিনন্দন! ${targetUser.name} আপনার রেফার কোড ব্যবহার করে সক্রিয় হয়েছেন। +${toBengaliNumber(refBonus, lang)} পয়েন্ট যোগ হয়েছে!`,
+          'general'
+        );
+      }
+
+      await Promise.all(promises);
+
+      if (awardedSelfBonus > 0) {
+        showToast(
+          lang === 'bn'
+            ? `🎁 রেফারেল ওয়েলকাম বোনাস +${toBengaliNumber(awardedSelfBonus, lang)} পয়েন্ট আপনার ওয়ালেটে যোগ হয়েছে!`
+            : `🎁 Referral welcome bonus +${awardedSelfBonus} pts added to your wallet!`
+        );
+      } else if (referrerUnderCap && refBonus > 0) {
+        showToast(
+          lang === 'bn'
+            ? `🎁 রেফারেল বোনাস (+${toBengaliNumber(refBonus, lang)} পয়েন্ট) সফলভাবে সম্পন্ন হয়েছে!`
+            : `🎁 Referral bonus (+${refBonus} pts) completed!`
+        );
+      }
+    } catch (err) {
+      console.error('Referral bonus processing error:', err);
+    }
+  };
+
+  const handleApplyReferralCode = async (
+    rawCode: string
+  ): Promise<{ ok: boolean; message: string }> => {
+    if (!isAuthenticated || !firebaseUser || !emailVerified || !isRealUserId(currentUserRef.current.id)) {
+      return {
+        ok: false,
+        message: lang === 'bn' ? 'অনুগ্রহ করে আগে লগইন করুন।' : 'Please log in first.',
+      };
+    }
+    if (!earningSettings.isMasterEarningEnabled || !earningSettings.isReferralEnabled) {
+      vibrateError();
+      return {
+        ok: false,
+        message: lang === 'bn' ? 'রেফারেল সিস্টেম বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : 'Referral system is paused by Admin.',
+      };
+    }
+
+    const activeUser = currentUserRef.current;
+    if (activeUser.referredBy) {
+      return {
+        ok: false,
+        message: lang === 'bn' ? 'আপনি ইতিমধ্যে একটি রেফার কোড ব্যবহার করেছেন।' : 'You have already used a referral code.',
+      };
+    }
+
+    const code = rawCode.trim().toUpperCase().slice(0, 20);
+    if (code.length < 4 || code === (activeUser.referralCode || '').toUpperCase()) {
+      vibrateError();
+      return {
+        ok: false,
+        message: lang === 'bn' ? 'সঠিক রেফার কোড দিন (নিজের কোড ব্যবহার করা যাবে না)।' : 'Enter a valid referral code.',
+      };
+    }
+
+    try {
+      const matched = await getCollection('public_profiles', [
+        where('referralCode', '==', code),
+      ]);
+      const referrer = matched?.[0] as User | undefined;
+      if (!referrer || !isRealUserId(referrer.id) || referrer.id === activeUser.id) {
+        vibrateError();
+        return {
+          ok: false,
+          message:
+            lang === 'bn'
+              ? '❌ এই রেফার কোডটি খুঁজে পাওয়া যায়নি! সঠিক ইউজার কোড দিন।'
+              : '❌ Referral code not found. Please check and try again.',
+        };
+      }
+
+      const updatedUser: User = { ...activeUser, referredBy: code };
+      setCurrentUser(updatedUser);
+      await updateDocument('users', activeUser.id, { referredBy: code });
+
+      if (
+        earningSettings.requireReelWatchForReferral === false ||
+        (updatedUser.reelsWatchedCount || 0) >= 1
+      ) {
+        await processReferralRewardIfEligible(updatedUser, earningSettings);
+      }
+
+      vibrateSuccess();
+      const msg =
+        earningSettings.requireReelWatchForReferral !== false && (updatedUser.reelsWatchedCount || 0) < 1
+          ? lang === 'bn'
+            ? '✅ রেফার কোড যুক্ত হয়েছে! বোনাস আনলক করতে কমপক্ষে ১টি রিল সম্পূর্ণ দেখুন।'
+            : '✅ Referral code applied! Watch at least 1 reel to unlock the bonus.'
+          : lang === 'bn'
+          ? '✅ রেফার কোড সফলভাবে ভেরিফাই ও যুক্ত হয়েছে!'
+          : '✅ Referral code verified and applied!';
+
+      showToast(msg);
+      return { ok: true, message: msg };
+    } catch (err) {
+      console.warn('Referral code apply error:', err);
+      return {
+        ok: false,
+        message: lang === 'bn' ? 'রেফার কোড যাচাই করতে সমস্যা হয়েছে।' : 'Failed to verify referral code.',
+      };
+    }
+  };
+
   const handleClaimDailyBonus = (bonusPoints: number) => {
     if (!earningSettings.isMasterEarningEnabled || !earningSettings.isDailyBonusEnabled) {
+      vibrateError();
       showToast(lang === 'bn' ? '⚠️ দৈনিক বোনাস আর্নিং বর্তমানে এডমিন দ্বারা বন্ধ রয়েছে।' : '⚠️ Daily bonus is currently disabled.');
       return;
     }
 
     if (!isAuthenticated || isClaimedToday) return;
+    const activeUser = currentUserRef.current;
+    const usage = getDailyEarningUsage(activeUser, earningSettings, todayKey);
+    if (usage.isDailyTotalLimitReached || usage.remainingTotalPoints <= 0) {
+      vibrateError();
+      showToast(
+        lang === 'bn'
+          ? `🔒 আজকের মোট উপার্জন লিমিট পূর্ণ হয়েছে (${toBengaliNumber(usage.dailyTotalEarnedToday, lang)}/${toBengaliNumber(usage.dailyMaxTotalPoints, lang)} পয়েন্ট)!`
+          : `🔒 Daily total earning limit reached (${usage.dailyTotalEarnedToday}/${usage.dailyMaxTotalPoints} pts)!`
+      );
+      return;
+    }
 
-    const actualBonus = earningSettings.dailyBonusPoints || bonusPoints;
-    applyFastUserMutation(actualBonus, { dailyClaimedDate: todayKey });
+    const rawBonus = Math.max(0, Math.round(earningSettings.dailyBonusPoints ?? bonusPoints));
+    const actualBonus = Number.isFinite(usage.remainingTotalPoints)
+      ? Math.min(rawBonus, usage.remainingTotalPoints)
+      : rawBonus;
+    if (actualBonus <= 0) {
+      vibrateError();
+      showToast(lang === 'bn' ? '⚠️ বর্তমানে বোনাস পয়েন্ট 0 সেট করা রয়েছে বা লিমিট শেষ।' : '⚠️ Daily bonus is 0 or limit reached.');
+      return;
+    }
+
+    applyFastUserMutation(actualBonus, {
+      dailyClaimedDate: todayKey,
+      dailyTotalEarnedDate: todayKey,
+      dailyTotalPointsEarned: usage.dailyTotalEarnedToday + actualBonus,
+    });
+    vibrateReward();
 
     showToast(`🎉 দৈনিক বোনাস +${toBengaliNumber(actualBonus, lang)} পয়েন্ট আপনার ওয়ালেটে যুক্ত হয়েছে!`);
   };
@@ -1109,6 +1461,7 @@ function UserApp() {
 
     setLikedReelIds(nextLiked);
     setCurrentUser((prev) => ({ ...prev, likedReelIds: nextLiked }));
+    vibrateLike(willLike);
 
     const targetReel = reels.find((r) => r.id === reelId);
     const currentLikesCount = Math.max(0, targetReel?.likesCount || 0);
@@ -1170,6 +1523,7 @@ function UserApp() {
       : existingLiked.filter((id) => id !== commentId);
 
     setCurrentUser((prev) => ({ ...prev, likedCommentIds: nextLiked }));
+    vibrateLike(willLike);
 
     try {
       await Promise.all([
@@ -1212,6 +1566,8 @@ function UserApp() {
     setSavedReelIds((prev) => {
       const alreadySaved = prev.includes(reelId);
       const next = alreadySaved ? prev.filter((id) => id !== reelId) : [...prev, reelId];
+      if (alreadySaved) vibrateLight();
+      else vibrateSuccess();
       try {
         localStorage.setItem('rt_saved_reels', JSON.stringify(next));
       } catch {}
@@ -1235,6 +1591,7 @@ function UserApp() {
   const handleEarnReelReward = (rewardPoints: number, _reelTitle: string, explicitReelId?: string) => {
     // 1. Check master toggle & video earning toggle
     if (!earningSettings.isMasterEarningEnabled || !earningSettings.isVideoWatchEarningEnabled) {
+      vibrateError();
       showToast(lang === 'bn' ? '📺 বিনোদন মোড: পয়েন্ট আর্নিং সিস্টেম বর্তমানে বন্ধ রয়েছে।' : '📺 Entertainment mode: earning is currently disabled.');
       return;
     }
@@ -1245,6 +1602,7 @@ function UserApp() {
     const activeReel = targetReelId ? reels.find(r => r.id === targetReelId) : undefined;
     if (activeReel) {
       if (isOwnContentUser(activeReel.userId)) {
+        vibrateError();
         showToast(
           lang === 'bn'
             ? '📺 নিজের ভিডিও দেখে পয়েন্ট অর্জন করা যাবে না। অন্য ইউজারের রিলস দেখে আয় করুন!'
@@ -1253,10 +1611,12 @@ function UserApp() {
         return;
       }
       if (activeReel.isEarningEnabled === false) {
+        vibrateError();
         showToast(lang === 'bn' ? '📺 এই রিলটিতে পয়েন্ট আর্নিং বন্ধ রয়েছে (শুধুমাত্র বিনোদন)।' : '📺 Earning is disabled for this reel.');
         return;
       }
       if (earningSettings.videoEarningScope === 'offer_reels_only' && !activeReel.isSpecialOffer) {
+        vibrateError();
         showToast(lang === 'bn' ? '📺 শুধুমাত্র স্পেশাল অফার রিলগুলোতে পয়েন্ট প্রযোজ্য।' : '📺 Earning is only available for special offer reels.');
         return;
       }
@@ -1298,6 +1658,7 @@ function UserApp() {
         });
       }
       if (!isMuted) playCoinSound();
+      vibrateReward();
       showToast(
         lang === 'bn'
           ? `🪙 গেস্ট প্রিভিউ +${toBengaliNumber(previewReward, lang)} পয়েন্ট (উত্তোলনযোগ্য নয়)। আসল টাকা আর্ন করতে লগইন করুন!`
@@ -1312,7 +1673,7 @@ function UserApp() {
       return;
     }
 
-    // 4. Enforce Admin-controlled Daily Reel & Point Limits
+    // 4. Enforce Admin-controlled Daily Reel & Global Daily Earning Limits
     const activeUser = currentUserRef.current;
     if (!firebaseUser || !isRealUserId(activeUser.id) || activeUser.id !== firebaseUser.uid) {
       return;
@@ -1333,20 +1694,34 @@ function UserApp() {
       if (dailyPointsLimit > 0 && usedPoints >= dailyPointsLimit) {
         showToast(
           lang === 'bn'
-            ? `🔒 আজকের পয়েন্ট আর্নিং লিমিট শেষ (${toBengaliNumber(usedPoints, lang)}/${toBengaliNumber(dailyPointsLimit, lang)} পয়েন্ট)! আগামীকাল আবার পয়েন্ট পাবেন।`
-            : `🔒 Daily point limit reached (${usedPoints}/${dailyPointsLimit} pts)! Try again tomorrow.`
+            ? `🔒 আজকের রিল পয়েন্ট লিমিট শেষ (${toBengaliNumber(usedPoints, lang)}/${toBengaliNumber(dailyPointsLimit, lang)} পয়েন্ট)! আগামীকাল আবার পয়েন্ট পাবেন।`
+            : `🔒 Daily reel point limit reached (${usedPoints}/${dailyPointsLimit} pts)! Try again tomorrow.`
         );
         return;
       }
     }
 
+    const totalUsage = getDailyEarningUsage(activeUser, earningSettings, todayKey);
+    if (totalUsage.isDailyTotalLimitReached || totalUsage.remainingTotalPoints <= 0) {
+      vibrateError();
+      showToast(
+        lang === 'bn'
+          ? `🔒 আজকের মোট উপার্জন লিমিট পূর্ণ হয়েছে (${toBengaliNumber(totalUsage.dailyTotalEarnedToday, lang)}/${toBengaliNumber(totalUsage.dailyMaxTotalPoints, lang)} পয়েন্ট)! আগামীকাল আবার আয় করুন।`
+          : `🔒 Daily total earning limit reached (${totalUsage.dailyTotalEarnedToday}/${totalUsage.dailyMaxTotalPoints} pts)!`
+      );
+      return;
+    }
+
     const currentLevel = getUserLevel(activeUser.reelsWatchedCount);
     const multiplier = earningSettings.isLevelMultiplierEnabled ? currentLevel.multiplier : 1;
     const rawReward = Math.round(rewardPoints * multiplier);
-    const finalReward =
+    const reelCapped =
       isReelLimitEnabled && dailyPointsLimit > 0
         ? Math.min(rawReward, Math.max(0, dailyPointsLimit - usedPoints))
         : rawReward;
+    const finalReward = Number.isFinite(totalUsage.remainingTotalPoints)
+      ? Math.min(reelCapped, totalUsage.remainingTotalPoints)
+      : reelCapped;
 
     if (finalReward <= 0) {
       showToast(lang === 'bn' ? '🔒 আজকের পয়েন্ট লিমিট পূর্ণ হয়েছে!' : '🔒 Daily point limit reached!');
@@ -1354,6 +1729,7 @@ function UserApp() {
     }
 
     if (!isMuted) playCoinSound();
+    vibrateReward();
 
     const newWatchedCount = activeUser.reelsWatchedCount + 1;
     const prevLevel = getUserLevel(activeUser.reelsWatchedCount);
@@ -1369,6 +1745,7 @@ function UserApp() {
             colors: ['#ffcc00', '#00c853', '#00e676', '#ffffff']
           });
           if (!isMuted) playSuccessChime();
+          vibrateReward();
         } catch (e) {}
         
         showToast(
@@ -1379,58 +1756,27 @@ function UserApp() {
       }, 600);
     }
 
-    if (earningSettings.isReferralEnabled && newWatchedCount >= 1 && activeUser.referredBy && !activeUser.referralBonusClaimed) {
-      setCurrentUser((prev) => ({ ...prev, referralBonusClaimed: true }));
-      const findReferrerAndBonus = async () => {
-        try {
-          const referrerCode = activeUser.referredBy;
-          const usersList = await getCollection('public_profiles', [where('referralCode', '==', referrerCode)]);
-          if (usersList && usersList.length > 0) {
-            const referrer = usersList[0] as User;
-            if (!isRealUserId(referrer.id) || referrer.id === activeUser.id) return;
-            const refBonus = earningSettings.referralRewardPoints || 50;
-            setUsers((prev) =>
-              prev.map((u) =>
-                u.id === referrer.id
-                  ? {
-                      ...u,
-                      points: (u.points || 0) + refBonus,
-                      referralsCount: (u.referralsCount || 0) + 1,
-                      referralEarnedPoints: (u.referralEarnedPoints || 0) + refBonus,
-                    }
-                  : u
-              )
-            );
-            await Promise.all([
-              updateDocument('users', referrer.id, {
-                points: increment(refBonus),
-                referralsCount: increment(1),
-                referralEarnedPoints: increment(refBonus),
-              }),
-              updateDocument('public_profiles', referrer.id, {
-                points: increment(refBonus),
-                referralsCount: increment(1),
-                referralEarnedPoints: increment(refBonus),
-              }).catch(() => {}),
-              updateDocument('users', activeUser.id, {
-                referralBonusClaimed: true,
-              }),
-            ]);
-            showToast(
-              lang === 'bn'
-                ? `🎁 রেফারেল বোনাস (+${toBengaliNumber(refBonus, lang)} পয়েন্ট) সফলভাবে সম্পন্ন হয়েছে!`
-                : `🎁 Referral bonus (+${refBonus} pts) successful!`
-            );
-          }
-        } catch (err) {
-          console.error("Referral bonus error:", err);
-        }
-      };
-      findReferrerAndBonus();
-    }
-
     const nextClaimsToday = usedClaims + 1;
     const nextPointsToday = usedPoints + finalReward;
+    const sameTotalDay = activeUser.dailyTotalEarnedDate === todayKey;
+    const nextTotalEarnedToday = totalUsage.dailyTotalEarnedToday + finalReward;
+
+    if (
+      earningSettings.isReferralEnabled &&
+      newWatchedCount >= 1 &&
+      activeUser.referredBy &&
+      !activeUser.referralBonusClaimed
+    ) {
+      processReferralRewardIfEligible(
+        {
+          ...activeUser,
+          reelsWatchedCount: newWatchedCount,
+          dailyTotalEarnedDate: todayKey,
+          dailyTotalPointsEarned: nextTotalEarnedToday,
+        },
+        earningSettings
+      ).catch(() => {});
+    }
 
     // Instant 0ms UI update + atomic Firestore increment
     setCurrentUser((prev) => ({
@@ -1442,6 +1788,8 @@ function UserApp() {
       dailyReelClaimDate: todayKey,
       dailyReelClaimsCount: nextClaimsToday,
       dailyReelPointsEarned: nextPointsToday,
+      dailyTotalEarnedDate: todayKey,
+      dailyTotalPointsEarned: nextTotalEarnedToday,
     }));
     setUsers((prev) =>
       prev.map((u) =>
@@ -1455,6 +1803,8 @@ function UserApp() {
               dailyReelClaimDate: todayKey,
               dailyReelClaimsCount: nextClaimsToday,
               dailyReelPointsEarned: nextPointsToday,
+              dailyTotalEarnedDate: todayKey,
+              dailyTotalPointsEarned: nextTotalEarnedToday,
             }
           : u
       )
@@ -1468,6 +1818,8 @@ function UserApp() {
       dailyReelClaimDate: todayKey,
       dailyReelClaimsCount: sameDay ? increment(1) : 1,
       dailyReelPointsEarned: sameDay ? increment(finalReward) : finalReward,
+      dailyTotalEarnedDate: todayKey,
+      dailyTotalPointsEarned: sameTotalDay ? increment(finalReward) : finalReward,
     }).catch((err) => console.warn('Reel reward sync error:', err));
 
     updateDocument('public_profiles', activeUser.id, {
@@ -1500,6 +1852,7 @@ function UserApp() {
   // Direct Claim from Feed (Respects Admin Daily Limit & Blocks Self-Watch Earning)
   const handleClaimDirect = (reel: Reel) => {
     if (isOwnContentUser(reel.userId)) {
+      vibrateError();
       showToast(
         lang === 'bn'
           ? '📺 নিজের ভিডিও দেখে পয়েন্ট অর্জন করা যাবে না। অন্য ইউজারের রিলস দেখে আয় করুন!'
@@ -1509,16 +1862,19 @@ function UserApp() {
     }
 
     if (!earningSettings.isMasterEarningEnabled || !earningSettings.isVideoWatchEarningEnabled || !earningSettings.allowDirectFeedClaim) {
+      vibrateError();
       showToast(lang === 'bn' ? '📺 হোম ফিড থেকে ক্লেইম বা আর্নিং বন্ধ রয়েছে।' : '📺 Earning from feed is currently disabled.');
       return;
     }
 
     if (reel.isEarningEnabled === false) {
+      vibrateError();
       showToast(lang === 'bn' ? '📺 এই রিলটিতে পয়েন্ট আর্নিং বন্ধ রয়েছে।' : '📺 Earning is disabled for this reel.');
       return;
     }
 
     if (earningSettings.videoEarningScope === 'offer_reels_only' && !reel.isSpecialOffer) {
+      vibrateError();
       showToast(lang === 'bn' ? '📺 শুধুমাত্র স্পেশাল অফার রিলগুলোতে পয়েন্ট প্রযোজ্য।' : '📺 Earning only applies to special offer reels.');
       return;
     }
@@ -1554,11 +1910,13 @@ function UserApp() {
     }
 
     if (watchedReelIds.includes(reel.id)) {
+      vibrateLight();
       showToast(lang === 'bn' ? 'আপনি ইতিমধ্যে এই রিলের পয়েন্ট সংগ্রহ করেছেন!' : 'Already collected points for this reel!');
       return;
     }
 
     if (isDailyReelLimitReached) {
+      vibrateError();
       showToast(
         lang === 'bn'
           ? `🔒 আজকের রিল আর্নিং লিমিট পূর্ণ হয়েছে (${toBengaliNumber(dailyClaimsUsed, lang)}/${toBengaliNumber(dailyClaimsLimit, lang)} রিল • ${toBengaliNumber(dailyPointsUsed, lang)}/${toBengaliNumber(dailyPointsLimit, lang)} Pts)!`
@@ -1607,6 +1965,7 @@ function UserApp() {
     };
 
     await addDocument(`reels/${reelId}/comments`, newComment);
+    vibrateSuccess();
 
     // Update comment counter on reel optimistically & in Firestore
     setReels((prev) =>
@@ -1677,6 +2036,7 @@ function UserApp() {
 
     // Instant 0ms deduction + optimistic history entry
     applyFastUserMutation(-reqData.pointsDeducted);
+    vibrateSuccess();
     setWithdrawals((prev) => [{ ...(newReq as WithdrawalRequest), id: tempId }, ...prev]);
     showToast(
       lang === 'bn'
@@ -1719,6 +2079,7 @@ function UserApp() {
     };
 
     await addDocument('deposits', newReq);
+    vibrateSuccess();
     showToast(
       lang === 'bn'
         ? `💎 ডিপোজিট রিকোয়েস্ট জমা হয়েছে। এডমিন যাচাই করে পয়েন্ট যোগ করে দেবে।`
@@ -1736,6 +2097,7 @@ function UserApp() {
     _explicitAdminShare?: number
   ) => {
     if (!siteSettings.isGiftsEnabled) {
+      vibrateError();
       showToast(lang === 'bn' ? '🔒 গিফট পাঠানো বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : '🔒 Gifts are disabled by Admin.');
       return;
     }
@@ -1753,6 +2115,7 @@ function UserApp() {
 
     // Strictly block self-gifting BEFORE any point deduction
     if (!resolvedTargetUserId || isOwnContentUser(resolvedTargetUserId)) {
+      vibrateError();
       showToast(
         lang === 'bn'
           ? '🎁 নিজের ভিডিও বা লাইভে গিফট পাঠানো যাবে না! গিফট শুধুমাত্র অন্য ইউজারদের জন্য।'
@@ -1768,6 +2131,7 @@ function UserApp() {
     const netCost = Math.max(0, gift.costPoints - userCashback);
 
     if ((currentUserRef.current.points || 0) < gift.costPoints) {
+      vibrateError();
       showToast(lang === 'bn' ? '⚠️ পর্যাপ্ত পয়েন্ট নেই!' : '⚠️ Insufficient points!');
       return;
     }
@@ -1782,6 +2146,7 @@ function UserApp() {
       (adminShare > 0 && adminUid && adminUid === currentUserRef.current.id ? adminShare : 0);
 
     applyFastUserMutation(senderNetDelta);
+    vibrateGift();
 
     if (resolvedTargetUserId && resolvedTargetUserId !== currentUserRef.current.id && creatorShare > 0) {
       setUsers((prev) =>
@@ -1849,8 +2214,8 @@ function UserApp() {
   );
 
   const resolvedReels = React.useMemo(
-    () => reels.map((r) => resolveReelWithOwner(r, userMap)),
-    [reels, userMap]
+    () => reels.map((r) => resolveReelWithOwner(r, userMap, masudCreator)),
+    [reels, userMap, masudCreator]
   );
 
   const handleOpenUserProfile = async (userId: string) => {
@@ -1866,7 +2231,7 @@ function UserApp() {
       return;
     }
 
-    if (isAuthenticated) {
+    if (isAuthenticated && isRealUserId(userId)) {
       try {
         const remoteUser = (await getDocument('public_profiles', userId)) as User | null;
         if (remoteUser) {
@@ -1880,17 +2245,18 @@ function UserApp() {
     }
 
     const creatorReel = resolvedReels.find((r) => r.userId === userId);
-    if (creatorReel) {
+    if (creatorReel || userId === MASUD_RANA_FALLBACK_ID || userId === masudCreator.id) {
+      const isMasud = userId === MASUD_RANA_FALLBACK_ID || userId === masudCreator.id || userId === 'system_admin';
       setSelectedUserProfileUser({
         id: userId,
-        name: creatorReel.creatorName || 'ReelPay BD অফিসিয়াল',
+        name: creatorReel?.creatorName || masudCreator.name || MASUD_RANA_NAME,
         phone: '',
-        avatar: creatorReel.creatorAvatar || DEFAULT_AVATAR_URL,
+        avatar: creatorReel?.creatorAvatar || masudCreator.avatar || MASUD_RANA_AVATAR,
         points: 0,
-        role: userId === 'system_admin' ? 'admin' : 'user',
-        createdAt: creatorReel.createdAt || new Date().toISOString().slice(0, 10),
+        role: isMasud ? 'admin' : 'user',
+        createdAt: creatorReel?.createdAt || new Date().toISOString().slice(0, 10),
         referralCode: '',
-        isVerified: Boolean(creatorReel.isVerified || userId === 'system_admin'),
+        isVerified: Boolean(creatorReel?.isVerified || isMasud),
         totalWithdrawn: 0,
         reelsWatchedCount: 0,
         followersCount: 0,
@@ -1950,6 +2316,8 @@ function UserApp() {
     setFollowListModal((prev) => (prev ? { ...prev, user: updateTargetState(prev.user) } : prev));
 
     if (!isMuted) playPopSound();
+    if (currentlyFollowing) vibrateLight();
+    else vibrateSuccess();
     showToast(
       currentlyFollowing
         ? (lang === 'bn' ? `${targetName || 'ক্রিয়েটর'}-কে আনফলো করেছেন।` : `Unfollowed ${targetName || 'creator'}.`)
@@ -2120,43 +2488,170 @@ function UserApp() {
     setShowShareSheet(true);
   };
 
-  // Task Completion (Instant 0ms + atomic increment)
-  const handleCompleteTask = (taskId: string, rewardPoints: number) => {
+  // Task / Offer Completion (Strictly verifies referral/watch requirements + daily task/total limits)
+  const handleCompleteTask = (taskId: string, _rewardPoints: number) => {
     if (!earningSettings.isMasterEarningEnabled || !earningSettings.isTasksEnabled) {
+      vibrateError();
       showToast(lang === 'bn' ? '⚠️ টাস্ক আর্নিং বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : '⚠️ Task earning is paused by Admin.');
       return;
     }
+    const activeUser = currentUserRef.current;
     if (
       !isAuthenticated ||
       !firebaseUser ||
       !emailVerified ||
-      !isRealUserId(currentUserRef.current.id) ||
-      currentUserRef.current.id !== firebaseUser.uid ||
-      rewardPoints <= 0
+      !isRealUserId(activeUser.id) ||
+      activeUser.id !== firebaseUser.uid
     ) {
       return;
     }
-    const currentCompleted = currentUserRef.current.completedTaskIds || [];
-    if (!currentCompleted.includes(taskId)) {
-      const updatedCompleted = [...currentCompleted, taskId];
-      applyFastUserMutation(rewardPoints, { completedTaskIds: updatedCompleted });
-      showToast(lang === 'bn' ? `🎉 টাস্ক সম্পন্ন হয়েছে! +${toBengaliNumber(rewardPoints, lang)} পয়েন্ট অর্জিত।` : `🎉 Task completed! +${rewardPoints} pts.`);
-    }
-  };
 
-  // Add Points (e.g., from spin wheel)
-  const handleAddPointsGeneral = (pts: number, reason: string) => {
-    if (!isAuthenticated || !firebaseUser || !emailVerified || !Number.isFinite(pts) || pts <= 0) return;
-    updateUserPoints(pts);
+    const rawTask = tasks.find((t) => t.id === taskId);
+    if (!rawTask) {
+      vibrateError();
+      showToast(lang === 'bn' ? '⚠️ এই অফার বা টাস্কটি খুঁজে পাওয়া যায়নি।' : '⚠️ Offer not found.');
+      return;
+    }
+    const task = normalizeTaskOffer(rawTask);
+    if (!task.isActive) {
+      vibrateError();
+      showToast(lang === 'bn' ? '⚠️ এই অফারটি বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : '⚠️ This offer is currently paused.');
+      return;
+    }
+
+    if (isTaskCompletedForUser(task, activeUser, todayKey)) {
+      vibrateLight();
+      showToast(
+        lang === 'bn'
+          ? task.isRepeatableDaily
+            ? 'আজকের জন্য এই টাস্কটি ইতিমধ্যে সম্পন্ন করেছেন!'
+            : 'আপনি ইতিমধ্যে এই অফারটি সম্পন্ন করেছেন!'
+          : 'Offer already completed!'
+      );
+      return;
+    }
+
+    const req = getOfferRequirementProgress(task, activeUser, todayKey);
+    if (!req.met) {
+      vibrateError();
+      if (req.requirementType === 'referral_count') {
+        showToast(
+          lang === 'bn'
+            ? `🔒 রেফার ছাড়া পয়েন্ট পাওয়া যাবে না! কমপক্ষে ${toBengaliNumber(req.required, lang)} জন সফল রেফার প্রয়োজন (বর্তমান: ${toBengaliNumber(req.current, lang)}/${toBengaliNumber(req.required, lang)})।`
+            : `🔒 Need ${req.required} verified referrals to claim (${req.current}/${req.required}).`
+        );
+      } else if (req.requirementType === 'reels_watched') {
+        showToast(
+          lang === 'bn'
+            ? `🔒 এই অফার আনলক করতে কমপক্ষে ${toBengaliNumber(req.required, lang)}টি রিল দেখুন (সম্পন্ন: ${toBengaliNumber(req.current, lang)}/${toBengaliNumber(req.required, lang)})।`
+            : `🔒 Watch ${req.required} reels to unlock this offer (${req.current}/${req.required}).`
+        );
+      }
+      return;
+    }
+
+    const usage = getDailyEarningUsage(activeUser, earningSettings, todayKey);
+    if (usage.isDailyTaskLimitReached) {
+      vibrateError();
+      showToast(
+        lang === 'bn'
+          ? `🔒 আজকের টাস্ক/অফার ক্লেইম লিমিট শেষ (${toBengaliNumber(usage.dailyTaskClaimsUsed, lang)}/${toBengaliNumber(usage.dailyMaxTaskClaims, lang)})! আগামীকাল আবার চেষ্টা করুন।`
+          : `🔒 Daily task limit reached (${usage.dailyTaskClaimsUsed}/${usage.dailyMaxTaskClaims})!`
+      );
+      return;
+    }
+    if (task.rewardPoints > 0 && (usage.isDailyTotalLimitReached || usage.remainingTotalPoints <= 0)) {
+      vibrateError();
+      showToast(
+        lang === 'bn'
+          ? `🔒 আজকের মোট উপার্জন লিমিট পূর্ণ হয়েছে (${toBengaliNumber(usage.dailyTotalEarnedToday, lang)}/${toBengaliNumber(usage.dailyMaxTotalPoints, lang)} পয়েন্ট)!`
+          : `🔒 Daily total earning limit reached!`
+      );
+      return;
+    }
+
+    const awardedPoints = Number.isFinite(usage.remainingTotalPoints)
+      ? Math.min(Math.max(0, task.rewardPoints), usage.remainingTotalPoints)
+      : Math.max(0, task.rewardPoints);
+
+    const extraFields: Record<string, any> = {
+      dailyTaskClaimDate: todayKey,
+      dailyTaskClaimsCount: usage.dailyTaskClaimsUsed + 1,
+      dailyTotalEarnedDate: todayKey,
+      dailyTotalPointsEarned: usage.dailyTotalEarnedToday + awardedPoints,
+    };
+
+    if (task.isRepeatableDaily) {
+      const prevDailyIds =
+        activeUser.dailyTaskClaimDate === todayKey && Array.isArray(activeUser.dailyCompletedTaskIds)
+          ? activeUser.dailyCompletedTaskIds
+          : [];
+      extraFields.dailyCompletedTaskIds = Array.from(new Set([...prevDailyIds, taskId]));
+    } else {
+      const currentCompleted = activeUser.completedTaskIds || [];
+      extraFields.completedTaskIds = Array.from(new Set([...currentCompleted, taskId]));
+    }
+
+    applyFastUserMutation(awardedPoints, extraFields);
+    vibrateReward();
+    if (!isMuted) playSuccessChime();
     showToast(
       lang === 'bn'
-        ? `🎉 ${reason}: +${toBengaliNumber(pts, lang)} পয়েন্ট ওয়ালেটে যুক্ত হয়েছে!`
-        : `🎉 ${reason}: +${pts} points added to wallet!`
+        ? `🎉 অফার সম্পন্ন হয়েছে! +${toBengaliNumber(awardedPoints, lang)} পয়েন্ট অর্জিত।`
+        : `🎉 Offer completed! +${awardedPoints} pts.`
+    );
+  };
+
+  // Add Points (Spin Wheel — respects spin toggle, spin limits, & global daily earning limit)
+  const handleAddPointsGeneral = (pts: number, reason: string) => {
+    const activeUser = currentUserRef.current;
+    if (
+      !isAuthenticated ||
+      !firebaseUser ||
+      !emailVerified ||
+      !isRealUserId(activeUser.id) ||
+      !Number.isFinite(pts) ||
+      pts <= 0
+    ) {
+      return;
+    }
+    if (!earningSettings.isMasterEarningEnabled || !earningSettings.isSpinWheelEnabled) {
+      vibrateError();
+      showToast(lang === 'bn' ? '⚠️ স্পিন হুইল বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : '⚠️ Spin wheel is paused by Admin.');
+      return;
+    }
+
+    const usage = getDailyEarningUsage(activeUser, earningSettings, todayKey);
+    if (usage.isDailyTotalLimitReached || usage.remainingTotalPoints <= 0) {
+      vibrateError();
+      showToast(
+        lang === 'bn'
+          ? `🔒 আজকের মোট উপার্জন লিমিট পূর্ণ হয়েছে (${toBengaliNumber(usage.dailyTotalEarnedToday, lang)}/${toBengaliNumber(usage.dailyMaxTotalPoints, lang)} পয়েন্ট)!`
+          : `🔒 Daily total earning limit reached!`
+      );
+      return;
+    }
+
+    const awardedPts = Number.isFinite(usage.remainingTotalPoints)
+      ? Math.min(Math.round(pts), usage.remainingTotalPoints)
+      : Math.round(pts);
+    if (awardedPts <= 0) return;
+
+    applyFastUserMutation(awardedPts, {
+      dailyTotalEarnedDate: todayKey,
+      dailyTotalPointsEarned: usage.dailyTotalEarnedToday + awardedPts,
+    });
+    vibrateReward();
+    showToast(
+      lang === 'bn'
+        ? `🎉 ${reason}: +${toBengaliNumber(awardedPts, lang)} পয়েন্ট ওয়ালেটে যুক্ত হয়েছে!`
+        : `🎉 ${reason}: +${awardedPts} points added to wallet!`
     );
   };
 
   const handleClaimScratchCard = (prizePts: number) => {
     if (!earningSettings.isMasterEarningEnabled || !earningSettings.isScratchCardEnabled) {
+      vibrateError();
       showToast(lang === 'bn' ? '⚠️ স্ক্র্যাচ কার্ড বর্তমানে বন্ধ রয়েছে।' : '⚠️ Scratch card is currently paused.');
       return;
     }
@@ -2165,11 +2660,38 @@ function UserApp() {
       return;
     }
     if (activeUser.dailyScratchClaimDate === todayKey) {
+      vibrateLight();
       showToast(lang === 'bn' ? 'আজকের স্ক্র্যাচ কার্ড পুরস্কার ইতিমধ্যে সংগ্রহ করেছেন!' : 'Already claimed today\'s scratch card!');
       return;
     }
-    const actualPrize = Math.max(1, earningSettings.scratchCardPrize || prizePts);
-    applyFastUserMutation(actualPrize, { dailyScratchClaimDate: todayKey });
+
+    const usage = getDailyEarningUsage(activeUser, earningSettings, todayKey);
+    if (usage.isDailyTotalLimitReached || usage.remainingTotalPoints <= 0) {
+      vibrateError();
+      showToast(
+        lang === 'bn'
+          ? `🔒 আজকের মোট উপার্জন লিমিট পূর্ণ হয়েছে (${toBengaliNumber(usage.dailyTotalEarnedToday, lang)}/${toBengaliNumber(usage.dailyMaxTotalPoints, lang)} পয়েন্ট)!`
+          : `🔒 Daily total earning limit reached!`
+      );
+      return;
+    }
+
+    const rawPrize = Math.max(0, Math.round(earningSettings.scratchCardPrize ?? prizePts));
+    const actualPrize = Number.isFinite(usage.remainingTotalPoints)
+      ? Math.min(rawPrize, usage.remainingTotalPoints)
+      : rawPrize;
+    if (actualPrize <= 0) {
+      vibrateError();
+      showToast(lang === 'bn' ? '⚠️ স্ক্র্যাচ কার্ড পয়েন্ট 0 সেট করা রয়েছে বা আজকের লিমিট শেষ।' : '⚠️ Scratch prize is 0 or limit reached.');
+      return;
+    }
+
+    applyFastUserMutation(actualPrize, {
+      dailyScratchClaimDate: todayKey,
+      dailyTotalEarnedDate: todayKey,
+      dailyTotalPointsEarned: usage.dailyTotalEarnedToday + actualPrize,
+    });
+    vibrateReward();
     try {
       localStorage.setItem(`rt_scratch_${activeUser.id}`, todayKey);
     } catch {}
@@ -2351,6 +2873,7 @@ function UserApp() {
       setCurrentLiveStreamId(liveId);
       setShowLiveSheet(true);
       if (!isMuted) playSuccessChime();
+      vibrateSuccess();
       showToast(
         payload.mode === 'audio'
           ? lang === 'bn'
@@ -2541,6 +3064,37 @@ function UserApp() {
     return result;
   })();
 
+  // Ensure every category immediately has plenty of AI videos & visuals
+  useEffect(() => {
+    if (selectedCategory === '🔴 লাইভ' || feedSearchQuery.trim()) return;
+    const countInCategory =
+      selectedCategory === 'সকল'
+        ? reels.length
+        : reels.filter((r) => r.category === selectedCategory).length;
+    if (countInCategory < 8) {
+      loadMoreInfiniteReels(selectedCategory);
+    }
+  }, [selectedCategory, reels.length, feedSearchQuery, loadMoreInfiniteReels]);
+
+  // Infinite scroll observer for the Home feed
+  useEffect(() => {
+    if (activeTab !== 'home' || selectedCategory === '🔴 লাইভ') return;
+    const sentinel = feedSentinelRef.current;
+    if (!sentinel || typeof IntersectionObserver === 'undefined') return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          loadMoreInfiniteReels(selectedCategory);
+        }
+      },
+      { rootMargin: '600px 0px' }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [activeTab, selectedCategory, loadMoreInfiniteReels, filteredReels.length]);
+
   // MANDATORY SECURITY GATES: Show loader during auth init, and enforce email verification whenever signed in
   if (authLoading) {
     return <FullPageLoader />;
@@ -2652,6 +3206,10 @@ function UserApp() {
           isAuthenticated={isAuthenticated}
           onOpenAuth={(view) => openAuthModal(view || 'login')}
           userPoints={isAuthenticated ? currentUser.points : guestPoints}
+          showCategoryTabs={activeTab === 'home'}
+          categories={CATEGORIES}
+          selectedCategory={selectedCategory}
+          onSelectCategory={handleSelectCategory}
         />
 
         {/* Global Announcement Marquee Ticker */}
@@ -2839,6 +3397,7 @@ function UserApp() {
                                     return;
                                   }
                                   if (isOwnContentUser(reel.userId)) {
+                                    vibrateError();
                                     showToast(
                                       lang === 'bn'
                                         ? '🎁 নিজের ভিডিওতে গিফট পাঠানো যাবে না! গিফট শুধুমাত্র অন্য ইউজারদের জন্য।'
@@ -2862,8 +3421,32 @@ function UserApp() {
                                 isCommentsEnabled={siteSettings.isCommentsEnabled}
                                 onSelectCategory={handleSelectCategory}
                                 activeCategory={selectedCategory}
+                                watchProgress={reelWatchProgressMap[reel.id] || 0}
+                                onWatchProgressChange={handleWatchProgressChange}
+                                isModalOpen={Boolean(fullScreenReelId)}
                               />
                             ))
+                          )}
+
+                          {/* Infinite Scroll Sentinel for Endless AI Reels */}
+                          {filteredReels.length > 0 && (
+                            <div
+                              ref={feedSentinelRef}
+                              className="py-5 flex flex-col items-center justify-center gap-2 text-center"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => loadMoreInfiniteReels(selectedCategory)}
+                                className="px-4 py-2 rounded-xl bg-emerald-950/70 hover:bg-emerald-900/80 border border-emerald-500/35 text-emerald-300 text-xs font-bold flex items-center gap-2 transition cursor-pointer"
+                              >
+                                <Sparkles className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                                <span>
+                                  {lang === 'bn'
+                                    ? 'আরও AI ভিডিও ও রিলস লোড করুন...'
+                                    : 'Load more AI videos & visuals...'}
+                                </span>
+                              </button>
+                            </div>
                           )}
                         </div>
                       </>
@@ -2879,7 +3462,11 @@ function UserApp() {
                       onCompleteTask={handleCompleteTask}
                       onAddPoints={handleAddPointsGeneral}
                       isMuted={isMuted}
-                      spinPrizes={[10, 25, 50, 15, spinMaxPrize, 30, 20, Math.round(spinMaxPrize * 0.4)]}
+                      spinPrizes={
+                        earningSettings.spinPrizes?.length
+                          ? earningSettings.spinPrizes
+                          : buildScaledSpinPrizes(spinMaxPrize)
+                      }
                       scratchPrize={scratchPrize}
                       earningSettings={earningSettings}
                       users={users}
@@ -2971,6 +3558,7 @@ function UserApp() {
                       isDirectChatEnabled={siteSettings.isDirectChatEnabled}
                       users={users}
                       onOpenUserProfile={handleOpenUserProfile}
+                      onApplyReferralCode={handleApplyReferralCode}
                     />
                   ) : (
                     <GuestProfileView
@@ -3008,16 +3596,23 @@ function UserApp() {
         {/* Modals & Sheets wrapped in Suspense */}
         <Suspense fallback={null}>
           {/* Full-Screen Immersive Reel Player Modal */}
-          {fullScreenReelId && (
+          {fullScreenReelId && (() => {
+            const fullScreenReelsList = filteredReels.some((r) => r.id === fullScreenReelId)
+              ? filteredReels
+              : resolvedReels;
+            return (
             <FullScreenReelModal
-              reels={resolvedReels}
+              reels={fullScreenReelsList}
               initialReelId={fullScreenReelId}
               onClose={() => setFullScreenReelId(null)}
               isLiked={likedReelIds.includes(fullScreenReelId)}
+              likedReelIds={likedReelIds}
+              onLoadMoreReels={() => loadMoreInfiniteReels(selectedCategory)}
+              hasMore={true}
               onToggleLike={handleToggleLike}
               onOpenComments={(r) => setActiveCommentReel(r)}
               onRewardEarned={handleEarnReelReward}
-              onOpenGiftSheet={() => {
+              onOpenGiftSheet={(activeModalReel) => {
                 if (!isAuthenticated) {
                   triggerAuthPrompt(
                     lang === 'bn'
@@ -3026,9 +3621,10 @@ function UserApp() {
                   );
                   return;
                 }
-                const targetReel = resolvedReels.find((r) => r.id === fullScreenReelId);
+                const targetReel = activeModalReel || resolvedReels.find((r) => r.id === fullScreenReelId);
                 if (targetReel) {
                   if (isOwnContentUser(targetReel.userId)) {
+                    vibrateError();
                     showToast(
                       lang === 'bn'
                         ? '🎁 নিজের ভিডিওতে গিফট পাঠানো যাবে না! গিফট শুধুমাত্র অন্য ইউজারদের জন্য।'
@@ -3080,6 +3676,7 @@ function UserApp() {
               onVideoCompleted={handleIncrementReelView}
               currentUserId={currentUser.id}
               onSelectCategory={handleSelectCategory}
+              onWatchProgressChange={handleWatchProgressChange}
               onOpenChatWithCreator={async (creatorId) => {
                 if (!siteSettings.isDirectChatEnabled) {
                   showToast(lang === 'bn' ? '🔒 ডিরেক্ট চ্যাট বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে।' : '🔒 Direct chat paused by Admin.');
@@ -3103,7 +3700,8 @@ function UserApp() {
                 }
               }}
             />
-          )}
+            );
+          })()}
 
           {/* Edit Reel Modal */}
           {editingReel && (

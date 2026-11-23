@@ -16,6 +16,7 @@ const DEMO_USER_IDS = new Set([
   'user_005',
   'user_006',
   'user_7788',
+  'masud_rana',
 ]);
 
 interface TopEarnersLeaderboardProps {

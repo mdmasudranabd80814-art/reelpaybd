@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { DailyBonusCard } from './DailyBonusCard';
 import {
   User as UserIcon,
   Phone,
@@ -16,10 +15,6 @@ import {
   MessageCircle,
   Users,
   UserPlus,
-  Mic,
-  Radio,
-  SlidersHorizontal,
-  Power,
   Check,
   Camera,
   ChevronRight,
@@ -28,10 +23,12 @@ import {
   Sparkles,
   Lock,
   Mail,
+  Smartphone,
 } from 'lucide-react';
 import { User, Reel, EarningSettings, LiveStream, LiveMode, PaymentMethodConfig, DEFAULT_PAYMENT_METHODS } from '../types';
 import { toBengaliNumber, formatTaka } from '../utils/bengali';
 import { getUserLevel, getNextLevel, getProgressToNextLevel } from '../utils/levels';
+import { isHapticsEnabled, setHapticsEnabled, vibrateLight, vibrateSuccess, vibrateError } from '../utils/haptics';
 import { ProfileInfoModal, ProfileInfoModalMode } from './ProfileInfoModal';
 import { TopEarnersLeaderboard } from './TopEarnersLeaderboard';
 
@@ -70,6 +67,7 @@ interface ProfileViewProps {
   isDirectChatEnabled?: boolean;
   users?: User[];
   onOpenUserProfile?: (userId: string) => void;
+  onApplyReferralCode?: (code: string) => Promise<{ ok: boolean; message: string }>;
 }
 
 export const ProfileView: React.FC<ProfileViewProps> = ({
@@ -107,6 +105,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   isDirectChatEnabled = true,
   users = [],
   onOpenUserProfile,
+  onApplyReferralCode,
 }) => {
   const availablePaymentMethods = React.useMemo(() => {
     const base = paymentMethods && paymentMethods.length > 0 ? paymentMethods : DEFAULT_PAYMENT_METHODS;
@@ -119,7 +118,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [infoModalMode, setInfoModalMode] = useState<ProfileInfoModalMode | null>(null);
   const [reelToDelete, setReelToDelete] = useState<Reel | null>(null);
   const [copiedRef, setCopiedRef] = useState(false);
-  const [referralNote, setReferralNote] = useState<string | null>(null);
+  const [hapticsOn, setHapticsOn] = useState<boolean>(() => isHapticsEnabled());
+  const [referralNote, setReferralNote] = useState<{ text: string; isError?: boolean } | null>(null);
+  const [applyingReferral, setApplyingReferral] = useState(false);
   const [referredByInput, setReferredByInput] = useState('');
   const [nameInput, setNameInput] = useState(user.name);
   const [phoneInput, setPhoneInput] = useState(user.phone);
@@ -186,6 +187,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         paymentBranchName: branchNameInput.trim(),
       });
       setIsEditing(false);
+      vibrateSuccess();
     }
   };
 
@@ -201,132 +203,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     .map((id) => reels.find((r) => r.id === id))
     .filter((r): r is Reel => Boolean(r));
 
-  const handleLaunchPersonalLive = (mode: LiveMode) => {
-    if (onOpenPersonalLive) {
-      onOpenPersonalLive(mode);
-    } else {
-      setShowLiveSheet(true);
-    }
-  };
-
   return (
     <div className="space-y-4 pb-20 text-white">
-      <DailyBonusCard
-          onClaim={onClaimDailyBonus}
-          isClaimedToday={isClaimedToday}
-          isMuted={isMuted}
-          isAuthenticated={isAuthenticated}
-          onRequireAuth={onRequireAuth}
-          bonusPoints={earningSettings?.dailyBonusPoints}
-          isEnabled={earningSettings ? (earningSettings.isMasterEarningEnabled && earningSettings.isDailyBonusEnabled) : true}
-      />
-
-      {/* Personal Live Studio Card (User's Personal Live Launcher & Controls) */}
-      <div className="rounded-2xl bg-gradient-to-br from-[#17261d] via-[#111d16] to-[#211218] p-4 border border-emerald-900/60 shadow-xl">
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-rose-600/20 border border-rose-500/40 text-rose-400 flex items-center justify-center shrink-0">
-              <Radio className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <h3 className="text-sm font-extrabold text-white truncate">
-                {lang === 'bn' ? 'আমার পার্সোনাল লাইভ স্টুডিও' : 'My Personal Live Studio'}
-              </h3>
-              <p className="text-[11px] text-neutral-400 truncate">
-                {lang === 'bn'
-                  ? 'অডিও আড্ডা বা লাইভ ভিডিও চালু করুন ও গিফট পান'
-                  : 'Start Audio Adda or Live Video & receive gifts'}
-              </p>
-            </div>
-          </div>
-          {activeMyLive && (
-            <span className="shrink-0 text-[11px] font-bold text-rose-400 flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-              <span>LIVE</span>
-            </span>
-          )}
-        </div>
-
-        {activeMyLive ? (
-          <div className="p-3 rounded-xl bg-black/40 border border-rose-500/30 space-y-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-white truncate">{activeMyLive.title}</p>
-                <p className="text-[11px] text-neutral-400">
-                  {activeMyLive.mode === 'video'
-                    ? lang === 'bn'
-                      ? '📹 লাইভ ভিডিও'
-                      : '📹 Video Live'
-                    : lang === 'bn'
-                    ? '🎙️ অডিও আড্ডা'
-                    : '🎙️ Audio Adda'}{' '}
-                  · {toBengaliNumber(activeMyLive.viewersCount || 0, lang)}{' '}
-                  {lang === 'bn' ? 'দেখছে' : 'watching'} ·{' '}
-                  {toBengaliNumber(activeMyLive.likesCount || 0, lang)} ❤️ ·{' '}
-                  {toBengaliNumber(activeMyLive.giftsTotalPoints || 0, lang)} 🎁
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() =>
-                  onManageMyLive ? onManageMyLive(activeMyLive.id) : setShowLiveSheet(true)
-                }
-                className="flex-1 min-h-[44px] rounded-xl bg-[#00c853] hover:bg-[#00e676] text-black text-xs font-extrabold flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-[0.98]"
-              >
-                <SlidersHorizontal className="w-4 h-4" />
-                <span>{lang === 'bn' ? 'লাইভ পরিচালনা করুন' : 'Manage Live'}</span>
-              </button>
-              {onEndMyLive && (
-                <button
-                  type="button"
-                  onClick={() => onEndMyLive(activeMyLive.id)}
-                  className="min-h-[44px] px-3.5 rounded-xl bg-rose-950/70 hover:bg-rose-900 border border-rose-600/40 text-rose-300 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
-                >
-                  <Power className="w-4 h-4" />
-                  <span>{lang === 'bn' ? 'বন্ধ' : 'End'}</span>
-                </button>
-              )}
-            </div>
-          </div>
-        ) : !allowUserAudioLive && !allowUserVideoLive ? (
-          <div className="p-3 rounded-xl bg-black/40 border border-neutral-800 text-center text-xs text-neutral-400 flex items-center justify-center gap-1.5">
-            <Lock className="w-3.5 h-3.5 text-amber-400" />
-            <span>{lang === 'bn' ? 'পার্সোনাল লাইভ স্টুডিও বর্তমানে এডমিন কর্তৃক বন্ধ রয়েছে' : 'Personal Live Studio is paused by Admin'}</span>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-2.5">
-            <button
-              type="button"
-              disabled={!allowUserAudioLive}
-              onClick={() => allowUserAudioLive && handleLaunchPersonalLive('audio')}
-              className={`min-h-[48px] px-3 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition ${
-                allowUserAudioLive
-                  ? 'bg-[#0e1a13] hover:bg-[#16291e] border border-emerald-500/40 text-emerald-300 active:scale-[0.98] cursor-pointer'
-                  : 'bg-neutral-900 border border-neutral-800 text-neutral-500 cursor-not-allowed opacity-60'
-              }`}
-            >
-              {allowUserAudioLive ? <Mic className="w-4 h-4 text-emerald-400 shrink-0" /> : <Lock className="w-3.5 h-3.5 shrink-0" />}
-              <span>{lang === 'bn' ? (allowUserAudioLive ? 'অডিও আড্ডা' : 'অডিও বন্ধ') : 'Audio Adda'}</span>
-            </button>
-            <button
-              type="button"
-              disabled={!allowUserVideoLive}
-              onClick={() => allowUserVideoLive && handleLaunchPersonalLive('video')}
-              className={`min-h-[48px] px-3 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition ${
-                allowUserVideoLive
-                  ? 'bg-gradient-to-r from-rose-600 to-pink-600 hover:brightness-110 text-white shadow-md shadow-rose-600/20 active:scale-[0.98] cursor-pointer'
-                  : 'bg-neutral-900 border border-neutral-800 text-neutral-500 cursor-not-allowed opacity-60'
-              }`}
-            >
-              {allowUserVideoLive ? <Video className="w-4 h-4 shrink-0" /> : <Lock className="w-3.5 h-3.5 shrink-0" />}
-              <span>{lang === 'bn' ? (allowUserVideoLive ? 'লাইভ ভিডিও' : 'ভিডিও বন্ধ') : 'Live Video'}</span>
-            </button>
-          </div>
-        )}
-      </div>
-
       {/* Profile Card */}
       <div className="rounded-2xl bg-gradient-to-br from-[#122419] to-[#0c1811] p-5 border border-emerald-900/60 shadow-xl">
         <div className="flex items-center gap-3.5">
@@ -443,6 +321,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 type="button"
                 onClick={() => {
                   navigator.clipboard.writeText(user.referralCode);
+                  vibrateLight();
                   setCopiedRef(true);
                   setTimeout(() => setCopiedRef(false), 1800);
                 }}
@@ -468,6 +347,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 <input 
                   type="text"
                   value={referredByInput}
+                  disabled={applyingReferral}
                   onChange={(e) => {
                     setReferredByInput(e.target.value.toUpperCase());
                     if (referralNote) setReferralNote(null);
@@ -477,27 +357,49 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 />
                 <button 
                   type="button"
-                  disabled={referredByInput.trim().length < 4}
-                  onClick={() => {
+                  disabled={applyingReferral || referredByInput.trim().length < 4}
+                  onClick={async () => {
                     const val = referredByInput.trim().toUpperCase();
-                    if (val.length >= 4 && val !== (user.referralCode || '').toUpperCase()) {
+                    if (val.length < 4 || val === (user.referralCode || '').toUpperCase()) {
+                      vibrateError();
+                      setReferralNote({
+                        text: lang === 'bn' ? 'সঠিক রেফার কোড দিন!' : 'Enter a valid referral code!',
+                        isError: true,
+                      });
+                      return;
+                    }
+                    if (onApplyReferralCode) {
+                      setApplyingReferral(true);
+                      try {
+                        const res = await onApplyReferralCode(val);
+                        setReferralNote({ text: res.message, isError: !res.ok });
+                        if (res.ok) setReferredByInput('');
+                      } finally {
+                        setApplyingReferral(false);
+                      }
+                    } else {
                       onSwitchUser({ ...user, referredBy: val });
                       setReferredByInput('');
-                      setReferralNote(lang === 'bn' ? 'রেফার কোড সফলভাবে যুক্ত হয়েছে!' : 'Referral code added!');
-                    } else {
-                      setReferralNote(lang === 'bn' ? 'সঠিক রেফার কোড দিন!' : 'Enter a valid referral code!');
+                      setReferralNote({
+                        text: lang === 'bn' ? 'রেফার কোড সফলভাবে যুক্ত হয়েছে!' : 'Referral code added!',
+                      });
+                      vibrateSuccess();
                     }
                   }}
                   className={`min-h-[40px] px-4 py-1.5 rounded-lg text-xs font-bold transition ${
-                    referredByInput.trim().length < 4
+                    applyingReferral || referredByInput.trim().length < 4
                       ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
                       : 'bg-emerald-500 hover:bg-emerald-400 text-black active:scale-95 cursor-pointer'
                   }`}
                 >
-                  {lang === 'bn' ? 'সাবমিট' : 'Submit'}
+                  {applyingReferral ? (lang === 'bn' ? 'যাচাই...' : 'Checking...') : (lang === 'bn' ? 'সাবমিট' : 'Submit')}
                 </button>
               </div>
-              {referralNote && <p className="text-[11px] text-emerald-300 mt-1">{referralNote}</p>}
+              {referralNote && (
+                <p className={`text-[11px] mt-1 ${referralNote.isError ? 'text-rose-400' : 'text-emerald-300'}`}>
+                  {referralNote.text}
+                </p>
+              )}
             </div>
           ) : (
             <div className="flex items-center gap-2 text-[10px] text-emerald-400/80 bg-emerald-500/5 p-2 rounded-lg border border-emerald-500/10">
@@ -722,12 +624,38 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         )}
       </div>
 
-      {/* Help & Support Links (Fully Functional) */}
+      {/* Help & Support Links + Haptics Preference */}
       <div className="rounded-2xl bg-[#141f19] border border-emerald-950 p-2 space-y-1">
         <button
           type="button"
-          onClick={() => setInfoModalMode('faq')}
+          onClick={() => {
+            const next = !hapticsOn;
+            setHapticsEnabled(next);
+            setHapticsOn(next);
+            if (next) vibrateLight();
+          }}
           className="w-full min-h-[46px] px-3 py-2 rounded-xl flex items-center justify-between text-xs text-neutral-200 hover:bg-white/5 transition cursor-pointer"
+        >
+          <div className="flex items-center gap-2.5">
+            <Smartphone className="w-4 h-4 text-emerald-400" />
+            <span className="font-semibold">
+              {lang === 'bn' ? 'টাচ ভাইব্রেশন (Haptic Feedback)' : 'Touch Vibration (Haptics)'}
+            </span>
+          </div>
+          <span
+            className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border transition ${
+              hapticsOn
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                : 'bg-neutral-800 text-neutral-400 border-neutral-700'
+            }`}
+          >
+            {hapticsOn ? (lang === 'bn' ? 'চালু' : 'ON') : (lang === 'bn' ? 'বন্ধ' : 'OFF')}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setInfoModalMode('faq')}
+          className="w-full min-h-[46px] px-3 py-2 rounded-xl border-t border-emerald-950/60 flex items-center justify-between text-xs text-neutral-200 hover:bg-white/5 transition cursor-pointer"
         >
           <div className="flex items-center gap-2.5">
             <HelpCircle className="w-4 h-4 text-emerald-400" />

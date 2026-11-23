@@ -179,4 +179,122 @@
   animation: centerHeartPop 800ms ease-out forwards;
 }
 
+/* ReelFeedCard watch progress bar: subtle traveling sheen */
+@keyframes progressSheen {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.animate-progress-sheen {
+  animation: progressSheen 2.2s linear infinite;
+}
+
+/* Watch-to-earn milestone: subtle horizontal wave along the progress bar */
+@keyframes milestoneWave {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.85;
+  }
+  100% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+.animate-milestone-wave {
+  animation: milestoneWave 720ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Watch-to-earn milestone: subtle concentric ripple rings */
+@keyframes milestoneRippleRing {
+  0% {
+    transform: translate(-50%, 50%) scale(0.3);
+    opacity: 0.68;
+  }
+  55% {
+    opacity: 0.28;
+  }
+  100% {
+    transform: translate(-50%, 50%) scale(3.4);
+    opacity: 0;
+  }
+}
+
+.animate-milestone-ripple-1 {
+  animation: milestoneRippleRing 850ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-milestone-ripple-2 {
+  animation: milestoneRippleRing 950ms cubic-bezier(0.16, 1, 0.3, 1) 180ms forwards;
+  opacity: 0;
+}
+
+/* Header category tab selection: subtle spring scale-up */
+@keyframes categoryTabScaleUp {
+  0% {
+    transform: scale(0.95);
+  }
+  55% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1.05);
+  }
+}
+
+.animate-category-scale-up {
+  animation: categoryTabScaleUp 280ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes kenBurnsMotion {
+  0% {
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+  50% {
+    transform: scale(1.12) translate3d(-1.5%, -1.5%, 0);
+  }
+  100% {
+    transform: scale(1.04) translate3d(1.5%, 1%, 0);
+  }
+}
+
+.animate-ken-burns {
+  animation: kenBurnsMotion 14s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+@keyframes reelSlideIn {
+  0% {
+    opacity: 0.72;
+    transform: translateY(18px) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-reel-slide-in {
+  animation: reelSlideIn 260ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-progress-sheen,
+  .animate-milestone-wave,
+  .animate-milestone-ripple-1,
+  .animate-milestone-ripple-2,
+  .animate-category-scale-up,
+  .animate-ken-burns,
+  .animate-reel-slide-in {
+    animation: none !important;
+  }
+}
+
 

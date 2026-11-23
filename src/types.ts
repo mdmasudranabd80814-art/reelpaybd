@@ -165,6 +165,13 @@ export interface User {
   dailyReelClaimDate?: string;
   dailyReelClaimsCount?: number;
   dailyReelPointsEarned?: number;
+  dailyTotalEarnedDate?: string;
+  dailyTotalPointsEarned?: number;
+  dailyTaskClaimDate?: string;
+  dailyTaskClaimsCount?: number;
+  dailyCompletedTaskIds?: string[];
+  dailyReferralDate?: string;
+  dailyReferralsCount?: number;
   loginOfferClaimed?: boolean;
   loginOfferCampaignId?: string;
   dailySpinClaimDate?: string;
@@ -188,7 +195,17 @@ export interface Reel {
   creatorHandle: string;
   creatorAvatar: string;
   isVerified?: boolean;
-  category: 'সকল' | 'ট্রেন্ডিং' | 'কমেডি' | 'গেমিং' | 'রান্না' | 'শিক্ষা';
+  category:
+    | 'সকল'
+    | 'ট্রেন্ডিং'
+    | 'কমেডি'
+    | 'শর্ট ড্রামা'
+    | 'শর্ট মুভি'
+    | 'গান'
+    | 'বিনোদন'
+    | 'গেমিং'
+    | 'রান্না'
+    | 'শিক্ষা';
   thumbnailUrl: string;
   videoUrl?: string;
   likesCount: number;
@@ -222,6 +239,10 @@ export interface EarningSettings {
   isDailyReelLimitEnabled: boolean;
   dailyMaxReelClaims: number;
   dailyMaxReelPoints: number;
+  isDailyTotalLimitEnabled: boolean;
+  dailyMaxTotalPoints: number;
+  isDailyTaskLimitEnabled: boolean;
+  dailyMaxTaskClaims: number;
   requireFullWatchTimeInFullScreen: boolean;
   isDailyBonusEnabled: boolean;
   dailyBonusPoints: number;
@@ -236,6 +257,8 @@ export interface EarningSettings {
   isReferralEnabled: boolean;
   referralRewardPoints: number;
   referredUserRewardPoints: number;
+  requireReelWatchForReferral: boolean;
+  dailyMaxReferrals: number;
   isTasksEnabled: boolean;
   isLevelMultiplierEnabled: boolean;
   giftHostPercent: number;
@@ -258,6 +281,10 @@ export const DEFAULT_EARNING_SETTINGS: EarningSettings = {
   isDailyReelLimitEnabled: true,
   dailyMaxReelClaims: 5,
   dailyMaxReelPoints: 100,
+  isDailyTotalLimitEnabled: true,
+  dailyMaxTotalPoints: 250,
+  isDailyTaskLimitEnabled: true,
+  dailyMaxTaskClaims: 5,
   requireFullWatchTimeInFullScreen: true,
   isDailyBonusEnabled: true,
   dailyBonusPoints: 50,
@@ -272,6 +299,8 @@ export const DEFAULT_EARNING_SETTINGS: EarningSettings = {
   isReferralEnabled: true,
   referralRewardPoints: 50,
   referredUserRewardPoints: 20,
+  requireReelWatchForReferral: true,
+  dailyMaxReferrals: 10,
   isTasksEnabled: true,
   isLevelMultiplierEnabled: true,
   giftHostPercent: 60,
@@ -314,15 +343,25 @@ export interface WithdrawalRequest {
   rejectionReason?: string;
 }
 
+export type TaskRequirementType = 'instant' | 'referral_count' | 'reels_watched' | 'daily_checkin';
+
 export interface TaskItem {
   id: string;
   title: string;
+  description?: string;
+  badgeText?: string;
   rewardPoints: number;
   category: string;
   iconName: string;
   completed: boolean;
   actionUrl?: string;
+  isActive?: boolean;
+  requirementType?: TaskRequirementType;
+  requirementValue?: number;
+  isRepeatableDaily?: boolean;
+  sortOrder?: number;
   createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface DepositRequest {

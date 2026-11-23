@@ -1,5 +1,6 @@
 import React from 'react';
 import { Home, Sparkles, Wallet, User as UserIcon, Plus } from 'lucide-react';
+import { vibrateLight } from '../utils/haptics';
 
 export type TabType = 'home' | 'earn' | 'wallet' | 'profile';
 
@@ -21,7 +22,10 @@ export const BottomNav: React.FC<BottomNavProps> = ({
     return (
       <button
         type="button"
-        onClick={() => onChangeTab(tab)}
+        onClick={() => {
+          vibrateLight();
+          onChangeTab(tab);
+        }}
         className={`relative min-w-[56px] min-h-[48px] flex flex-col items-center justify-center gap-1 py-1 px-2 rounded-xl transition cursor-pointer ${
           active ? 'text-[#00e676]' : 'text-neutral-400 hover:text-neutral-200'
         }`}
@@ -51,7 +55,10 @@ export const BottomNav: React.FC<BottomNavProps> = ({
 
         <button
           type="button"
-          onClick={onOpenCreate}
+          onClick={() => {
+            vibrateLight();
+            onOpenCreate();
+          }}
           className="flex flex-col items-center -mt-3.5 cursor-pointer group px-2"
           title={lang === 'bn' ? 'নতুন রিল বা লাইভ' : 'Create reel or go live'}
         >

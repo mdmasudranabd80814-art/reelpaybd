@@ -1,6 +1,7 @@
 import React from 'react';
 import { Bell, User as UserIcon, Volume2, VolumeX } from 'lucide-react';
 import { toBengaliNumber } from '../utils/bengali';
+import { CATEGORIES_LIST, getCategoryMeta, ReelCategory } from '../utils/categories';
 
 interface HeaderProps {
   onOpenNotifications: () => void;
@@ -12,6 +13,10 @@ interface HeaderProps {
   isAuthenticated?: boolean;
   onOpenAuth?: (view?: 'login' | 'register') => void;
   userPoints?: number;
+  showCategoryTabs?: boolean;
+  categories?: ReelCategory[];
+  selectedCategory?: ReelCategory;
+  onSelectCategory?: (category: ReelCategory) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -24,6 +29,10 @@ export const Header: React.FC<HeaderProps> = ({
   isAuthenticated = false,
   onOpenAuth,
   userPoints = 0,
+  showCategoryTabs = false,
+  categories = CATEGORIES_LIST,
+  selectedCategory = 'সকল',
+  onSelectCategory,
 }) => {
   return (
     <header className="sticky top-0 z-40 w-full bg-[#09120d]/95 backdrop-blur-md border-b border-emerald-900/50">
@@ -103,6 +112,53 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Category Tabs Bar */}
+      {showCategoryTabs && onSelectCategory && categories.length > 0 && (
+        <div
+          role="tablist"
+          aria-label={lang === 'bn' ? 'রিল ক্যাটাগরি' : 'Reel categories'}
+          className="max-w-md mx-auto px-3.5 pt-1.5 pb-2.5 flex items-center gap-2 overflow-x-auto no-scrollbar border-t border-emerald-950/60"
+        >
+          {categories.map((cat) => {
+            const meta = getCategoryMeta(cat);
+            const isSelected = selectedCategory === cat;
+            const displayLabel =
+              cat === '🔴 লাইভ'
+                ? lang === 'bn'
+                  ? 'লাইভ'
+                  : meta.labelEn
+                : lang === 'bn'
+                  ? meta.labelBn
+                  : meta.labelEn;
+
+            return (
+              <button
+                key={cat}
+                id={`cat-tab-${cat}`}
+                type="button"
+                role="tab"
+                aria-selected={isSelected}
+                onClick={() => onSelectCategory(cat)}
+                className={`shrink-0 h-8 px-3 rounded-xl text-xs font-extrabold flex items-center gap-1.5 border select-none cursor-pointer transition-all duration-200 ease-out origin-center active:scale-95 ${
+                  isSelected
+                    ? `${meta.activeBg} ${meta.activeText} border-white/20 shadow-md shadow-emerald-500/20 scale-105 animate-category-scale-up`
+                    : 'bg-[#122018] hover:bg-[#192b20] text-neutral-300 hover:text-white border-emerald-900/50 scale-100'
+                }`}
+              >
+                <span
+                  className={`text-xs transition-transform duration-200 ${
+                    isSelected ? 'scale-110' : 'scale-100'
+                  }`}
+                >
+                  {meta.icon}
+                </span>
+                <span className="whitespace-nowrap tracking-wide">{displayLabel}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </header>
   );
 };

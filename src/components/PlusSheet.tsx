@@ -2,9 +2,11 @@ import React, { useState, useRef } from 'react';
 import { X, Camera, Image as ImageIcon, Radio, Rocket, Sparkles, Lock } from 'lucide-react';
 import { Reel, User } from '../types';
 import { playSuccessChime } from '../utils/audio';
+import { vibrateSuccess, vibrateError } from '../utils/haptics';
 import { storeVideoInDB, fileToDataUrl, captureVideoThumbnail } from '../utils/videoStorage';
 import { extractYouTubeId } from '../utils/video';
 import { buildCreatorHandle } from '../utils/reelOwner';
+import { REEL_UPLOAD_CATEGORIES } from '../utils/categories';
 
 interface PlusSheetProps {
   isOpen: boolean;
@@ -38,7 +40,7 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [caption, setCaption] = useState('');
-  const [category, setCategory] = useState<'সকল' | 'ট্রেন্ডিং' | 'কমেডি' | 'গেমিং' | 'রান্না' | 'শিক্ষা'>('ট্রেন্ডিং');
+  const [category, setCategory] = useState<Reel['category']>('কমেডি');
   const [externalVideoUrl, setExternalVideoUrl] = useState('');
   const [filter, setFilter] = useState('none');
   const [formError, setFormError] = useState<string | null>(null);
@@ -87,6 +89,7 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
     e.preventDefault();
     setFormError(null);
     if (!title.trim()) {
+      vibrateError();
       setFormError(lang === 'bn' ? 'ভিডিওর শিরোনাম লিখুন' : 'Please enter reel title');
       return;
     }
@@ -112,6 +115,7 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
     }
 
     if (!finalVideoUrl) {
+      vibrateError();
       setFormError(lang === 'bn' ? 'অনুগ্রহ করে ভিডিও রেকর্ড বা আপলোড করুন অথবা ভিডিও লিংক দিন।' : 'Please upload a video or provide a video link.');
       return;
     }
@@ -139,6 +143,7 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
     });
 
     if (!isMuted) playSuccessChime();
+    vibrateSuccess();
 
     // Reset
     setVideoPreviewUrl(null);
@@ -362,15 +367,14 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
               <div>
                 <select
                   value={category}
-                  onChange={(e) => setCategory(e.target.value as any)}
+                  onChange={(e) => setCategory(e.target.value as Reel['category'])}
                   className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white"
                 >
-                  <option value="সকল">{lang === 'bn' ? 'সকল' : 'All'}</option>
-                  <option value="ট্রেন্ডিং">{lang === 'bn' ? 'ট্রেন্ডিং' : 'Trending'}</option>
-                  <option value="কমেডি">{lang === 'bn' ? 'কমেডি' : 'Comedy'}</option>
-                  <option value="গেমিং">{lang === 'bn' ? 'গেমিং' : 'Gaming'}</option>
-                  <option value="রান্না">{lang === 'bn' ? 'রান্না' : 'Cooking'}</option>
-                  <option value="শিক্ষা">{lang === 'bn' ? 'শিক্ষা' : 'Education'}</option>
+                  {REEL_UPLOAD_CATEGORIES.map((cat) => (
+                    <option key={cat.value} value={cat.value}>
+                      {lang === 'bn' ? cat.labelBn : cat.labelEn}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>

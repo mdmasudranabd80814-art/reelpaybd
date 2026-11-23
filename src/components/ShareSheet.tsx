@@ -3,6 +3,7 @@ import { X, Copy, Share2, Facebook, MessageCircle, Send, Download, Check } from 
 import { motion, AnimatePresence } from 'motion/react';
 import { Reel, LiveStream } from '../types';
 import { downloadReelVideo } from '../utils/videoDownload';
+import { vibrateLight } from '../utils/haptics';
 
 interface ShareSheetProps {
   isOpen: boolean;
@@ -37,6 +38,7 @@ export const ShareSheet: React.FC<ShareSheetProps> = ({ isOpen, onClose, reel, l
 
   const handleDownload = async () => {
     if (!reel) return;
+    vibrateLight();
     setIsDownloading(true);
 
     if (onDownloadReel) {
@@ -56,6 +58,7 @@ export const ShareSheet: React.FC<ShareSheetProps> = ({ isOpen, onClose, reel, l
   const copyToClipboard = async () => {
     try {
       await navigator.clipboard.writeText(shareUrl);
+      vibrateLight();
       if (!isLiveShare && reel && onShareTracked) {
         onShareTracked(reel.id);
       }
@@ -77,6 +80,7 @@ export const ShareSheet: React.FC<ShareSheetProps> = ({ isOpen, onClose, reel, l
           text: shareText,
           url: shareUrl,
         });
+        vibrateLight();
         if (!isLiveShare && reel && onShareTracked) {
           onShareTracked(reel.id);
         }
@@ -113,6 +117,7 @@ export const ShareSheet: React.FC<ShareSheetProps> = ({ isOpen, onClose, reel, l
     }
 
     if (url) {
+      vibrateLight();
       if (!isLiveShare && reel && onShareTracked) {
         onShareTracked(reel.id);
       }

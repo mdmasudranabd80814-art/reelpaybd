@@ -5,6 +5,7 @@ import { playSuccessChime } from '../utils/audio';
 import { storeVideoInDB, fileToDataUrl, captureVideoThumbnail } from '../utils/videoStorage';
 import { extractYouTubeId } from '../utils/video';
 import { buildCreatorHandle } from '../utils/reelOwner';
+import { REEL_UPLOAD_CATEGORIES } from '../utils/categories';
 
 interface CreateReelModalProps {
   currentUser: User;
@@ -20,7 +21,7 @@ export const CreateReelModal: React.FC<CreateReelModalProps> = ({
   isMuted,
 }) => {
   const [title, setTitle] = useState('');
-  const [category, setCategory] = useState<'সকল' | 'ট্রেন্ডিং' | 'কমেডি' | 'গেমিং' | 'রান্না' | 'শিক্ষা'>('ট্রেন্ডিং');
+  const [category, setCategory] = useState<Reel['category']>('কমেডি');
   const [caption, setCaption] = useState('');
   const [videoUrlInput, setVideoUrlInput] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -93,7 +94,7 @@ export const CreateReelModal: React.FC<CreateReelModalProps> = ({
     }
 
     const ytId = extractYouTubeId(finalVideoUrl);
-    const finalThumb = thumbnailUrl || (ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=800&auto=format&fit=crop&q=80');
+    const finalThumb = thumbnailUrl || (ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : '/images/ai_comedian_stage.jpg');
 
     onAddReel({
       title: title.trim(),
@@ -213,17 +214,16 @@ export const CreateReelModal: React.FC<CreateReelModalProps> = ({
 
           <div>
             <label className="text-neutral-400 block mb-1">ক্যাটাগরি:</label>
-            <select
+              <select
               value={category}
-              onChange={(e) => setCategory(e.target.value as any)}
+              onChange={(e) => setCategory(e.target.value as Reel['category'])}
               className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-white"
             >
-              <option value="সকল">সকল</option>
-              <option value="ট্রেন্ডিং">ট্রেন্ডিং</option>
-              <option value="কমেডি">কমেডি</option>
-              <option value="গেমিং">গেমিং</option>
-              <option value="রান্না">রান্না</option>
-              <option value="শিক্ষা">শিক্ষা</option>
+              {REEL_UPLOAD_CATEGORIES.map((cat) => (
+                <option key={cat.value} value={cat.value}>
+                  {cat.labelBn}
+                </option>
+              ))}
             </select>
           </div>
 

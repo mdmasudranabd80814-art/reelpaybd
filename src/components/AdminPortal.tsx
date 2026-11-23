@@ -35,6 +35,7 @@ import { INITIAL_REELS, INITIAL_TASKS, INITIAL_USER } from '../data/initialData'
 import { playSuccessChime } from '../utils/audio';
 import { toBengaliNumber } from '../utils/bengali';
 import { normalizeVideoUrl } from '../utils/video';
+import { buildScaledSpinPrizes, sanitizeTaskPayload } from '../utils/offers';
 
 export const AdminPortal: React.FC = () => {
   const {
@@ -179,6 +180,7 @@ export const AdminPortal: React.FC = () => {
 
   const adminIdRef = useRef<string>('');
   adminIdRef.current = firebaseUser?.uid || '';
+  const firestoreTaskIdsRef = useRef<Set<string>>(new Set());
 
   const resolvedEmail = (
     firebaseUser?.email ||
@@ -257,23 +259,32 @@ export const AdminPortal: React.FC = () => {
     const unsubReels = firebaseOnSnapshot(
       'reels',
       (data) => {
-        if (data && data.length > 0) {
-          const loaded = (data as Reel[])
-            .filter((r) => r.id !== 'reel_01' && r.id !== 'reel_02')
-            .map((r, idx) => ({
-              ...r,
-              videoUrl: normalizeVideoUrl(r.videoUrl, idx) ?? r.videoUrl,
-            }));
-          setReels(loaded.length > 0 ? loaded : INITIAL_REELS);
-        } else {
-          setReels(INITIAL_REELS);
-        }
+        const remote = ((data || []) as Reel[])
+          .filter((r) => r && r.id && r.id !== 'reel_01' && r.id !== 'reel_02');
+        const seenIds = new Set(remote.map((r) => r.id));
+        const merged = [
+          ...remote,
+          ...INITIAL_REELS.filter((r) => !seenIds.has(r.id)),
+        ].map((r, idx) => ({
+          ...r,
+          videoUrl: normalizeVideoUrl(r.videoUrl, idx) ?? r.videoUrl,
+        }));
+        setReels(merged);
       },
       [orderBy('createdAt', 'desc')]
     );
 
     const unsubTasks = firebaseOnSnapshot('tasks', (data) => {
-      setTasks(data && data.length > 0 ? (data as TaskItem[]) : INITIAL_TASKS);
+      const list = (data || []) as TaskItem[];
+      firestoreTaskIdsRef.current = new Set(list.map((t) => t.id));
+      if (list.length > 0) {
+        const sorted = [...list].sort(
+          (a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999)
+        );
+        setTasks(sorted);
+      } else {
+        setTasks(INITIAL_TASKS);
+      }
     });
 
     const unsubSettings = firebaseOnSnapshot('settings', (data) => {
@@ -623,23 +634,64 @@ export const AdminPortal: React.FC = () => {
     showToast(`🗑️ ${userName} কে সফলভাবে রিমুভ করা হয়েছে!`);
   };
 
+  const ensureDefaultTasksInFirestore = async (excludeId?: string) => {
+    if (firestoreTaskIdsRef.current.size > 0) return;
+    const now = new Date().toISOString();
+    await Promise.all(
+      INITIAL_TASKS.filter((t) => t.id !== excludeId).map((t) =>
+        setDocument('tasks', t.id, sanitizeTaskPayload({ ...t, createdAt: now, updatedAt: now })).catch(() => {})
+      )
+    );
+  };
+
   const handleAddTask = async (newTaskData: Omit<TaskItem, 'id' | 'completed'>) => {
-    await addDocument('tasks', {
-      ...newTaskData,
-      completed: false,
-      createdAt: new Date().toISOString(),
-    });
-    showToast('✅ নতুন টাস্ক যোগ করা হয়েছে!');
+    try {
+      await ensureDefaultTasksInFirestore();
+      const now = new Date().toISOString();
+      const newId = `offer_${Date.now()}`;
+      const payload = sanitizeTaskPayload({
+        ...newTaskData,
+        completed: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await setDocument('tasks', newId, payload);
+      showToast('✅ নতুন অফার / টাস্ক যোগ করা হয়েছে!');
+    } catch (err) {
+      console.error('Add task failed:', err);
+      showToast('⚠️ অফার সেভ করা যায়নি! অনুগ্রহ করে আবার চেষ্টা করুন।');
+    }
   };
 
   const handleEditTask = async (task: TaskItem) => {
-    await updateDocument('tasks', task.id, task);
-    showToast('✅ টাস্ক আপডেট করা হয়েছে!');
+    try {
+      await ensureDefaultTasksInFirestore(task.id);
+      const now = new Date().toISOString();
+      const payload = sanitizeTaskPayload({
+        ...task,
+        createdAt: task.createdAt || now,
+        updatedAt: now,
+      });
+      await setDocument('tasks', task.id, payload);
+      showToast('✅ অফার / টাস্ক আপডেট করা হয়েছে!');
+    } catch (err) {
+      console.error('Edit task failed:', err);
+      showToast('⚠️ অফার আপডেট করা যায়নি!');
+    }
   };
 
   const handleDeleteTask = async (taskId: string) => {
-    await deleteDocument('tasks', taskId);
-    showToast('🗑️ টাস্ক মুছে ফেলা হয়েছে!');
+    try {
+      await ensureDefaultTasksInFirestore(taskId);
+      if (firestoreTaskIdsRef.current.has(taskId)) {
+        await deleteDocument('tasks', taskId);
+      }
+      setTasks((prev) => prev.filter((t) => t.id !== taskId));
+      showToast('🗑️ অফার / টাস্ক মুছে ফেলা হয়েছে!');
+    } catch (err) {
+      console.error('Delete task failed:', err);
+      showToast('⚠️ অফার মুছে ফেলা যায়নি!');
+    }
   };
 
   const handleSendDirectMessage = async (targetUserId: string, _title: string, message: string) => {
@@ -713,8 +765,20 @@ export const AdminPortal: React.FC = () => {
   };
 
   const handleUpdateEarningSettings = async (newSettings: EarningSettings) => {
+    const prevMaxPrize = earningSettings.spinMaxPrize;
+    const nextMaxPrize = newSettings.spinMaxPrize ?? prevMaxPrize;
+    const shouldRescaleSpin =
+      nextMaxPrize !== prevMaxPrize &&
+      JSON.stringify(newSettings.spinPrizes || []) === JSON.stringify(earningSettings.spinPrizes || []);
+
     const normalizedSettings: EarningSettings = {
+      ...DEFAULT_EARNING_SETTINGS,
       ...newSettings,
+      spinPrizes: shouldRescaleSpin
+        ? buildScaledSpinPrizes(nextMaxPrize)
+        : (newSettings.spinPrizes && newSettings.spinPrizes.length > 0
+            ? newSettings.spinPrizes
+            : buildScaledSpinPrizes(nextMaxPrize)),
       adminCommissionReceiverId:
         newSettings.adminCommissionReceiverId ||
         earningSettings.adminCommissionReceiverId ||
@@ -738,7 +802,7 @@ export const AdminPortal: React.FC = () => {
       updatedAt: new Date().toISOString(),
     }).catch((err) => console.warn('Save settings error:', err));
 
-    showToast('✅ আর্নিং ও অফার সেটিংস সফলভাবে সেভ করা হয়েছে!');
+    showToast('✅ আর্নিং, লিমিট ও অফার সেটিংস সফলভাবে সেভ করা হয়েছে!');
   };
 
   const handleUpdateSiteSettings = async (nextSite: SiteSettings, customToast?: string) => {
@@ -1109,10 +1173,7 @@ export const AdminPortal: React.FC = () => {
             try {
               localStorage.setItem('rt_spin_max', String(val));
             } catch {}
-            const ratio = Math.max(0.1, val / 100);
-            const scaledPrizes = [10, 25, 50, 15, 100, 30, 20, 40].map((p) =>
-              p === 100 ? val : Math.max(1, Math.round(p * ratio))
-            );
+            const scaledPrizes = buildScaledSpinPrizes(val);
             handleUpdateEarningSettings({
               ...earningSettings,
               spinMaxPrize: val,

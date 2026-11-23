@@ -69,6 +69,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   const [paymentAccount, setPaymentAccount] = useState('');
   const [paymentAccountHolder, setPaymentAccountHolder] = useState('');
   const [paymentBankName, setPaymentBankName] = useState('');
+  const [referredBy, setReferredBy] = useState(() => {
+    try {
+      return (localStorage.getItem('rt_pending_ref') || '').toUpperCase();
+    } catch {
+      return '';
+    }
+  });
 
   React.useEffect(() => {
     if (availableMethods.length > 0 && !availableMethods.some((m) => m.name === paymentMethod)) {
@@ -144,6 +151,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
           paymentAccountNumber: paymentAccount.trim(),
           paymentAccountHolder: paymentAccountHolder.trim() || undefined,
           paymentBankName: (paymentBankName || selectedMethodObj?.bankName || '').trim() || undefined,
+          referredBy: referredBy.trim().toUpperCase() || undefined,
         }
       : undefined;
     const res = await onGoogleLogin(pending);
@@ -203,6 +211,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
       paymentAccountNumber: paymentAccount.trim(),
       paymentAccountHolder: paymentAccountHolder.trim() || undefined,
       paymentBankName: (paymentBankName || selectedMethodObj?.bankName || '').trim() || undefined,
+      referredBy: referredBy.trim().toUpperCase() || undefined,
     });
     if (res.error) {
       setErrorMsg(formatFirebaseAuthError(res.error, lang));
@@ -448,6 +457,18 @@ export const AuthPage: React.FC<AuthPageProps> = ({
                       className="w-full bg-[#0d1611] border border-emerald-900/40 rounded-2xl py-3 pl-11 pr-4 text-sm focus:outline-none focus:border-emerald-500 transition"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
+                    />
+                  </div>
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-neutral-500">
+                      <Sparkles className="w-4 h-4" />
+                    </div>
+                    <input
+                      type="text"
+                      placeholder={lang === 'bn' ? 'রেফার কোড (ঐচ্ছিক, যেমন: REEL1234)' : 'Referral Code (Optional)'}
+                      className="w-full bg-[#0d1611] border border-emerald-900/40 rounded-2xl py-3 pl-11 pr-4 text-sm font-mono uppercase focus:outline-none focus:border-emerald-500 transition"
+                      value={referredBy}
+                      onChange={(e) => setReferredBy(e.target.value.toUpperCase())}
                     />
                   </div>
                 </div>

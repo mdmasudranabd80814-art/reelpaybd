@@ -22,10 +22,13 @@ import {
   Eye,
   UserPlus,
   Bookmark,
+  Play,
+  Pause,
 } from 'lucide-react';
 import { Reel, LiveStream, EarningSettings } from '../types';
 import { toBengaliNumber } from '../utils/bengali';
 import { playCoinSound, playPopSound } from '../utils/audio';
+import { vibrateLike, vibrateError } from '../utils/haptics';
 import { normalizeVideoUrl, extractYouTubeId, extractVimeoId } from '../utils/video';
 import { getVideoFromDB } from '../utils/videoStorage';
 import confetti from 'canvas-confetti';
@@ -39,7 +42,7 @@ interface FullScreenReelModalProps {
   onToggleLike: (reelId: string) => void;
   onOpenComments: (reel: Reel) => void;
   onRewardEarned: (points: number, reelTitle: string, reelId?: string) => void;
-  onOpenGiftSheet?: () => void;
+  onOpenGiftSheet?: (reel?: Reel) => void;
   onDownload?: (reel: Reel) => void;
   onShare: (reel: Reel) => void;
   onOpenProfile?: (userId: string) => void;
@@ -68,6 +71,10 @@ interface FullScreenReelModalProps {
   onVideoCompleted?: (reelId: string) => void;
   currentUserId?: string;
   onSelectCategory?: (category: Reel['category']) => void;
+  onWatchProgressChange?: (reelId: string, progressPercent: number) => void;
+  onLoadMoreReels?: () => void;
+  likedReelIds?: string[];
+  hasMore?: boolean;
 }
 
 export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
@@ -79,7 +86,6 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   onOpenComments,
   onRewardEarned,
   onOpenGiftSheet,
-  onDownload,
   onShare,
   onOpenProfile,
   lang,
@@ -107,9 +113,13 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   onVideoCompleted,
   currentUserId,
   onSelectCategory,
+  onWatchProgressChange,
+  onLoadMoreReels,
+  likedReelIds,
+  hasMore = true,
 }) => {
   const [viewMode, setViewMode] = useState<'reels' | 'live'>('reels');
-  const [activeLiveIndex, setActiveLiveIndex] = useState(0);
+  const [activeLiveIndex] = useState(0);
   const [currentIndex, setCurrentIndex] = useState(() => {
     const idx = reels.findIndex((r) => r.id === initialReelId);
     return idx !== -1 ? idx : 0;
@@ -124,8 +134,24 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   }, [initialReelId]);
 
   const reel = reels[currentIndex] || reels[0];
+  const currentIsLiked = likedReelIds && reel ? likedReelIds.includes(reel.id) : isLiked;
   const [videoSrc, setVideoSrc] = useState<string>(() => reel?.videoUrl || '');
   const [videoFailed, setVideoFailed] = useState(false);
+  const [thumbFailed, setThumbFailed] = useState(false);
+
+  // Continuously preload more AI reels as user approaches the end of the current list
+  const onLoadMoreRef = useRef(onLoadMoreReels);
+  onLoadMoreRef.current = onLoadMoreReels;
+
+  useEffect(() => {
+    if (viewMode === 'reels' && hasMore && onLoadMoreRef.current && currentIndex >= Math.max(0, reels.length - 4)) {
+      onLoadMoreRef.current();
+    }
+  }, [currentIndex, reels.length, viewMode, hasMore]);
+
+  useEffect(() => {
+    setThumbFailed(false);
+  }, [reel?.id, reel?.thumbnailUrl]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -210,8 +236,15 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   const [incrementKey, setIncrementKey] = useState(0);
   const [centerHeartAnim, setCenterHeartAnim] = useState(false);
   const [showWatchAgain, setShowWatchAgain] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const isPausedRef = useRef(false);
+  const [tapPulse, setTapPulse] = useState<'pause' | 'play' | null>(null);
+  const [autoAdvanceToast, setAutoAdvanceToast] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const lastTapRef = useRef<number>(0);
+  const tapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tapPulseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoAdvanceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ignoreNextClickRef = useRef(false);
   const onVideoCompletedRef = useRef(onVideoCompleted);
   onVideoCompletedRef.current = onVideoCompleted;
 
@@ -225,34 +258,148 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   const isLimitActive = Boolean(earningSettings?.isDailyReelLimitEnabled !== false);
 
   const touchStartY = useRef<number>(0);
+  const touchStartX = useRef<number>(0);
+  const lastWheelNavRef = useRef<number>(0);
+
+  // Clear pending tap / auto-advance timers on unmount
+  useEffect(() => {
+    return () => {
+      if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current);
+      if (tapPulseTimeoutRef.current) clearTimeout(tapPulseTimeoutRef.current);
+      if (autoAdvanceTimeoutRef.current) clearTimeout(autoAdvanceTimeoutRef.current);
+    };
+  }, []);
+
+  // Reset pause & auto-advance state whenever switching reels
+  useEffect(() => {
+    if (autoAdvanceTimeoutRef.current) {
+      clearTimeout(autoAdvanceTimeoutRef.current);
+      autoAdvanceTimeoutRef.current = null;
+    }
+    if (tapTimeoutRef.current) {
+      clearTimeout(tapTimeoutRef.current);
+      tapTimeoutRef.current = null;
+    }
+    isPausedRef.current = false;
+    setIsPaused(false);
+    setShowWatchAgain(false);
+    setAutoAdvanceToast(false);
+    setTapPulse(null);
+  }, [currentIndex, reel?.id]);
+
+  const togglePlayPause = () => {
+    const nextPaused = !isPausedRef.current;
+    isPausedRef.current = nextPaused;
+    setIsPaused(nextPaused);
+
+    const vid = videoRef.current;
+    if (vid) {
+      if (nextPaused) {
+        vid.pause();
+      } else {
+        setShowWatchAgain(false);
+        vid.play().catch(() => {});
+      }
+    }
+
+    if (tapPulseTimeoutRef.current) clearTimeout(tapPulseTimeoutRef.current);
+    setTapPulse(nextPaused ? 'pause' : 'play');
+    tapPulseTimeoutRef.current = setTimeout(() => {
+      setTapPulse(null);
+    }, 650);
+  };
 
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartY.current = e.touches[0].clientY;
+    touchStartX.current = e.touches[0].clientX;
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
     const touchEndY = e.changedTouches[0].clientY;
-    const diff = touchStartY.current - touchEndY;
-    if (diff > 50) {
-      goNext();
-    } else if (diff < -50) {
-      goPrev();
-    } else if (Math.abs(diff) < 15) {
-      // Tap detected - check for double tap
-      const now = Date.now();
-      if (now - lastTapRef.current < 320) {
-        handleDoubleTapLike();
+    const touchEndX = e.changedTouches[0].clientX;
+    const diffY = touchStartY.current - touchEndY;
+    const diffX = touchStartX.current - touchEndX;
+    if (Math.abs(diffY) > 45 || Math.abs(diffX) > 45) {
+      ignoreNextClickRef.current = true;
+      if (tapTimeoutRef.current) {
+        clearTimeout(tapTimeoutRef.current);
+        tapTimeoutRef.current = null;
       }
-      lastTapRef.current = now;
+      if (diffY > 45) {
+        goNext();
+      } else if (diffY < -45) {
+        goPrev();
+      }
     }
   };
 
-  // Watch Timer Progress
+  const handleSurfaceClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (viewMode !== 'reels') return;
+    if (ignoreNextClickRef.current) {
+      ignoreNextClickRef.current = false;
+      return;
+    }
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('button, a, input, textarea, select, iframe, [role="button"]')) {
+      return;
+    }
+
+    if (tapTimeoutRef.current) {
+      // 2nd tap within 240ms -> Double-Tap Like (do NOT toggle pause)
+      clearTimeout(tapTimeoutRef.current);
+      tapTimeoutRef.current = null;
+      handleDoubleTapLike();
+      return;
+    }
+
+    // 1st single tap -> toggle Pause / Play after disambiguation window
+    tapTimeoutRef.current = setTimeout(() => {
+      tapTimeoutRef.current = null;
+      togglePlayPause();
+    }, 240);
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    if (viewMode !== 'reels') return;
+    if (Math.abs(e.deltaY) < 25) return;
+    const now = Date.now();
+    if (now - lastWheelNavRef.current < 420) return;
+    lastWheelNavRef.current = now;
+    if (e.deltaY > 0) {
+      goNext();
+    } else {
+      goPrev();
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (viewMode !== 'reels') return;
+      if (e.key === 'ArrowDown' || e.key === 'PageDown') {
+        e.preventDefault();
+        goNext();
+      } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
+        e.preventDefault();
+        goPrev();
+      } else if (e.key === ' ') {
+        e.preventDefault();
+        togglePlayPause();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
+
+  // Watch Timer Progress (pauses cleanly when video is paused)
   useEffect(() => {
     setWatchSeconds(0);
     setHasClaimedCurrent(reel ? watchedReelIds.includes(reel.id) : false);
 
-    if (videoRef.current && viewMode === 'reels') {
+    if (videoRef.current && viewMode === 'reels' && !isPausedRef.current) {
       videoRef.current.currentTime = 0;
       videoRef.current.play().catch(() => {});
     }
@@ -262,6 +409,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
     }
 
     const timer = setInterval(() => {
+      if (isPausedRef.current) return;
       setWatchSeconds((prev) => {
         if (prev >= totalSeconds) {
           clearInterval(timer);
@@ -274,17 +422,17 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
     return () => clearInterval(timer);
   }, [currentIndex, reel?.id, totalSeconds, isEarningActive, isDailyLimitReached]);
 
-  // Pause background reel video when viewing Live tab, resume when back on Reels
+  // Pause background reel video when viewing Live tab, resume when back on Reels (if not manually paused)
   useEffect(() => {
     if (!videoRef.current) return;
     if (viewMode === 'live') {
       videoRef.current.pause();
-    } else {
+    } else if (!isPausedRef.current) {
       videoRef.current.play().catch(() => {});
     }
   }, [viewMode]);
 
-  // Fallback full-watch view tracking for non-HTML5-video reels (YouTube, Vimeo, or image fallback)
+  // Fallback view tracking & auto-advance for AI visual motion reels (YouTube/Vimeo or image-motion reels)
   const resolvedYtId = extractYouTubeId(videoSrc);
   const resolvedVimeoId = extractVimeoId(videoSrc);
   const isNativeVideoElement = !resolvedYtId && !resolvedVimeoId && !videoFailed && Boolean(videoSrc);
@@ -294,17 +442,34 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
       return;
     }
     let elapsed = 0;
+    const isVisualOnly = !resolvedYtId && !resolvedVimeoId;
     const targetDuration = Math.max(1, totalSeconds);
+    const autoSlideDuration = Math.max(8, Math.min(10, totalSeconds));
+    let completedSent = false;
+
     const viewTimer = setInterval(() => {
+      if (isPausedRef.current) return;
       elapsed += 1;
-      if (elapsed >= targetDuration) {
-        elapsed = 0;
+      if (!completedSent && elapsed >= targetDuration) {
+        completedSent = true;
         onVideoCompletedRef.current?.(reel.id);
+      }
+      if (isVisualOnly && elapsed >= autoSlideDuration) {
+        clearInterval(viewTimer);
+        if (!completedSent) {
+          completedSent = true;
+          onVideoCompletedRef.current?.(reel.id);
+        }
+        setAutoAdvanceToast(true);
+        autoAdvanceTimeoutRef.current = setTimeout(() => {
+          setAutoAdvanceToast(false);
+          goNext();
+        }, 280);
       }
     }, 1000);
 
     return () => clearInterval(viewTimer);
-  }, [viewMode, reel?.id, isNativeVideoElement, totalSeconds]);
+  }, [viewMode, reel?.id, isNativeVideoElement, resolvedYtId, resolvedVimeoId, totalSeconds]);
 
   // Sync mute state
   useEffect(() => {
@@ -314,14 +479,19 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   }, [isMuted]);
 
   useEffect(() => {
+    if (reel?.id && watchSeconds > 0 && totalSeconds > 0) {
+      const pct = Math.min(100, (watchSeconds / totalSeconds) * 100);
+      onWatchProgressChange?.(reel.id, pct);
+    }
     if (isEarningActive && !isDailyLimitReached && !isReelAlreadyClaimed && watchSeconds >= totalSeconds) {
       handleClaimPoints(true);
     }
-  }, [watchSeconds, isReelAlreadyClaimed, isEarningActive, isDailyLimitReached, totalSeconds]);
+  }, [watchSeconds, isReelAlreadyClaimed, isEarningActive, isDailyLimitReached, totalSeconds, reel?.id, onWatchProgressChange]);
 
   // Handle claiming points (respects watch time & admin daily limit; strictly blocks own reels)
   const handleClaimPoints = (fromTimer = false) => {
     if (isOwnReel) {
+      vibrateError();
       showModalNotice(
         lang === 'bn'
           ? '📺 নিজের ভিডিও দেখে পয়েন্ট অর্জন করা যাবে না। অন্য ইউজারের ভিডিও দেখুন!'
@@ -331,16 +501,19 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
     }
 
     if (!isEarningActive) {
+      vibrateError();
       showModalNotice(lang === 'bn' ? '📺 এই ভিডিওতে পয়েন্ট আর্নিং বন্ধ রয়েছে।' : '📺 Point earning is disabled on this video.');
       return;
     }
 
     if (isReelAlreadyClaimed) {
+      vibrateError();
       showModalNotice(lang === 'bn' ? '✓ আপনি ইতিমধ্যে এই রিলের পয়েন্ট সংগ্রহ করেছেন!' : '✓ You already collected points for this reel!');
       return;
     }
 
     if (isDailyLimitReached) {
+      vibrateError();
       showModalNotice(
         lang === 'bn'
           ? `🔒 আজকের রিল আর্নিং লিমিট পূর্ণ হয়েছে! (${toBengaliNumber(dailyClaimsUsed, lang)}/${toBengaliNumber(dailyClaimsLimit, lang)} রিল)`
@@ -351,6 +524,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
 
     if (!fromTimer && requireFullWatch && watchSeconds < totalSeconds) {
       const remaining = Math.max(1, totalSeconds - watchSeconds);
+      vibrateError();
       showModalNotice(
         lang === 'bn'
           ? `⏳ পয়েন্ট পেতে আর ${toBengaliNumber(remaining, lang)} সেকেন্ড ভিডিওটি দেখুন!`
@@ -381,7 +555,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   const handleLike = () => {
     if (!isMuted) playPopSound();
 
-    const willBeLiked = !isLiked;
+    const willBeLiked = !currentIsLiked;
 
     // Reset and trigger spring animation
     setIsSpringing(false);
@@ -412,10 +586,11 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
     setCenterHeartAnim(true);
     setTimeout(() => setCenterHeartAnim(false), 850);
 
-    if (!isLiked) {
+    if (!currentIsLiked) {
       handleLike();
     } else {
       if (!isMuted) playPopSound();
+      vibrateLike(true);
       setIsSpringing(false);
       requestAnimationFrame(() => {
         setIsSpringing(true);
@@ -434,7 +609,13 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   };
 
   const goNext = () => {
+    if (hasMore && onLoadMoreRef.current && currentIndex >= Math.max(0, reels.length - 4)) {
+      onLoadMoreRef.current();
+    }
     if (currentIndex < reels.length - 1) {
+      setCurrentIndex((prev) => prev + 1);
+    } else if (hasMore && onLoadMoreRef.current) {
+      onLoadMoreRef.current();
       setCurrentIndex((prev) => prev + 1);
     }
   };
@@ -447,6 +628,10 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
 
   const progressPercent = Math.min(100, (watchSeconds / totalSeconds) * 100);
   const likesDisplay = Math.max(0, reel.likesCount || 0);
+  const fullScreenThumbSrc = thumbFailed
+    ? '/images/ai_comedy_tea_stall.jpg'
+    : (reel.thumbnailUrl || '/images/ai_comedy_tea_stall.jpg');
+  const isImageMotionReel = !videoSrc && !reel.videoUrl;
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex justify-center items-center select-none overflow-hidden">
@@ -455,10 +640,11 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
         className="relative w-full h-full max-w-md bg-neutral-950 flex flex-col justify-between overflow-hidden shadow-2xl"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
-        onDoubleClick={handleDoubleTapLike}
+        onWheel={handleWheel}
+        onClick={handleSurfaceClick}
       >
-        {/* Background Visual (Video, YouTube Embed, or Image preview) */}
-        <div className="absolute inset-0 z-0" style={reel.filter ? { filter: reel.filter } : {}}>
+        {/* Background Visual (Video, YouTube Embed, or Animated AI Image) */}
+        <div key={reel.id} className="absolute inset-0 z-0 animate-reel-slide-in" style={reel.filter ? { filter: reel.filter } : {}}>
           {(() => {
             const ytId = extractYouTubeId(videoSrc);
             const vimeoId = extractVimeoId(videoSrc);
@@ -502,20 +688,27 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
                   playsInline
                   preload="auto"
                   onCanPlay={(e) => {
-                    if (viewMode === 'reels') {
+                    if (viewMode === 'reels' && !isPausedRef.current) {
                       e.currentTarget.play().catch(() => {});
                     }
                   }}
                   onEnded={(e) => {
+                    if (viewMode !== 'reels') return;
                     if (
-                      viewMode === 'reels' &&
                       reel?.id &&
                       Number.isFinite(e.currentTarget.duration) &&
                       e.currentTarget.duration > 0
                     ) {
                       onVideoCompletedRef.current?.(reel.id);
                     }
-                    if (viewMode === 'reels') {
+                    // Automatically play the next reel without manual scroll
+                    if (currentIndex < reels.length - 1 || hasMore) {
+                      setAutoAdvanceToast(true);
+                      autoAdvanceTimeoutRef.current = setTimeout(() => {
+                        setAutoAdvanceToast(false);
+                        goNext();
+                      }, 280);
+                    } else {
                       setShowWatchAgain(true);
                     }
                   }}
@@ -529,13 +722,20 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
             }
 
             return (
-              <div className="relative w-full h-full">
+              <div className="relative w-full h-full overflow-hidden">
                 <img
-                  src={reel.thumbnailUrl}
+                  src={fullScreenThumbSrc}
                   alt={reel.title}
-                  className="w-full h-full object-cover"
+                  className={`w-full h-full object-cover ${isImageMotionReel ? 'animate-ken-burns' : ''}`}
+                  onError={() => setThumbFailed(true)}
                 />
-                {videoFailed && (
+                {isImageMotionReel && (
+                  <div className="absolute top-24 left-4 z-10 px-2.5 py-1 rounded-full bg-black/55 backdrop-blur-md border border-cyan-400/40 text-cyan-200 text-[10px] font-black flex items-center gap-1.5 shadow-md pointer-events-none">
+                    <Sparkles className="w-3 h-3 text-cyan-300 animate-pulse" />
+                    <span>{lang === 'bn' ? 'AI ভিজ্যুয়াল মোশন' : 'AI Visual Motion'}</span>
+                  </div>
+                )}
+                {videoFailed && Boolean(videoSrc) && (
                   <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex flex-col items-center justify-center p-6 text-center z-10">
                     <AlertCircle className="w-9 h-9 text-amber-400 mb-2" />
                     <p className="text-sm font-bold text-white mb-1">
@@ -565,9 +765,9 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
             );
           })()}
 
-          {/* Watch Again Overlay Button */}
+          {/* Watch Again / Next Reel Overlay Buttons */}
           {showWatchAgain && viewMode === 'reels' && (
-            <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 backdrop-blur-[2px] transition-all animate-fade-in pointer-events-auto">
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-black/40 backdrop-blur-[2px] transition-all animate-fade-in pointer-events-auto">
               <button
                 type="button"
                 onClick={(e) => {
@@ -583,12 +783,56 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
                 <RotateCcw className="w-4 h-4" />
                 <span>{lang === 'bn' ? 'আবার দেখুন (Watch Again)' : 'Watch Again'}</span>
               </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowWatchAgain(false);
+                  goNext();
+                }}
+                className="px-5 py-2 rounded-full bg-white/15 hover:bg-white/25 backdrop-blur-md text-white font-bold text-xs border border-white/25 flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <span>{lang === 'bn' ? 'পরবর্তী রিল দেখুন' : 'Next Reel'}</span>
+                <ChevronDown className="w-4 h-4" />
+              </button>
             </div>
           )}
 
           {/* Gradients matching Screenshot 2 */}
           <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-transparent to-black/90 pointer-events-none" />
         </div>
+
+        {/* Paused Overlay (1st tap pauses -> 2nd single tap resumes; pointer-events-none so tapping center works seamlessly) */}
+        {isPaused && viewMode === 'reels' && !showWatchAgain && (
+          <div className="absolute inset-0 z-25 pointer-events-none flex flex-col items-center justify-center gap-2.5 bg-black/25 backdrop-blur-[1px]">
+            <div className="w-20 h-20 rounded-full bg-black/65 border-2 border-emerald-400/80 flex items-center justify-center shadow-[0_0_30px_rgba(16,185,129,0.45)]">
+              <Play className="w-10 h-10 text-emerald-400 fill-emerald-400 ml-1" />
+            </div>
+            <span className="px-3.5 py-1 rounded-full bg-black/75 border border-white/15 text-[11px] font-bold text-white shadow-lg">
+              {lang === 'bn' ? 'ভিডিও পজ করা হয়েছে • চালু করতে ১ বার চাপুন' : 'Paused • Tap once to resume'}
+            </span>
+          </div>
+        )}
+
+        {/* Brief Tap Pulse Indicator on Play/Pause toggle */}
+        {tapPulse && !isPaused && viewMode === 'reels' && (
+          <div className="absolute inset-0 z-25 pointer-events-none flex items-center justify-center">
+            <div className="w-16 h-16 rounded-full bg-black/60 border border-white/25 flex items-center justify-center animate-ping">
+              {tapPulse === 'pause' ? (
+                <Pause className="w-7 h-7 text-white fill-white" />
+              ) : (
+                <Play className="w-7 h-7 text-emerald-400 fill-emerald-400 ml-0.5" />
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Auto-advance subtle toast */}
+        {autoAdvanceToast && viewMode === 'reels' && (
+          <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none px-3.5 py-1 rounded-full bg-emerald-500 text-black text-[11px] font-black shadow-lg">
+            {lang === 'bn' ? '▶ পরবর্তী ভিডিও চালু হচ্ছে...' : '▶ Playing next video...'}
+          </div>
+        )}
 
         {/* Center Heart Pop for double tap */}
         {centerHeartAnim && (
@@ -768,7 +1012,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
                     {isGiftsEnabled && onOpenGiftSheet && !(currentUserId && currentLive.hostId === currentUserId) && (
                       <button
                         type="button"
-                        onClick={onOpenGiftSheet}
+                        onClick={() => onOpenGiftSheet(reel)}
                         className="px-4 py-2 rounded-2xl bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-black font-extrabold text-xs transition flex items-center gap-1.5 shadow-lg active:scale-95 cursor-pointer"
                       >
                         <Gift className="w-4 h-4" />
@@ -888,16 +1132,16 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
           {currentIndex > 0 && (
             <button
               onClick={goPrev}
-              className="w-8 h-8 rounded-full bg-black/50 backdrop-blur-md text-white flex items-center justify-center hover:bg-emerald-500 hover:text-black transition shadow-lg"
+              className="w-8 h-8 rounded-full bg-black/50 backdrop-blur-md text-white flex items-center justify-center hover:bg-emerald-500 hover:text-black transition shadow-lg cursor-pointer"
               title="পূর্ববর্তী রিল"
             >
               <ChevronUp className="w-5 h-5" />
             </button>
           )}
-          {currentIndex < reels.length - 1 && (
+          {(currentIndex < reels.length - 1 || hasMore) && (
             <button
               onClick={goNext}
-              className="w-8 h-8 rounded-full bg-black/50 backdrop-blur-md text-white flex items-center justify-center hover:bg-emerald-500 hover:text-black transition shadow-lg"
+              className="w-8 h-8 rounded-full bg-black/50 backdrop-blur-md text-white flex items-center justify-center hover:bg-emerald-500 hover:text-black transition shadow-lg cursor-pointer"
               title="পরবর্তী রিল"
             >
               <ChevronDown className="w-5 h-5" />
@@ -906,12 +1150,15 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
         </div>
 
         {/* RIGHT SIDE FLOATING ACTION DOCK matching Screenshot 2 */}
-        <div className="relative z-20 self-end mr-3 mb-2 flex flex-col items-center gap-4 text-white">
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="relative z-20 self-end mr-3 mb-2 flex flex-col items-center gap-4 text-white"
+        >
           {/* Like Button */}
           <button
             onClick={handleLike}
             className="relative flex flex-col items-center gap-0.5 cursor-pointer group select-none"
-            aria-label={isLiked ? (lang === 'bn' ? 'আনলাইক করুন' : 'Unlike') : (lang === 'bn' ? 'লাইক করুন' : 'Like')}
+            aria-label={currentIsLiked ? (lang === 'bn' ? 'আনলাইক করুন' : 'Unlike') : (lang === 'bn' ? 'লাইক করুন' : 'Like')}
           >
             {/* Animated floating number increment badge (+1 / +১) */}
             {showIncrement && (
@@ -928,7 +1175,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
 
             <div className="relative w-12 h-12 flex items-center justify-center">
               {/* Burst shockwave ring & sparkles when springing */}
-              {isSpringing && isLiked && (
+              {isSpringing && currentIsLiked && (
                 <>
                   <span className="absolute inset-0 rounded-2xl border-2 border-rose-500/90 pointer-events-none animate-heart-burst" />
                   <span className="absolute -top-1 w-1.5 h-1.5 rounded-full bg-rose-400 pointer-events-none animate-ping" />
@@ -940,14 +1187,14 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
 
               <div
                 className={`w-12 h-12 rounded-2xl bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center transition-all ${
-                  isLiked
+                  currentIsLiked
                     ? 'text-rose-500 drop-shadow-[0_0_12px_rgba(244,63,94,0.7)]'
                     : 'text-white hover:bg-black/60'
                 } ${isSpringing ? 'animate-heart-spring' : ''}`}
               >
                 <Heart
                   className={`w-6 h-6 transition-transform duration-150 ${
-                    isLiked ? 'fill-rose-500 text-rose-500 scale-110' : ''
+                    currentIsLiked ? 'fill-rose-500 text-rose-500 scale-110' : ''
                   }`}
                 />
               </div>
@@ -955,7 +1202,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
 
             <span
               className={`text-xs font-bold drop-shadow tabular-nums transition-colors duration-200 ${
-                isLiked ? 'text-rose-400' : 'text-white'
+                currentIsLiked ? 'text-rose-400' : 'text-white'
               } ${showIncrement ? 'animate-number-bump' : ''}`}
             >
               {toBengaliNumber(likesDisplay, lang)}
@@ -1018,7 +1265,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
           {isGiftsEnabled && onOpenGiftSheet && !isOwnReel && (
             <button
               type="button"
-              onClick={onOpenGiftSheet}
+              onClick={() => onOpenGiftSheet(reel)}
               className="flex flex-col items-center gap-0.5 cursor-pointer group"
             >
               <div className="w-12 h-12 rounded-2xl bg-black/45 backdrop-blur-md border border-white/15 flex items-center justify-center hover:bg-black/65 transition text-rose-400">
@@ -1075,7 +1322,10 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
         </div>
 
         {/* BOTTOM METADATA OVERLAY matching Screenshot 2 */}
-        <div className="relative z-20 px-4 pb-4 bg-gradient-to-t from-black/95 via-black/60 to-transparent pt-6">
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="relative z-20 px-4 pb-4 bg-gradient-to-t from-black/95 via-black/60 to-transparent pt-6"
+        >
           {/* Creator row */}
           <div className="flex items-center gap-2.5 mb-2">
             <button
