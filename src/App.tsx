@@ -46,6 +46,8 @@ import { GuestEarnView } from './components/GuestEarnView';
 import { GuestWalletView } from './components/GuestWalletView';
 import { GuestProfileView } from './components/GuestProfileView';
 import { AuthPromptModal } from './components/AuthPromptModal';
+import { ApkDownloadBanner } from './components/ApkDownloadBanner';
+import { AppInstallModal } from './components/AppInstallModal';
 import { useFirebase, formatFirebaseAuthError } from './hooks/useFirebase';
 import { where, orderBy, increment, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { normalizeVideoUrl } from './utils/video';
@@ -936,6 +938,7 @@ function UserApp() {
   const [durationFilter, setDurationFilter] = useState<'all' | 'short' | 'long'>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'most_watched' | 'popular'>('newest');
   const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [showInstallModal, setShowInstallModal] = useState<boolean>(false);
 
   // Category selection handler with horizontal pill auto-scroll and audio feedback
   const handleSelectCategory = useCallback((cat: ReelCategory | string) => {
@@ -3032,6 +3035,12 @@ function UserApp() {
     );
   };
 
+  const handleDownloadApk = () => {
+    if (!isMuted) playSuccessChime();
+    vibrateSuccess();
+    setShowInstallModal(true);
+  };
+
   // Filtered and Sorted Reels
   const filteredReels = (() => {
     if (selectedCategory === '🔴 লাইভ') {
@@ -3202,6 +3211,7 @@ function UserApp() {
 
       {/* Main Container constrained to Mobile/Tablet Frame */}
       <div className="w-full max-w-md mx-auto min-h-screen bg-[#0a120e] flex flex-col relative shadow-2xl border-x border-emerald-950/40">
+        <ApkDownloadBanner lang={lang} onOpenInstallModal={handleDownloadApk} />
         <Header
           onOpenNotifications={() => {
             setShowNotifications(true);
@@ -4040,6 +4050,12 @@ function UserApp() {
             />
           </div>
         )}
+        {/* App Install Modal / Guide */}
+        <AppInstallModal
+          isOpen={showInstallModal}
+          onClose={() => setShowInstallModal(false)}
+          lang={lang}
+        />
       </div>
     </div>
   );
