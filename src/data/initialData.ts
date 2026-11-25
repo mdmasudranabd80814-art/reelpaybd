@@ -204,6 +204,24 @@ export const INITIAL_REELS: Reel[] = [
     caption: 'বাংলার আসল বাউল লোকসঙ্গীত ও লাইভ কনসার্ট ভিডিও ফুটেজ! ৩০ সেকেন্ড নন-স্টপ সুরের মূর্ছনা 🎤✨ #BaulSong #BanglaFolk #MasudRana',
     hashtags: ['#গান', '#BaulSong', '#FolkMusicBD', '#MasudRana'],
   },
+  {
+    id: 'reel_app_song_03',
+    ...MASUD_BASE,
+    title: 'ওরে ও দরিয়ার মাঝি • নজরুলগীতি ও লাইভ বাংলা গান 🎶🎤',
+    category: 'গান',
+    thumbnailUrl: '/images/ai_song_concert.jpg',
+    videoUrl: '/videos/ai_song_majhi.mp4',
+    likesCount: 642,
+    commentsCount: 68,
+    sharesCount: 145,
+    pointsReward: 20,
+    timeAgo: 'আসল বাংলা গান • ৩০সে.',
+    createdAt: '2026-11-23T08:50:00Z',
+    viewsCount: 3390,
+    audioTrack: 'ওরে ও দরিয়ার মাঝি (আসল বাংলা কণ্ঠ ও কনসার্ট)',
+    caption: 'কাজী নজরুল ইসলামের চিরসবুজ গান "ওরে ও দরিয়ার মাঝি" সাথে লাইভ স্টেজ পারফরম্যান্স ভিডিও! সাউন্ড অন রেখে শুনুন 🎶🎤 #গান #NazrulGeeti #BanglaSong',
+    hashtags: ['#গান', '#NazrulGeeti', '#BanglaSong', '#MasudRana'],
+  },
 
   // === বিনোদন (30s REAL Bengali Folk Songs & Entertainment Shows) ===
   {

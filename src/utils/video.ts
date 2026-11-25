@@ -7,6 +7,7 @@ export const DEFAULT_FALLBACK_VIDEOS = [
   '/videos/ai_movie_hero.mp4',
   '/videos/ai_song_concert.mp4',
   '/videos/ai_song_folk.mp4',
+  '/videos/ai_song_majhi.mp4',
   '/videos/ai_ent_morar.mp4',
   '/videos/ai_ent_prabhat.mp4',
   '/videos/ai_comedy_tea_stall.mp4',
