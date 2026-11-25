@@ -33,6 +33,7 @@ import { normalizeVideoUrl, extractYouTubeId, extractVimeoId } from '../utils/vi
 import { getVideoFromDB } from '../utils/videoStorage';
 import confetti from 'canvas-confetti';
 import { getCategoryMeta } from '../utils/categories';
+import { WatermarkOverlay } from './WatermarkOverlay';
 
 interface FullScreenReelModalProps {
   reels: Reel[];
@@ -842,6 +843,15 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
 
           {/* Gradients matching Screenshot 2 */}
           <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-transparent to-black/90 pointer-events-none" />
+
+          {/* Creator Content Watermark Protection Overlay */}
+          {reel?.watermark?.enabled && (
+            <WatermarkOverlay
+              watermark={reel.watermark}
+              fallbackText={reel.creatorHandle}
+              isFullScreen={true}
+            />
+          )}
         </div>
 
         {/* Paused Overlay (1st tap pauses -> 2nd single tap resumes; pointer-events-none so tapping center works seamlessly) */}

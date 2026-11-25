@@ -734,6 +734,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       src={reel.thumbnailUrl}
                       alt={reel.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      style={reel.filter ? { filter: reel.filter } : undefined}
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-black/30 pointer-events-none" />
                   </div>
@@ -821,6 +822,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     src={reel.thumbnailUrl}
                     alt={reel.title}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    style={reel.filter ? { filter: reel.filter } : undefined}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-black/30 pointer-events-none" />
                   <div className="absolute inset-0 flex items-center justify-center opacity-80 group-hover:opacity-100 pointer-events-none">

@@ -135,7 +135,7 @@ service cloud.firestore {
                'isVerified', 'category', 'thumbnailUrl', 'videoUrl', 'likesCount',
                'commentsCount', 'sharesCount', 'pointsReward', 'createdAt', 'viewsCount',
                'audioTrack', 'caption', 'hashtags', 'timeAgo', 'isEarningEnabled',
-               'isSpecialOffer', 'specialOfferBadge', 'customWatchSeconds', 'filter'
+               'isSpecialOffer', 'specialOfferBadge', 'customWatchSeconds', 'filter', 'watermark'
              ]) &&
              data.title is string && data.title.size() <= 200 &&
              data.creatorName is string && data.creatorName.size() <= 100 &&
@@ -147,7 +147,16 @@ service cloud.firestore {
              (!('commentsCount' in data) || (data.commentsCount is number && data.commentsCount >= 0)) &&
              (!('sharesCount' in data) || (data.sharesCount is number && data.sharesCount >= 0)) &&
              (!('viewsCount' in data) || (data.viewsCount is number && data.viewsCount >= 0)) &&
-             (!('hashtags' in data) || data.hashtags == null || (data.hashtags is list && data.hashtags.size() <= 15));
+             (!('hashtags' in data) || data.hashtags == null || (data.hashtags is list && data.hashtags.size() <= 15)) &&
+             (!('watermark' in data) || (data.watermark is map &&
+               (!('enabled' in data.watermark) || data.watermark.enabled is bool) &&
+               (!('type' in data.watermark) || data.watermark.type in ['text', 'logo']) &&
+               (!('text' in data.watermark) || (data.watermark.text is string && data.watermark.text.size() <= 120)) &&
+               (!('logoUrl' in data.watermark) || (data.watermark.logoUrl is string && data.watermark.logoUrl.size() <= 200000)) &&
+               (!('position' in data.watermark) || data.watermark.position in ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'center']) &&
+               (!('opacity' in data.watermark) || (data.watermark.opacity is number && data.watermark.opacity >= 0 && data.watermark.opacity <= 1)) &&
+               (!('size' in data.watermark) || data.watermark.size in ['small', 'medium', 'large']) &&
+               (!('color' in data.watermark) || (data.watermark.color is string && data.watermark.color.size() <= 30))));
     }
 
     function isValidComment(data) {

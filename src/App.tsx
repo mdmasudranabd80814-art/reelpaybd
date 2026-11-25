@@ -933,6 +933,7 @@ function UserApp() {
   // UI Navigation & View State
   const [selectedCategory, setSelectedCategory] = useState<ReelCategory>('সকল');
   const [feedSearchQuery, setFeedSearchQuery] = useState<string>('');
+  const [durationFilter, setDurationFilter] = useState<'all' | 'short' | 'long'>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'most_watched' | 'popular'>('newest');
   const [isMuted, setIsMuted] = useState<boolean>(false);
 
@@ -2730,17 +2731,17 @@ function UserApp() {
   };
 
   const handleAddNewReel = async (
-    newReelData: Pick<Reel, 'title' | 'userId' | 'creatorName' | 'creatorHandle' | 'creatorAvatar' | 'category' | 'thumbnailUrl' | 'videoUrl' | 'pointsReward' | 'audioTrack' | 'caption' | 'hashtags' | 'isVerified'>
+    newReelData: Pick<Reel, 'title' | 'userId' | 'creatorName' | 'creatorHandle' | 'creatorAvatar' | 'category' | 'thumbnailUrl' | 'videoUrl' | 'pointsReward' | 'audioTrack' | 'caption' | 'hashtags' | 'isVerified' | 'filter' | 'watermark'>
   ) => {
     if (!siteSettings.allowUserReelUpload) {
       showToast(lang === 'bn' ? '🔒 এডমিন কর্তৃক ইউজার রিল আপলোড সাময়িকভাবে বন্ধ রয়েছে।' : '🔒 Reel upload disabled by Admin.');
       return;
     }
-    const newReel: Reel = {
+    const rawReel: Reel = {
       ...newReelData,
       pointsReward: newReelData.pointsReward ?? siteSettings.defaultUserReelRewardPoints ?? 10,
       id: `reel_${Date.now()}`,
-      videoUrl: newReelData.videoUrl, // Preserve user's original video
+      videoUrl: newReelData.videoUrl,
       userId: newReelData.userId || firebaseUser?.uid || currentUser.id,
       likesCount: 0,
       commentsCount: 0,
@@ -2749,9 +2750,12 @@ function UserApp() {
       createdAt: new Date().toISOString(),
       timeAgo: 'এখনো',
     };
+    const newReel = Object.fromEntries(
+      Object.entries(rawReel).filter(([, value]) => value !== undefined)
+    ) as Reel;
     // Optimistic addition
     setReels((prev) => [newReel, ...prev]);
-    showToast(lang === 'bn' ? '🎉 রিলটি সফলভাবে পাবলিশ হয়েছে! আসল ভিডিওটি চলবে।' : '🎉 Reel published successfully!');
+    showToast(lang === 'bn' ? '🎉 রিলটি সফলভাবে পাবলিশ হয়েছে!' : '🎉 Reel published successfully!');
     try {
       await addDocument('reels', newReel);
     } catch (err) {
@@ -3037,6 +3041,19 @@ function UserApp() {
       ? resolvedReels
       : resolvedReels.filter((r) => r.category === selectedCategory);
 
+    // Filter by duration: short (under 30s, i.e., <= 30), long (over 30s, i.e., > 30)
+    if (durationFilter === 'short') {
+      result = result.filter((r) => {
+        const dur = r.customWatchSeconds && r.customWatchSeconds > 0 ? r.customWatchSeconds : 30;
+        return dur <= 30;
+      });
+    } else if (durationFilter === 'long') {
+      result = result.filter((r) => {
+        const dur = r.customWatchSeconds && r.customWatchSeconds > 0 ? r.customWatchSeconds : 30;
+        return dur > 30;
+      });
+    }
+
     if (feedSearchQuery.trim()) {
       const q = feedSearchQuery.toLowerCase().trim();
       result = result.filter((r) => {
@@ -3210,6 +3227,10 @@ function UserApp() {
           categories={CATEGORIES}
           selectedCategory={selectedCategory}
           onSelectCategory={handleSelectCategory}
+          searchQuery={feedSearchQuery}
+          onSearchChange={setFeedSearchQuery}
+          durationFilter={durationFilter}
+          onDurationFilterChange={setDurationFilter}
         />
 
         {/* Global Announcement Marquee Ticker */}

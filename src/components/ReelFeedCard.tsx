@@ -6,6 +6,7 @@ import { playPopSound } from '../utils/audio';
 import { extractYouTubeId, extractVimeoId, normalizeVideoUrl } from '../utils/video';
 import { getVideoFromDB } from '../utils/videoStorage';
 import { getCategoryMeta } from '../utils/categories';
+import { WatermarkOverlay } from './WatermarkOverlay';
 
 interface ReelFeedCardProps {
   reel: Reel;
@@ -82,6 +83,22 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
   const [videoReady, setVideoReady] = React.useState(false);
   const [videoFailed, setVideoFailed] = React.useState(false);
   const [isPlaying, setIsPlaying] = React.useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = React.useState<0.5 | 1 | 2>(1);
+
+  React.useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.playbackRate = playbackSpeed;
+    }
+  }, [playbackSpeed, videoReady, isPlaying]);
+
+  const handleToggleSpeed = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const nextSpeed = playbackSpeed === 0.5 ? 1 : playbackSpeed === 1 ? 2 : 0.5;
+    setPlaybackSpeed(nextSpeed);
+    if (videoRef.current) {
+      videoRef.current.playbackRate = nextSpeed;
+    }
+  };
 
   // Watch progress & milestone ripple state
   const [localProgress, setLocalProgress] = React.useState<number>(() =>
@@ -506,6 +523,15 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
         {/* Gradient overlays */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-black/30 pointer-events-none" />
 
+        {/* Creator Watermark Protection Overlay */}
+        {reel.watermark?.enabled && (
+          <WatermarkOverlay
+            watermark={reel.watermark}
+            fallbackText={reel.creatorHandle}
+            isFullScreen={false}
+          />
+        )}
+
         {/* Centered Circular Play Button */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div
@@ -544,6 +570,16 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
           </button>
 
           <div className="flex items-center gap-1.5 pointer-events-auto">
+            {isNativeVideo && (
+              <button
+                type="button"
+                onClick={handleToggleSpeed}
+                className="px-2 py-0.5 rounded-lg text-[10px] font-black bg-black/75 backdrop-blur-md text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500 hover:text-black transition-all cursor-pointer tabular-nums shadow-sm active:scale-95"
+                title={lang === 'bn' ? 'প্লেব্যাক স্পিড পরিবর্তন (০.৫x / ১x / ২x)' : 'Toggle playback speed (0.5x / 1x / 2x)'}
+              >
+                {playbackSpeed}x
+              </button>
+            )}
             {isImageMotionReel && (
               <span className="px-2 py-0.5 rounded-lg text-[9px] font-black bg-black/65 backdrop-blur-md text-cyan-300 border border-cyan-400/35 flex items-center gap-1">
                 <Sparkles className="w-2.5 h-2.5" />

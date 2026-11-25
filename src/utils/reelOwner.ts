@@ -101,8 +101,7 @@ export const resolveReelWithOwner = (
   userMap: Map<string, User>,
   masudCreator: MasudRanaCreatorIdentity = DEFAULT_MASUD_CREATOR
 ): Reel => {
-  const isAllMasudMode = true;
-  if (isAllMasudMode) {
+  if (!reel.userId || reel.userId === MASUD_RANA_FALLBACK_ID || reel.userId === masudCreator.id || reel.userId === 'system_admin') {
     const owner = userMap.get(masudCreator.id);
     const nextUserId = masudCreator.id;
     const nextCreatorName = owner?.name?.trim() && owner.name.trim() !== 'অতিথি ইউজার'
@@ -131,28 +130,24 @@ export const resolveReelWithOwner = (
     };
   }
 
-  if (!reel.userId) return reel;
+  // Regular user-uploaded reel: preserve their userId and resolve latest owner profile info from userMap
   const owner = userMap.get(reel.userId);
-  if (!owner) return reel;
-
-  const ownerName = owner.name?.trim();
-  const hasValidOwnerName = Boolean(ownerName && ownerName !== 'অতিথি ইউজার');
-
-  const nextCreatorName = hasValidOwnerName ? ownerName! : reel.creatorName;
-  const nextCreatorAvatar = owner.avatar || reel.creatorAvatar;
-  const nextIsVerified = Boolean(owner.isVerified || reel.isVerified);
-
-  if (
-    nextCreatorName === reel.creatorName &&
-    nextCreatorAvatar === reel.creatorAvatar &&
-    nextIsVerified === Boolean(reel.isVerified)
-  ) {
+  if (!owner) {
     return reel;
   }
 
+  const ownerName = owner.name?.trim();
+  const hasValidOwnerName = Boolean(ownerName && ownerName !== 'অতিথি ইউজার');
+  const nextCreatorName = hasValidOwnerName ? ownerName! : (reel.creatorName || 'ইউজার');
+  const nextCreatorAvatar = owner.avatar || reel.creatorAvatar || '/images/masud_rana_avatar.jpg';
+  const nextHandle = `@${buildCreatorHandle(nextCreatorName, owner.phone)}`;
+  const nextIsVerified = Boolean(owner.isVerified || reel.isVerified);
+
   return {
     ...reel,
+    userId: reel.userId,
     creatorName: nextCreatorName,
+    creatorHandle: nextHandle,
     creatorAvatar: nextCreatorAvatar,
     isVerified: nextIsVerified,
   };

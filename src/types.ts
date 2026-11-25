@@ -187,6 +187,20 @@ export interface User {
   likedCommentIds?: string[];
 }
 
+export type WatermarkPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center';
+export type WatermarkType = 'text' | 'logo';
+
+export interface ReelWatermark {
+  enabled: boolean;
+  type: WatermarkType;
+  text?: string;
+  logoUrl?: string;
+  position: WatermarkPosition;
+  opacity: number; // 0.1 to 1.0
+  size: 'small' | 'medium' | 'large';
+  color?: string; // hex color
+}
+
 export interface Reel {
   id: string;
   userId: string;
@@ -224,6 +238,7 @@ export interface Reel {
   specialOfferBadge?: string;
   customWatchSeconds?: number;
   filter?: string;
+  watermark?: ReelWatermark;
 }
 
 export interface EarningSettings {
