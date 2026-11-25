@@ -193,9 +193,9 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
       ([entry]) => {
         const visible = entry.isIntersecting;
         setIsIntersecting(visible);
-        setIsActiveInView(visible && entry.intersectionRatio >= 0.5);
+        setIsActiveInView(visible && entry.intersectionRatio >= 0.2);
       },
-      { rootMargin: '-5% 0px -5% 0px', threshold: [0, 0.25, 0.5, 0.75, 1] }
+      { rootMargin: '0px 0px', threshold: [0, 0.2, 0.5, 0.75, 1] }
     );
 
     nearObserver.observe(el);
@@ -472,10 +472,11 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
             ref={videoRef}
             src={videoSrc}
             poster={displayThumbnail}
+            autoPlay={shouldPlayPreview}
             muted
             playsInline
             loop
-            preload={isActiveInView ? 'auto' : 'metadata'}
+            preload={isNearView ? 'auto' : 'metadata'}
             onLoadedData={() => setVideoReady(true)}
             onCanPlay={(e) => {
               setVideoReady(true);
@@ -483,6 +484,10 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
                 e.currentTarget.muted = true;
                 e.currentTarget.play().catch(() => {});
               }
+            }}
+            onPlaying={() => {
+              setVideoReady(true);
+              setIsPlaying(true);
             }}
             onPlay={() => setIsPlaying(true)}
             onPause={() => setIsPlaying(false)}
@@ -492,7 +497,7 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
               setIsPlaying(false);
             }}
             className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 pointer-events-none ${
-              videoReady && !videoFailed ? 'opacity-100' : 'opacity-0'
+              (videoReady || isPlaying) && !videoFailed ? 'opacity-100' : 'opacity-0'
             }`}
             style={reel.filter ? { filter: reel.filter } : {}}
           />

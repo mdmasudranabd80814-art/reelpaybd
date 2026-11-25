@@ -10,6 +10,7 @@ export type ContentCategory =
   | 'শর্ট মুভি'
   | 'গান'
   | 'বিনোদন'
+  | 'ট্রেনিং'
   | 'ট্রেন্ডিং'
   | 'গেমিং'
   | 'রান্না'
@@ -21,6 +22,7 @@ export const ALL_CONTENT_CATEGORIES: ContentCategory[] = [
   'শর্ট মুভি',
   'গান',
   'বিনোদন',
+  'ট্রেনিং',
   'ট্রেন্ডিং',
   'গেমিং',
   'রান্না',
@@ -213,28 +215,61 @@ const AI_CATEGORY_TEMPLATES: Record<ContentCategory, AiSceneTemplate> = {
     ],
     pointsReward: 20,
   },
-  ট্রেন্ডিং: {
+  ট্রেনিং: {
     titles: [
-      'ঢাকা হাতিরঝিল নাইট লাইটস ও সিনেম্যাটিক AI রিল ✨🌃',
-      'মাসুদ রানার AI মিউজিক স্টুডিও ভাইরাল বিট রিমিক্স 🎸🔥',
-      '৬০ সেকেন্ডে বিকাশ ও নগদ ইনস্ট্যান্ট ক্যাশআউট ট্রেন্ড ⚡💸',
-      'ভাইরাল ক্রিয়েটর স্টার চ্যালেঞ্জ ও সুপার গিফট শো 🏆✨',
-      '২০২৬-এর সেরা ট্রেন্ডিং AI ভিজ্যুয়াল আর্ট রিল 🚀🌟',
-      'রাতের শহরের নিয়োন আলো ও চিল মিউজিক ভাইবস 🎶💫',
+      'সকালের ফিটনেস ও জিম ওয়ার্কআউট ট্রেনিং গাইড 💪🏃‍♂️',
+      'ফ্রিল্যান্সিং ও ভিডিও এডিটিং প্রো স্কিল ট্রেনিং 💻🎬',
+      'ক্রিকেট ব্যাটিং ও ফাস্ট বোলিং প্রো ট্রেনিং টিপস 🏏⚡',
+      'মোবাইল ভিডিওগ্রাফি ও ভাইরাল রিলস মেকিং ট্রেনিং 📱🎥',
     ],
     captions: [
-      'ট্রেন্ডিং AI ভিডিও ও ছবি মাসুদ রানার অফিসিয়াল ফিড থেকে! 🔥✨',
+      'কোনো স্থির ছবি নয়—১০০% চলমান বাস্তব ভিডিওতে স্টেপ বাই স্টেপ ট্রেনিং গাইড! 🏋️🔥',
+      'প্রতিদিন মাত্র ২০ মিনিট প্র্যাকটিসে নিজের ফিটনেস ও স্কিল বাড়ান! 💪✨',
+    ],
+    hashtags: ['#ট্রেনিং', '#TrainingBD', '#FitnessTraining', '#SkillDev', '#MasudRana'],
+    audioTracks: [
+      'ফিটনেস ও ওয়ার্কআউট কোচ বাংলা ভয়েস - মাসুদ রানা',
+      'ফ্রিল্যান্সিং ও ভিডিও এডিটিং ট্রেনিং গাইড - মাসুদ রানা',
+      'ক্রিকেট কোচিং প্রো টিপস ও বাংলা সংলাপ',
+      'স্মার্টফোন ভিডিওগ্রাফি ট্রেনিং গাইড',
+    ],
+    videos: [
+      '/videos/ai_training_fitness.mp4',
+      '/videos/ai_training_freelance.mp4',
+      '/videos/ai_training_cricket.mp4',
+      '/videos/ai_training_camera.mp4',
+    ],
+    images: [
+      '/images/ai_education_tech.jpg',
+      '/images/ai_comedy_cricket.jpg',
+      '/images/reel_creator_star.jpg',
+    ],
+    pointsReward: 20,
+  },
+  ট্রেন্ডিং: {
+    titles: [
+      'যদি তোর ডাক শুনে কেউ না আসে (একলা চলো রে) • লাইভ বাংলা গান 🌙🎤',
+      'আহা আজি এ বসন্তে • ৩০ সেকেন্ডের সুরেলা কনসার্ট ভিডিও 🎶💫',
+      'সকালের ফিটনেস ও ওয়ার্কআউট চ্যালেঞ্জ ট্রেনিং 💪🔥',
+      'মোবাইল ভিডিওগ্রাফি ও রিলস মেকিং প্রো ট্রেনিং 📱🎬',
+      '৬০ সেকেন্ডে বিকাশ ও নগদ ইনস্ট্যান্ট ক্যাশআউট ⚡💸',
+      'ভাইরাল ক্রিয়েটর স্টার চ্যালেঞ্জ ও সুপার গিফট শো 🏆✨',
+    ],
+    captions: [
+      '১০০% চলমান বাস্তব ভিডিও ও আসল বাংলা গান — মাসুদ রানার অফিসিয়াল ফিড থেকে! 🔥🎬',
       'অবিরাম দেখতে থাকুন আর প্রতিটি রিল দেখে পয়েন্ট জিতুন! 💸🚀',
     ],
-    hashtags: ['#ট্রেন্ডিং', '#ViralBD', '#MasudRana', '#ReelPayBD', '#AIReels'],
+    hashtags: ['#ট্রেন্ডিং', '#ViralBD', '#MasudRana', '#ReelPayBD', '#LiveVideo'],
     audioTracks: [
-      'মাসুদ রানা ভাইরাল স্টুডিও বিট',
-      'ঢাকা নাইট ভাইবস - AI মিউজিক',
-      'ট্রেন্ডিং রিলস সাউন্ড - Masud Rana',
+      'একলা চলো রে (আসল বাংলা কণ্ঠ) - মাসুদ রানা',
+      'আহা আজি এ বসন্তে (লাইভ কনসার্ট বাংলা গান)',
+      'ফিটনেস ও ক্রিয়েটর ট্রেনিং বাংলা ভয়েস - মাসুদ রানা',
     ],
     videos: [
       '/videos/ai_trending_dhaka.mp4',
       '/videos/ai_trending_neon_music.mp4',
+      '/videos/ai_training_fitness.mp4',
+      '/videos/ai_training_camera.mp4',
       '/videos/reel_bkash_cashout.mp4',
       '/videos/reel_creator_star.mp4',
     ],
@@ -318,6 +353,7 @@ const AI_CATEGORY_TEMPLATES: Record<ContentCategory, AiSceneTemplate> = {
     ],
     videos: [
       '/videos/ai_education_tech.mp4',
+      '/videos/ai_training_freelance.mp4',
       '/videos/reel_taka_earn.mp4',
       '/videos/reel_daily_bonus.mp4',
     ],
@@ -360,6 +396,10 @@ const EXTRA_CATEGORY_IMAGES: Record<ContentCategory, string[]> = {
     'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=720&auto=format&fit=crop&q=80',
     'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=720&auto=format&fit=crop&q=80',
   ],
+  ট্রেনিং: [
+    'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=720&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=720&auto=format&fit=crop&q=80',
+  ],
   ট্রেন্ডিং: [
     'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=720&auto=format&fit=crop&q=80',
     'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=720&auto=format&fit=crop&q=80',
@@ -378,15 +418,17 @@ const EXTRA_CATEGORY_IMAGES: Record<ContentCategory, string[]> = {
   ],
 };
 
-// Cycle pattern emphasizing Comedy, Short Drama, Short Movie, Songs, and 30s Entertainment alongside all other categories
+// Cycle pattern emphasizing Comedy, Short Drama, Short Movie, Training, Songs, and 30s Entertainment alongside all other categories
 const STREAM_CATEGORY_CYCLE: ContentCategory[] = [
   'কমেডি',
+  'ট্রেনিং',
   'শর্ট ড্রামা',
   'গান',
   'শর্ট মুভি',
   'বিনোদন',
   'কমেডি',
   'ট্রেন্ডিং',
+  'ট্রেনিং',
   'গেমিং',
   'রান্না',
   'শিক্ষা',

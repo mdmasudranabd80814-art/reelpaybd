@@ -237,6 +237,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   const [centerHeartAnim, setCenterHeartAnim] = useState(false);
   const [showWatchAgain, setShowWatchAgain] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [autoplayMuted, setAutoplayMuted] = useState(false);
   const isPausedRef = useRef(false);
   const [tapPulse, setTapPulse] = useState<'pause' | 'play' | null>(null);
   const [autoAdvanceToast, setAutoAdvanceToast] = useState(false);
@@ -247,6 +248,25 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   const ignoreNextClickRef = useRef(false);
   const onVideoCompletedRef = useRef(onVideoCompleted);
   onVideoCompletedRef.current = onVideoCompleted;
+
+  const safePlayVideo = async (vid: HTMLVideoElement | null) => {
+    if (!vid || isPausedRef.current) return;
+    try {
+      vid.muted = isMuted;
+      await vid.play();
+      setAutoplayMuted(false);
+    } catch {
+      if (!vid.muted) {
+        try {
+          vid.muted = true;
+          await vid.play();
+          setAutoplayMuted(true);
+        } catch {
+          // Wait for user interaction
+        }
+      }
+    }
+  };
 
   const showModalNotice = (msg: string) => {
     setModalNotice(msg);
@@ -282,23 +302,29 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
     }
     isPausedRef.current = false;
     setIsPaused(false);
+    setAutoplayMuted(false);
     setShowWatchAgain(false);
     setAutoAdvanceToast(false);
     setTapPulse(null);
   }, [currentIndex, reel?.id]);
 
   const togglePlayPause = () => {
-    const nextPaused = !isPausedRef.current;
+    const vid = videoRef.current;
+    const currentlyPlaying = vid ? !vid.paused : !isPausedRef.current;
+    const nextPaused = currentlyPlaying;
     isPausedRef.current = nextPaused;
     setIsPaused(nextPaused);
 
-    const vid = videoRef.current;
     if (vid) {
       if (nextPaused) {
         vid.pause();
       } else {
         setShowWatchAgain(false);
-        vid.play().catch(() => {});
+        vid.muted = isMuted;
+        setAutoplayMuted(false);
+        vid.play().catch(() => {
+          safePlayVideo(vid);
+        });
       }
     }
 
@@ -401,7 +427,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
 
     if (videoRef.current && viewMode === 'reels' && !isPausedRef.current) {
       videoRef.current.currentTime = 0;
-      videoRef.current.play().catch(() => {});
+      safePlayVideo(videoRef.current);
     }
 
     if (!isEarningActive || isDailyLimitReached || (reel && watchedReelIds.includes(reel.id))) {
@@ -428,7 +454,7 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
     if (viewMode === 'live') {
       videoRef.current.pause();
     } else if (!isPausedRef.current) {
-      videoRef.current.play().catch(() => {});
+      safePlayVideo(videoRef.current);
     }
   }, [viewMode]);
 
@@ -471,12 +497,18 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
     return () => clearInterval(viewTimer);
   }, [viewMode, reel?.id, isNativeVideoElement, resolvedYtId, resolvedVimeoId, totalSeconds]);
 
-  // Sync mute state
+  // Sync mute state & ensure video starts playing cleanly when videoSrc resolves
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.muted = isMuted;
+      if (!isMuted) {
+        setAutoplayMuted(false);
+      }
+      if (viewMode === 'reels' && !isPausedRef.current && videoSrc) {
+        safePlayVideo(videoRef.current);
+      }
     }
-  }, [isMuted]);
+  }, [isMuted, videoSrc]);
 
   useEffect(() => {
     if (reel?.id && watchSeconds > 0 && totalSeconds > 0) {
@@ -687,10 +719,20 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
                   muted={isMuted}
                   playsInline
                   preload="auto"
-                  onCanPlay={(e) => {
-                    if (viewMode === 'reels' && !isPausedRef.current) {
-                      e.currentTarget.play().catch(() => {});
+                  onLoadedData={(e) => {
+                    if (viewMode === 'reels' && !isPausedRef.current && e.currentTarget.paused) {
+                      safePlayVideo(e.currentTarget);
                     }
+                  }}
+                  onCanPlay={(e) => {
+                    if (viewMode === 'reels' && !isPausedRef.current && e.currentTarget.paused) {
+                      safePlayVideo(e.currentTarget);
+                    }
+                  }}
+                  onPlay={() => {
+                    isPausedRef.current = false;
+                    setIsPaused(false);
+                    setShowWatchAgain(false);
                   }}
                   onEnded={(e) => {
                     if (viewMode !== 'reels') return;
@@ -832,6 +874,25 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
           <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none px-3.5 py-1 rounded-full bg-emerald-500 text-black text-[11px] font-black shadow-lg">
             {lang === 'bn' ? '▶ পরবর্তী ভিডিও চালু হচ্ছে...' : '▶ Playing next video...'}
           </div>
+        )}
+
+        {/* Sound unlock prompt when browser policy forced muted autoplay */}
+        {autoplayMuted && !isMuted && viewMode === 'reels' && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (videoRef.current) {
+                videoRef.current.muted = false;
+                videoRef.current.play().catch(() => {});
+              }
+              setAutoplayMuted(false);
+            }}
+            className="absolute top-16 left-1/2 -translate-x-1/2 z-30 px-3.5 py-1.5 rounded-full bg-black/80 hover:bg-black text-emerald-300 border border-emerald-400/50 text-[11px] font-bold shadow-lg flex items-center gap-1.5 cursor-pointer animate-pulse"
+          >
+            <Volume2 className="w-3.5 h-3.5" />
+            <span>{lang === 'bn' ? 'সাউন্ড চালু করতে চাপুন' : 'Tap to unmute sound'}</span>
+          </button>
         )}
 
         {/* Center Heart Pop for double tap */}

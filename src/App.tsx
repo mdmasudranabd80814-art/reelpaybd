@@ -339,7 +339,7 @@ function UserApp() {
       return {};
     }
   });
-  const [reels, setReels] = useState<Reel[]>([]);
+  const [reels, setReels] = useState<Reel[]>(() => INITIAL_REELS);
   const [editingReel, setEditingReel] = useState<Reel | null>(null);
   const [likedReelIds, setLikedReelIds] = useState<string[]>([]);
   const [savedReelIds, setSavedReelIds] = useState<string[]>(() => {

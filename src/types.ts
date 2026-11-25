@@ -197,6 +197,7 @@ export interface Reel {
   isVerified?: boolean;
   category:
     | 'সকল'
+    | 'ট্রেনিং'
     | 'ট্রেন্ডিং'
     | 'কমেডি'
     | 'শর্ট ড্রামা'

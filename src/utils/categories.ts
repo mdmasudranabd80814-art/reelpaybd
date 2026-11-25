@@ -6,6 +6,7 @@ export type ReelCategory =
   | 'শর্ট মুভি'
   | 'গান'
   | 'বিনোদন'
+  | 'ট্রেনিং'
   | 'ট্রেন্ডিং'
   | 'গেমিং'
   | 'রান্না'
@@ -109,6 +110,18 @@ export const CATEGORY_DEFINITIONS: Record<string, CategoryMeta> = {
     activeBg: 'bg-teal-500',
     activeText: 'text-black',
   },
+  ট্রেনিং: {
+    key: 'ট্রেনিং',
+    labelBn: 'ট্রেনিং',
+    labelEn: 'Training',
+    icon: '🏋️',
+    badgeBg: 'bg-lime-950/80',
+    badgeBorder: 'border-lime-500/50',
+    badgeText: 'text-lime-300',
+    badgeHover: 'hover:bg-lime-900/80',
+    activeBg: 'bg-lime-400',
+    activeText: 'text-black',
+  },
   ট্রেন্ডিং: {
     key: 'ট্রেন্ডিং',
     labelBn: 'ট্রেন্ডিং',
@@ -167,6 +180,7 @@ export const CATEGORIES_LIST: ReelCategory[] = [
   'শর্ট মুভি',
   'গান',
   'বিনোদন',
+  'ট্রেনিং',
   'ট্রেন্ডিং',
   'গেমিং',
   'রান্না',
@@ -179,6 +193,7 @@ export const REEL_UPLOAD_CATEGORIES: Array<{ value: Exclude<ReelCategory, '🔴 
   { value: 'শর্ট মুভি', labelBn: '🎥 শর্ট মুভি', labelEn: 'Short Movie' },
   { value: 'গান', labelBn: '🎵 গান ও মিউজিক', labelEn: 'Songs & Music' },
   { value: 'বিনোদন', labelBn: '🌟 বিনোদন (৩০ সেকেন্ড)', labelEn: 'Entertainment' },
+  { value: 'ট্রেনিং', labelBn: '🏋️ ট্রেনিং ও স্কিল', labelEn: 'Training & Skills' },
   { value: 'ট্রেন্ডিং', labelBn: '🔥 ট্রেন্ডিং', labelEn: 'Trending' },
   { value: 'গেমিং', labelBn: '🎮 গেমিং', labelEn: 'Gaming' },
   { value: 'রান্না', labelBn: '🍳 রান্না', labelEn: 'Cooking' },
@@ -199,6 +214,7 @@ export function getCategoryMeta(category?: string): CategoryMeta {
   if (lower === 'short movie' || lower === 'movie') return CATEGORY_DEFINITIONS['শর্ট মুভি'];
   if (lower === 'song' || lower === 'music') return CATEGORY_DEFINITIONS['গান'];
   if (lower === 'entertainment') return CATEGORY_DEFINITIONS['বিনোদন'];
+  if (lower === 'training' || lower === 'workout' || lower === 'skill') return CATEGORY_DEFINITIONS['ট্রেনিং'];
   if (lower === 'trending') return CATEGORY_DEFINITIONS['ট্রেন্ডিং'];
   if (lower === 'gaming') return CATEGORY_DEFINITIONS['গেমিং'];
   if (lower === 'cooking' || lower === 'food') return CATEGORY_DEFINITIONS['রান্না'];
