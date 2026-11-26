@@ -1,11 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { X, Smartphone, Download, Sparkles, CheckCircle2, ShieldCheck, Zap } from 'lucide-react';
-import { vibrateLight, vibrateSuccess } from '../utils/haptics';
-
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
-}
+import React from 'react';
+import { X, Smartphone, Download, ExternalLink, Cpu, ShieldCheck, Zap, Copy } from 'lucide-react';
+import { vibrateLight } from '../utils/haptics';
 
 interface AppInstallModalProps {
   isOpen: boolean;
@@ -14,50 +9,14 @@ interface AppInstallModalProps {
 }
 
 export const AppInstallModal: React.FC<AppInstallModalProps> = ({ isOpen, onClose, lang }) => {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [isInstalled, setIsInstalled] = useState(false);
-  const [isInstalling, setIsInstalling] = useState(false);
-
-  useEffect(() => {
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e as BeforeInstallPromptEvent);
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-
-    window.addEventListener('appinstalled', () => {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-    });
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    };
-  }, []);
-
   if (!isOpen) return null;
 
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+  const appUrl = window.location.origin;
 
-  const handleInstallClick = async () => {
+  const handleCopyUrl = () => {
     vibrateLight();
-    if (deferredPrompt) {
-      setIsInstalling(true);
-      try {
-        await deferredPrompt.prompt();
-        const choiceResult = await deferredPrompt.userChoice;
-        if (choiceResult.outcome === 'accepted') {
-          setIsInstalled(true);
-          vibrateSuccess();
-        }
-      } catch (err) {
-        console.error('Install prompt error:', err);
-      } finally {
-        setIsInstalling(false);
-        setDeferredPrompt(null);
-      }
-    }
+    navigator.clipboard.writeText(appUrl);
+    alert(lang === 'bn' ? 'অ্যাপ লিংক কপি হয়েছে! APK কনভার্টারে পেস্ট করুন।' : 'App URL copied! Paste into APK converter.');
   };
 
   return (
@@ -66,7 +25,7 @@ export const AppInstallModal: React.FC<AppInstallModalProps> = ({ isOpen, onClos
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-sm rounded-[32px] bg-gradient-to-b from-[#13231a] via-[#0d1a14] to-[#0a120e] border border-emerald-500/40 p-6 shadow-2xl text-white space-y-5 animate-in zoom-in-95 duration-200"
+        className="relative w-full max-w-md rounded-[32px] bg-gradient-to-b from-[#13231a] via-[#0d1a14] to-[#0a120e] border border-emerald-500/40 p-6 shadow-2xl text-white space-y-4 animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -77,88 +36,91 @@ export const AppInstallModal: React.FC<AppInstallModalProps> = ({ isOpen, onClos
           <X className="w-4 h-4" />
         </button>
 
-        <div className="text-center space-y-3 pt-1">
-          <div className="relative w-18 h-18 rounded-3xl bg-gradient-to-br from-emerald-400 via-emerald-500 to-[#00c853] text-black flex items-center justify-center mx-auto text-4xl font-black shadow-lg shadow-emerald-500/30">
-            🎬
-            <span className="absolute -bottom-1 -right-1 w-6 h-6 bg-black text-emerald-400 rounded-full border border-emerald-500 flex items-center justify-center text-xs">
-              ✓
-            </span>
+        <div className="text-center space-y-2 pt-1">
+          <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-emerald-400 to-[#00c853] text-black flex items-center justify-center mx-auto text-3xl font-black shadow-lg shadow-emerald-500/30">
+            🤖
           </div>
           <div>
             <h3 className="text-lg font-black tracking-tight text-white">
-              {lang === 'bn' ? 'ReelPay BD অ্যাপ ইনস্টল করুন' : 'Install ReelPay BD App'}
+              {lang === 'bn' ? 'ReelPay BD APK ডাউনলোড ও জেনারেটর' : 'ReelPay BD APK Download Center'}
             </h3>
-            <p className="text-xs text-neutral-300 mt-1 max-w-xs mx-auto leading-relaxed">
+            <p className="text-xs text-neutral-300 max-w-xs mx-auto leading-relaxed">
               {lang === 'bn'
-                ? 'হোম স্ক্রিনে ইনস্টল করে সরাসরি অ্যাপের মতো ব্যবহার করুন। রিল দেখুন, লাইভ করুন ও পয়েন্ট জিতুন এক ক্লিকে!'
-                : 'Install to your home screen for lightning-fast access, instant reel earnings, and live adda.'}
+                ? 'আপনার অ্যান্ড্রয়েড ফোনের জন্য সরাসরি .APK ফাইল তৈরি বা ডাউনলোড করুন।'
+                : 'Create and download the official .APK package for your Android phone.'}
             </p>
           </div>
         </div>
 
-        {isInstalled ? (
-          <div className="p-4 rounded-2xl bg-emerald-950/80 border border-emerald-500 text-center space-y-2">
-            <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
-            <p className="text-xs font-bold text-emerald-300">
-              {lang === 'bn' ? 'অ্যাপটি সফলভাবে ইনস্টল করা হয়েছে!' : 'App successfully installed!'}
-            </p>
+        {/* 1-Click APK Builder Tools */}
+        <div className="space-y-2.5 pt-1">
+          <div className="text-[11px] font-extrabold text-emerald-300 flex items-center gap-1.5">
+            <Cpu className="w-4 h-4 text-emerald-400" />
+            <span>{lang === 'bn' ? '১ ক্লিকে রিয়েল .APK ফাইল তৈরি করুন:' : 'Generate Real .APK File in 1 Click:'}</span>
           </div>
-        ) : deferredPrompt ? (
-          <button
-            type="button"
-            onClick={handleInstallClick}
-            disabled={isInstalling}
-            className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-[#00c853] hover:brightness-110 text-black font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/30 transition cursor-pointer active:scale-95"
+
+          <a
+            href="https://www.appsgeyser.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full py-3 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-black font-black text-xs flex items-center justify-between shadow-md transition cursor-pointer"
           >
-            <Download className="w-4 h-4 stroke-[2.5]" />
-            <span>
-              {isInstalling
-                ? (lang === 'bn' ? 'ইনস্টল হচ্ছে...' : 'Installing...')
-                : (lang === 'bn' ? 'এখনই ইনস্টল করুন' : 'Install Now')}
-            </span>
-          </button>
-        ) : isIOS ? (
-          <div className="p-4 rounded-2xl bg-[#0e1c15] border border-emerald-900/60 space-y-2.5 text-xs text-neutral-200">
-            <p className="font-bold text-emerald-300 flex items-center gap-1.5">
-              <Smartphone className="w-4 h-4 text-emerald-400" />
-              <span>{lang === 'bn' ? 'আইফোন / আইপ্যাডে ইনস্টল নির্দেশিকা:' : 'iOS Safari Installation Guide:'}</span>
-            </p>
-            <ol className="list-decimal list-inside space-y-1.5 text-[11px] text-neutral-300">
-              <li>{lang === 'bn' ? 'সাফারি ব্রাউজারের নিচের শেয়ার (Share) আইকনে ট্যাপ করুন।' : 'Tap the Share button in Safari toolbar.'}</li>
-              <li>{lang === 'bn' ? 'মেনু থেকে "Add to Home Screen" সিলেক্ট করুন।' : 'Select "Add to Home Screen" from the menu.'}</li>
-              <li>{lang === 'bn' ? '"Add" চাপুন এবং হোমস্ক্রিনে অ্যাপ পান!' : 'Tap "Add" and enjoy ReelPay BD on your home screen!'}</li>
-            </ol>
+            <div className="flex items-center gap-2.5">
+              <span>🚀</span>
+              <span>AppsGeyser APK Creator</span>
+            </div>
+            <ExternalLink className="w-4 h-4" />
+          </a>
+
+          <a
+            href="https://www.webintoapp.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full py-3 px-3.5 rounded-xl bg-[#122018] hover:bg-[#1a2e22] border border-emerald-500/40 text-emerald-300 font-extrabold text-xs flex items-center justify-between shadow-md transition cursor-pointer"
+          >
+            <div className="flex items-center gap-2.5">
+              <span>📱</span>
+              <span>WebIntoApp APK Generator</span>
+            </div>
+            <ExternalLink className="w-4 h-4" />
+          </a>
+        </div>
+
+        {/* URL Copy Box */}
+        <div className="p-3.5 rounded-2xl bg-[#091a14] border border-emerald-900/60 space-y-2">
+          <div className="text-[10px] font-bold text-neutral-300 flex items-center justify-between">
+            <span>{lang === 'bn' ? 'APK কনভার্টারে এই অ্যাপ লিংকটি দিন:' : 'App URL to paste into APK builder:'}</span>
+            <button
+              type="button"
+              onClick={handleCopyUrl}
+              className="text-emerald-400 hover:underline flex items-center gap-1 font-bold text-[10px]"
+            >
+              <Copy className="w-3 h-3" />
+              <span>{lang === 'bn' ? 'কপি করুন' : 'Copy URL'}</span>
+            </button>
           </div>
-        ) : (
-          <div className="p-4 rounded-2xl bg-[#0e1c15] border border-emerald-900/60 space-y-2 text-xs text-neutral-200 text-center">
-            <p className="font-bold text-emerald-300">
-              {lang === 'bn' ? 'ব্রাউজার মেনু থেকে ইনস্টল করুন' : 'Install via Browser Menu'}
-            </p>
-            <p className="text-[11px] text-neutral-300 leading-relaxed">
-              {lang === 'bn'
-                ? 'ব্রাউজারের ওপরের ডানপাশের মেনু (⋮) থেকে "Install App" বা "Add to Home Screen" এ ক্লিক করুন।'
-                : 'Tap the browser menu (⋮) at the top right and select "Install app" or "Add to Home Screen".'}
-            </p>
+          <div className="bg-black/60 p-2.5 rounded-xl border border-emerald-900 text-[11px] text-emerald-300 font-mono truncate select-all">
+            {appUrl}
           </div>
-        )}
+        </div>
 
         <div className="grid grid-cols-3 gap-2 pt-1 text-center">
           <div className="p-2.5 rounded-xl bg-black/40 border border-emerald-950">
             <Zap className="w-4 h-4 text-amber-400 mx-auto mb-1" />
             <span className="text-[10px] font-bold text-neutral-300">
-              {lang === 'bn' ? 'সুপার ফাস্ট' : 'Super Fast'}
+              {lang === 'bn' ? '১০০% ফ্রি' : '100% Free'}
             </span>
           </div>
           <div className="p-2.5 rounded-xl bg-black/40 border border-emerald-950">
             <ShieldCheck className="w-4 h-4 text-emerald-400 mx-auto mb-1" />
             <span className="text-[10px] font-bold text-neutral-300">
-              {lang === 'bn' ? '১০০% নিরাপদ' : '100% Secure'}
+              {lang === 'bn' ? 'নিরাপদ APK' : 'Safe APK'}
             </span>
           </div>
           <div className="p-2.5 rounded-xl bg-black/40 border border-emerald-950">
-            <Sparkles className="w-4 h-4 text-cyan-400 mx-auto mb-1" />
+            <Smartphone className="w-4 h-4 text-cyan-400 mx-auto mb-1" />
             <span className="text-[10px] font-bold text-neutral-300">
-              {lang === 'bn' ? 'ফ্রি বোনাস' : 'Free Bonus'}
+              {lang === 'bn' ? 'অ্যান্ড্রয়েড' : 'Android App'}
             </span>
           </div>
         </div>
