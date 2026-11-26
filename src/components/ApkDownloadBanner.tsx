@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download, X, Smartphone, Sparkles } from 'lucide-react';
+import { Download, X, Smartphone } from 'lucide-react';
 
 interface ApkDownloadBannerProps {
   lang: 'bn' | 'en';
@@ -19,11 +19,11 @@ export const ApkDownloadBanner: React.FC<ApkDownloadBannerProps> = ({ lang, onOp
         </div>
         <div className="min-w-0 leading-tight">
           <div className="text-[11px] font-black text-emerald-300 flex items-center gap-1 truncate">
-            <span>{lang === 'bn' ? 'অফিশিয়াল অ্যান্ড্রয়েড অ্যাপ' : 'Official Android App'}</span>
-            <span className="px-1.5 py-0.2 bg-emerald-500 text-black text-[9px] font-black rounded">v2.4</span>
+            <span>{lang === 'bn' ? 'অফিশিয়াল মোবাইল অ্যাপ' : 'Official Web App'}</span>
+            <span className="px-1.5 py-0.2 bg-emerald-500 text-black text-[9px] font-black rounded">PWA</span>
           </div>
           <p className="text-[10px] text-neutral-300 truncate font-medium">
-            {lang === 'bn' ? 'ফোনে ইনস্টল করে ১ ক্লিকে রিলস ও আয় উপভোগ করুন' : 'Install app on phone for smooth access'}
+            {lang === 'bn' ? 'ফোনে ইনস্টল করে ১ ক্লিকে রিলস ও পয়েন্ট উপভোগ করুন' : 'Install to phone for smooth access'}
           </p>
         </div>
       </div>
@@ -35,7 +35,7 @@ export const ApkDownloadBanner: React.FC<ApkDownloadBannerProps> = ({ lang, onOp
           className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#00c853] to-[#00e676] hover:brightness-110 text-black font-black text-[11px] shadow-md flex items-center gap-1.5 cursor-pointer active:scale-95 transition"
         >
           <Download className="w-3.5 h-3.5 stroke-[2.5]" />
-          <span>{lang === 'bn' ? 'অ্যাপ ইনস্টল' : 'Install App'}</span>
+          <span>{lang === 'bn' ? 'ইনস্টল অ্যাপ' : 'Install App'}</span>
         </button>
 
         <button

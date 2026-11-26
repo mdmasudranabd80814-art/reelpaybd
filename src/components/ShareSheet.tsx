@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Copy, Share2, Facebook, MessageCircle, Send, Download, Check } from 'lucide-react';
+import { X, Copy, Share2, Facebook, MessageCircle, Send, Download, Check, Flag } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Reel, LiveStream } from '../types';
 import { downloadReelVideo } from '../utils/videoDownload';
@@ -14,12 +14,26 @@ interface ShareSheetProps {
   onSendInChat?: (reel: Reel) => void;
   onDownloadReel?: (reel: Reel) => void;
   onShareTracked?: (reelId: string) => void;
+  onReport?: (reel: Reel, reason: string) => void;
 }
 
-export const ShareSheet: React.FC<ShareSheetProps> = ({ isOpen, onClose, reel, liveStream, lang, onSendInChat, onDownloadReel, onShareTracked }) => {
+export const ShareSheet: React.FC<ShareSheetProps> = ({
+  isOpen,
+  onClose,
+  reel,
+  liveStream,
+  lang,
+  onSendInChat,
+  onDownloadReel,
+  onShareTracked,
+  onReport,
+}) => {
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadDone, setDownloadDone] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [selectedReportReason, setSelectedReportReason] = useState('nudity');
+  const [customReportNote, setCustomReportNote] = useState('');
 
   if (!reel && !liveStream) return null;
 
@@ -126,6 +140,16 @@ export const ShareSheet: React.FC<ShareSheetProps> = ({ isOpen, onClose, reel, l
     }
   };
 
+  const handleSubmitReport = () => {
+    if (!reel) return;
+    const reasonText = selectedReportReason === 'other' ? (customReportNote.trim() || 'Other') : selectedReportReason;
+    if (onReport) {
+      onReport(reel, reasonText);
+    }
+    setShowReportModal(false);
+    onClose();
+  };
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -159,8 +183,8 @@ export const ShareSheet: React.FC<ShareSheetProps> = ({ isOpen, onClose, reel, l
                       ? 'লাইভ শেয়ার করুন'
                       : 'Share Live'
                     : lang === 'bn'
-                    ? 'শেয়ার ও ডাউনলোড'
-                    : 'Share & Download'}
+                    ? 'শেয়ার ও অপশন'
+                    : 'Share & Options'}
                 </span>
               </h3>
               <button
@@ -196,6 +220,24 @@ export const ShareSheet: React.FC<ShareSheetProps> = ({ isOpen, onClose, reel, l
                       : isDownloading
                       ? (lang === 'bn' ? 'হচ্ছে...' : 'Downloading...')
                       : (lang === 'bn' ? 'ডাউনলোড' : 'Download')}
+                  </span>
+                </button>
+              )}
+
+              {/* REPORT OPTION INSIDE SHARE SHEET (Reels only) */}
+              {!isLiveShare && reel && (
+                <button
+                  onClick={() => {
+                    vibrateLight();
+                    setShowReportModal(true);
+                  }}
+                  className="flex flex-col items-center gap-2 group cursor-pointer"
+                >
+                  <div className="w-14 h-14 rounded-2xl bg-rose-500/15 border border-rose-500/40 flex items-center justify-center text-rose-400 group-hover:bg-rose-500 group-hover:text-white transition-all shadow-lg">
+                    <Flag className="w-7 h-7" />
+                  </div>
+                  <span className="text-[11px] font-medium text-rose-300">
+                    {lang === 'bn' ? 'রিপোর্ট' : 'Report'}
                   </span>
                 </button>
               )}
@@ -277,6 +319,107 @@ export const ShareSheet: React.FC<ShareSheetProps> = ({ isOpen, onClose, reel, l
               </button>
             </div>
           </motion.div>
+
+          {/* Report Confirmation Modal inside ShareSheet */}
+          {showReportModal && reel && (
+            <div
+              className="fixed inset-0 z-[80] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowReportModal(false);
+              }}
+            >
+              <div
+                className="w-full max-w-md bg-[#121915] border border-emerald-900/80 rounded-3xl p-5 shadow-2xl text-white space-y-4"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between border-b border-emerald-950 pb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center">
+                      <Flag className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-black">
+                        {lang === 'bn' ? 'আপত্তিকর কন্টেন্ট রিপোর্ট করুন' : 'Report Inappropriate Content'}
+                      </h3>
+                      <p className="text-[11px] text-neutral-400 truncate max-w-[240px]">
+                        {reel.title}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowReportModal(false)}
+                    className="w-7 h-7 rounded-full bg-neutral-800 hover:bg-neutral-700 flex items-center justify-center text-neutral-300 cursor-pointer transition"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-neutral-300">
+                    {lang === 'bn' ? 'এই রিলটি কেন রিপোর্ট করতে চান? সঠিক কারণটি সিলেক্ট করুন:' : 'Please select the reason for reporting this reel:'}
+                  </p>
+
+                  {[
+                    { id: 'nudity', labelBn: 'যৌন বা অশ্লীল কন্টেন্ট (Nudity / Sexual)', labelEn: 'Nudity or Sexual content' },
+                    { id: 'violence', labelBn: 'হিংসাত্মক বা বিপজ্জনক কন্টেন্ট (Violence)', labelEn: 'Violence or Dangerous content' },
+                    { id: 'hate', labelBn: 'ঘৃণা ছড়ানো বা হয়রানি (Hate speech)', labelEn: 'Hate speech or Harassment' },
+                    { id: 'spam', labelBn: 'স্প্যাম বা বিভ্রান্তিকর তথ্য (Spam / Misleading)', labelEn: 'Spam or Misleading' },
+                    { id: 'copyright', labelBn: 'কপিরাইট লঙ্ঘন (Copyright violation)', labelEn: 'Copyright violation' },
+                    { id: 'other', labelBn: 'অন্যান্য কারণ (Other)', labelEn: 'Other reason' },
+                  ].map((reason) => (
+                    <label
+                      key={reason.id}
+                      className={`flex items-center gap-3 p-2.5 rounded-xl border cursor-pointer transition ${
+                        selectedReportReason === reason.id
+                          ? 'bg-rose-950/40 border-rose-500 text-white'
+                          : 'bg-neutral-900/60 border-neutral-800 text-neutral-300 hover:bg-neutral-800/80'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="shareReportReason"
+                        value={reason.id}
+                        checked={selectedReportReason === reason.id}
+                        onChange={() => setSelectedReportReason(reason.id)}
+                        className="accent-rose-500 w-4 h-4"
+                      />
+                      <span className="text-xs font-bold">
+                        {lang === 'bn' ? reason.labelBn : reason.labelEn}
+                      </span>
+                    </label>
+                  ))}
+
+                  {selectedReportReason === 'other' && (
+                    <textarea
+                      value={customReportNote}
+                      onChange={(e) => setCustomReportNote(e.target.value)}
+                      placeholder={lang === 'bn' ? 'বিস্তারিত কারণ লিখুন...' : 'Enter details here...'}
+                      className="w-full h-20 bg-neutral-900 border border-neutral-700 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-rose-500 resize-none"
+                    />
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-emerald-950">
+                  <button
+                    type="button"
+                    onClick={() => setShowReportModal(false)}
+                    className="px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-xs font-bold text-neutral-300 cursor-pointer transition"
+                  >
+                    {lang === 'bn' ? 'বাতিল' : 'Cancel'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSubmitReport}
+                    className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-xs font-black text-white cursor-pointer transition shadow-md shadow-rose-600/30"
+                  >
+                    {lang === 'bn' ? 'রিপোর্ট সাবমিট করুন' : 'Submit Report'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </AnimatePresence>

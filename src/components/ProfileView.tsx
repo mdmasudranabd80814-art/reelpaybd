@@ -31,6 +31,7 @@ import { getUserLevel, getNextLevel, getProgressToNextLevel } from '../utils/lev
 import { isHapticsEnabled, setHapticsEnabled, vibrateLight, vibrateSuccess, vibrateError } from '../utils/haptics';
 import { ProfileInfoModal, ProfileInfoModalMode } from './ProfileInfoModal';
 import { TopEarnersLeaderboard } from './TopEarnersLeaderboard';
+import { FAQComponent } from './FAQComponent';
 
 interface ProfileViewProps {
   user: User;
@@ -864,6 +865,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* FAQ Accordion Section */}
+      <FAQComponent lang={lang} />
 
       {/* Logout button */}
       <button

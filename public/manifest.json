@@ -1,0 +1,20 @@
+{
+  "name": "ReelPay BD - রিল দেখুন টাকা জিতুন",
+  "short_name": "ReelPay BD",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0f0d",
+  "theme_color": "#00c853",
+  "icons": [
+    {
+      "src": "/images/masud_rana_avatar.jpg",
+      "sizes": "192x192",
+      "type": "image/jpeg"
+    },
+    {
+      "src": "/images/masud_rana_avatar.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg"
+    }
+  ]
+}

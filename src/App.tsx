@@ -3930,6 +3930,23 @@ function UserApp() {
             onSendInChat={handleShareInChat}
             onDownloadReel={(r) => downloadReelVideo(r, lang)}
             onShareTracked={handleRecordReelShare}
+            onReport={(r, reason) => {
+              showToast(
+                lang === 'bn'
+                  ? `🚩 রিল "${r.title}" রিপোর্ট করা হয়েছে (কারণ: ${reason})। এডমিন টিম যাচাই করে ব্যবস্থা নেবে।`
+                  : `🚩 Reel "${r.title}" reported (Reason: ${reason}). Admin team will review.`
+              );
+              if (isAuthenticated && firebaseUser && isRealUserId(firebaseUser.uid)) {
+                addDocument('reports', {
+                  reelId: r.id,
+                  reelTitle: r.title,
+                  reelOwnerId: r.userId,
+                  reporterId: firebaseUser.uid,
+                  reason,
+                  createdAt: new Date().toISOString(),
+                }).catch(() => {});
+              }
+            }}
           />
 
           {/* User Profile Modal */}

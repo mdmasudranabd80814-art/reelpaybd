@@ -867,6 +867,8 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
           </span>
         </button>
 
+
+
         {/* Gift Button: strictly hidden on user's own reels */}
         {isGiftsEnabled && !isOwnReel && (
           <button
