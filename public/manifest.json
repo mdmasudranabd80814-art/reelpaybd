@@ -1,6 +1,7 @@
 {
   "name": "ReelPay BD - রিল দেখুন টাকা জিতুন",
   "short_name": "ReelPay BD",
+  "id": "/?source=pwa",
   "description": "ReelPay BD is a premier short reels and video entertainment platform where users watch viral reels, connect with creators, and earn rewards securely.",
   "start_url": "/?source=pwa",
   "display": "standalone",
@@ -29,16 +30,14 @@
   "screenshots": [
     {
       "src": "/images/ai_comedy_standup.jpg",
-      "sizes": "540x960",
       "type": "image/jpeg",
       "form_factor": "narrow",
       "label": "ReelPay BD Trending Reels Feed"
     },
     {
       "src": "/images/reel_taka_earn.jpg",
-      "sizes": "540x960",
       "type": "image/jpeg",
-      "form_factor": "narrow",
+      "form_factor": "wide",
       "label": "Watch & Earn Rewards"
     }
   ]
