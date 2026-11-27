@@ -1,6 +1,8 @@
 export type ReelCategory =
   | 'সকল'
   | '🔴 লাইভ'
+  | 'হিন্দি ড্রামা'
+  | 'মোটিভেশন'
   | 'কমেডি'
   | 'শর্ট ড্রামা'
   | 'শর্ট মুভি'
@@ -26,6 +28,18 @@ export interface CategoryMeta {
 }
 
 export const CATEGORY_DEFINITIONS: Record<string, CategoryMeta> = {
+  'হিন্দি ড্রামা': {
+    key: 'হিন্দি ড্রামা',
+    labelBn: 'হিন্দি ড্রামা',
+    labelEn: 'Hindi Drama',
+    icon: '🎭',
+    badgeBg: 'bg-rose-950/80',
+    badgeBorder: 'border-rose-500/50',
+    badgeText: 'text-rose-300',
+    badgeHover: 'hover:bg-rose-900/80',
+    activeBg: 'bg-gradient-to-r from-rose-600 to-pink-600',
+    activeText: 'text-white',
+  },
   সকল: {
     key: 'সকল',
     labelBn: 'সকল',
@@ -49,6 +63,18 @@ export const CATEGORY_DEFINITIONS: Record<string, CategoryMeta> = {
     badgeHover: 'hover:bg-rose-900/80',
     activeBg: 'bg-rose-600',
     activeText: 'text-white',
+  },
+  মোটিভেশন: {
+    key: 'মোটিভেশন',
+    labelBn: 'মোটিভেশন',
+    labelEn: 'Motivational',
+    icon: '🔥',
+    badgeBg: 'bg-amber-950/80',
+    badgeBorder: 'border-amber-500/50',
+    badgeText: 'text-amber-300',
+    badgeHover: 'hover:bg-amber-900/80',
+    activeBg: 'bg-amber-500',
+    activeText: 'text-black',
   },
   কমেডি: {
     key: 'কমেডি',
@@ -175,10 +201,12 @@ export const CATEGORY_DEFINITIONS: Record<string, CategoryMeta> = {
 export const CATEGORIES_LIST: ReelCategory[] = [
   'সকল',
   '🔴 লাইভ',
-  'কমেডি',
+  'হিন্দি ড্রামা',
   'শর্ট ড্রামা',
-  'শর্ট মুভি',
+  'কমেডি',
   'গান',
+  'মোটিভেশন',
+  'শর্ট মুভি',
   'বিনোদন',
   'ট্রেনিং',
   'ট্রেন্ডিং',
@@ -188,10 +216,12 @@ export const CATEGORIES_LIST: ReelCategory[] = [
 ];
 
 export const REEL_UPLOAD_CATEGORIES: Array<{ value: Exclude<ReelCategory, '🔴 লাইভ'>; labelBn: string; labelEn: string }> = [
-  { value: 'কমেডি', labelBn: '🎭 কমেডি / কমেডিয়ান', labelEn: 'Comedy / Comedian' },
+  { value: 'হিন্দি ড্রামা', labelBn: '🎭 হিন্দি ড্রামা (Hindi Drama)', labelEn: 'Hindi Drama' },
   { value: 'শর্ট ড্রামা', labelBn: '🎬 শর্ট ড্রামা', labelEn: 'Short Drama' },
-  { value: 'শর্ট মুভি', labelBn: '🎥 শর্ট মুভি', labelEn: 'Short Movie' },
+  { value: 'কমেডি', labelBn: '🎭 কমেডি / কমেডিয়ান', labelEn: 'Comedy / Comedian' },
   { value: 'গান', labelBn: '🎵 গান ও মিউজিক', labelEn: 'Songs & Music' },
+  { value: 'মোটিভেশন', labelBn: '🔥 মোটিভেশনাল / অনুপ্রেরণা', labelEn: 'Motivational / Inspiration' },
+  { value: 'শর্ট মুভি', labelBn: '🎥 শর্ট মুভি', labelEn: 'Short Movie' },
   { value: 'বিনোদন', labelBn: '🌟 বিনোদন (৩০ সেকেন্ড)', labelEn: 'Entertainment' },
   { value: 'ট্রেনিং', labelBn: '🏋️ ট্রেনিং ও স্কিল', labelEn: 'Training & Skills' },
   { value: 'ট্রেন্ডিং', labelBn: '🔥 ট্রেন্ডিং', labelEn: 'Trending' },
@@ -209,6 +239,7 @@ export function getCategoryMeta(category?: string): CategoryMeta {
   const lower = category.toLowerCase().trim();
   if (lower === 'all') return CATEGORY_DEFINITIONS['সকল'];
   if (lower === 'live') return CATEGORY_DEFINITIONS['🔴 লাইভ'];
+  if (lower.includes('hindi') || lower.includes('হিন্দি')) return CATEGORY_DEFINITIONS['হিন্দি ড্রামা'];
   if (lower === 'comedy' || lower === 'comedian') return CATEGORY_DEFINITIONS['কমেডি'];
   if (lower === 'short drama' || lower === 'drama') return CATEGORY_DEFINITIONS['শর্ট ড্রামা'];
   if (lower === 'short movie' || lower === 'movie') return CATEGORY_DEFINITIONS['শর্ট মুভি'];
@@ -218,6 +249,7 @@ export function getCategoryMeta(category?: string): CategoryMeta {
   if (lower === 'trending') return CATEGORY_DEFINITIONS['ট্রেন্ডিং'];
   if (lower === 'gaming') return CATEGORY_DEFINITIONS['গেমিং'];
   if (lower === 'cooking' || lower === 'food') return CATEGORY_DEFINITIONS['রান্না'];
+  if (lower === 'motivation' || lower === 'motivational' || lower === 'inspire') return CATEGORY_DEFINITIONS['মোটিভেশন'];
   if (lower === 'education' || lower === 'learning') return CATEGORY_DEFINITIONS['শিক্ষা'];
 
   return {

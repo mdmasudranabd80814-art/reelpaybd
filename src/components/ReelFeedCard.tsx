@@ -1,12 +1,14 @@
 import React from 'react';
-import { Play, Heart, MessageCircle, Share2, Check, Sparkles, Flame, Eye, Bookmark } from 'lucide-react';
+import { Play, Heart, MessageCircle, Share2, Check, Sparkles, Flame, Eye, Bookmark, Volume2, VolumeX } from 'lucide-react';
 import { Reel, EarningSettings } from '../types';
-import { toBengaliNumber } from '../utils/bengali';
+import { toBengaliNumber, formatRelativeTime } from '../utils/bengali';
 import { playPopSound } from '../utils/audio';
 import { extractYouTubeId, extractVimeoId, normalizeVideoUrl } from '../utils/video';
 import { getVideoFromDB } from '../utils/videoStorage';
 import { getCategoryMeta } from '../utils/categories';
 import { WatermarkOverlay } from './WatermarkOverlay';
+
+const DEFAULT_AVATAR_URL = '/images/masud_rana_avatar.jpg';
 
 interface ReelFeedCardProps {
   reel: Reel;
@@ -16,11 +18,15 @@ interface ReelFeedCardProps {
   onOpenReel: (reel: Reel) => void;
   onOpenComments: (reel: Reel) => void;
   onClaimDirect: (reel: Reel) => void;
-  onOpenGift: (reel: Reel) => void;
+  onOpenGift?: (reel: Reel) => void;
   onOpenCreatorProfile: (userId: string) => void;
   onShare: (reel: Reel) => void;
   lang: 'bn' | 'en';
   isMuted: boolean;
+  onToggleMute?: () => void;
+  isFocusedInFeed?: boolean;
+  isAudioUnlocked?: boolean;
+  onAudioUnlock?: () => void;
   levelProgress: number;
   earningSettings?: EarningSettings;
   isDailyLimitReached?: boolean;
@@ -44,16 +50,18 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
   onOpenReel,
   onOpenComments,
   onClaimDirect,
-  onOpenGift,
   onOpenCreatorProfile,
   onShare,
   lang,
   isMuted,
+  onToggleMute,
+  isFocusedInFeed,
+  isAudioUnlocked = false,
+  onAudioUnlock,
   earningSettings,
   isDailyLimitReached = false,
   isSaved = false,
   onToggleSave,
-  isGiftsEnabled = true,
   isCommentsEnabled = true,
   currentUserId,
   onSelectCategory,
@@ -68,6 +76,9 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
   const [incrementKey, setIncrementKey] = React.useState(0);
   const [imgLoaded, setImgLoaded] = React.useState(false);
   const [thumbFailed, setThumbFailed] = React.useState(false);
+  const [isDescriptionExpanded, setIsDescriptionExpanded] = React.useState(false);
+  const [hasTitleOverflow, setHasTitleOverflow] = React.useState(false);
+  const titleLineRef = React.useRef<HTMLParagraphElement>(null);
 
   // Viewport & preview playback state
   const cardContainerRef = React.useRef<HTMLDivElement>(null);
@@ -83,6 +94,7 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
   const [videoReady, setVideoReady] = React.useState(false);
   const [videoFailed, setVideoFailed] = React.useState(false);
   const [isPlaying, setIsPlaying] = React.useState(false);
+  const [autoplayBlockedMuted, setAutoplayBlockedMuted] = React.useState(false);
   const [playbackSpeed, setPlaybackSpeed] = React.useState<0.5 | 1 | 2>(1);
 
   React.useEffect(() => {
@@ -274,9 +286,13 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
   const isImageMotionReel = !reel.videoUrl && !videoSrc;
   const isNativeVideo = Boolean(videoSrc && !ytId && !vimeoId && !videoFailed);
   const shouldPlayPreview =
-    (isActiveInView || (isHovered && isIntersecting)) && !isModalOpen && isPageVisible;
+    (isFocusedInFeed !== undefined
+      ? isFocusedInFeed
+      : isActiveInView || (isHovered && isIntersecting)) &&
+    !isModalOpen &&
+    isPageVisible;
 
-  // Control inline muted video playback when entering/leaving viewport
+  // Control inline middle-viewport video playback WITH sound (falling back to muted play only if browser blocks unmuted autoplay prior to first user gesture)
   React.useEffect(() => {
     const videoEl = videoRef.current;
     if (!videoEl || !isNativeVideo) {
@@ -285,17 +301,56 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
     }
 
     if (shouldPlayPreview) {
-      videoEl.muted = true;
+      const wantMuted = isMuted;
+      videoEl.muted = wantMuted;
+      if (!wantMuted) {
+        videoEl.volume = 1;
+      }
+
       if (videoEl.paused) {
         const playPromise = videoEl.play();
         if (playPromise !== undefined) {
-          playPromise.catch(() => {});
+          playPromise
+            .then(() => {
+              if (!wantMuted) {
+                setAutoplayBlockedMuted(false);
+              }
+            })
+            .catch(() => {
+              // Browser prevented unmuted autoplay before first interaction -> play muted so video keeps moving
+              videoEl.muted = true;
+              setAutoplayBlockedMuted(true);
+              videoEl.play().catch(() => {});
+            });
         }
+      } else if (!wantMuted && isAudioUnlocked) {
+        videoEl.muted = false;
+        videoEl.volume = 1;
+        setAutoplayBlockedMuted(false);
       }
-    } else if (!videoEl.paused) {
-      videoEl.pause();
+    } else {
+      videoEl.muted = true;
+      if (!videoEl.paused) {
+        videoEl.pause();
+      }
     }
-  }, [shouldPlayPreview, isNativeVideo, videoSrc, videoReady]);
+  }, [shouldPlayPreview, isNativeVideo, videoSrc, videoReady, isMuted, isAudioUnlocked]);
+
+  const handleToggleInlineSound = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onAudioUnlock?.();
+    const videoEl = videoRef.current;
+    if (autoplayBlockedMuted && !isMuted && videoEl) {
+      videoEl.muted = false;
+      videoEl.volume = 1;
+      setAutoplayBlockedMuted(false);
+      if (videoEl.paused) {
+        videoEl.play().catch(() => {});
+      }
+      return;
+    }
+    onToggleMute?.();
+  };
 
   // Sync external progress (e.g. from FullScreenReelModal) upward
   React.useEffect(() => {
@@ -447,15 +502,221 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
     setThumbFailed(false);
   }, [reel.id, reel.thumbnailUrl]);
 
+  const actionColumnsCount = 2 + (isCommentsEnabled ? 1 : 0);
+  const actionGridClass = actionColumnsCount === 3 ? 'grid-cols-3' : 'grid-cols-2';
+
+  const hasDistinctCaption = Boolean(
+    reel.caption && reel.caption.trim() && reel.caption.trim() !== reel.title.trim()
+  );
+
+  React.useEffect(() => {
+    setIsDescriptionExpanded(false);
+  }, [reel.id]);
+
+  React.useEffect(() => {
+    if (isDescriptionExpanded) return;
+    const checkOverflow = () => {
+      const el = titleLineRef.current;
+      if (!el) return;
+      setHasTitleOverflow(el.scrollWidth > el.clientWidth + 1);
+    };
+    const raf = requestAnimationFrame(checkOverflow);
+    window.addEventListener('resize', checkOverflow);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', checkOverflow);
+    };
+  }, [reel.id, reel.title, reel.caption, isDescriptionExpanded]);
+
+  const hasMoreDescription =
+    hasDistinctCaption ||
+    Boolean(reel.hashtags && reel.hashtags.length > 0) ||
+    hasTitleOverflow;
+
   return (
-    <div className="flex gap-2.5 items-end mb-4">
-      {/* Video Preview Container */}
+    <article className="bg-[#101914] border border-emerald-950/80 rounded-2xl overflow-hidden shadow-lg mb-3">
+      {/* 1. Facebook-Style Post Header */}
+      <div className="px-3.5 pt-3 pb-2 flex items-start justify-between gap-2">
+        <button
+          type="button"
+          className="flex items-center gap-2.5 cursor-pointer group/creator min-w-0 flex-1 text-left"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenCreatorProfile(reel.userId);
+          }}
+          title={
+            lang === 'bn'
+              ? `${reel.creatorName}-এর প্রোফাইল দেখুন`
+              : `View ${reel.creatorName}'s profile`
+          }
+        >
+          <div className="relative shrink-0">
+            <img
+              src={reel.creatorAvatar || DEFAULT_AVATAR_URL}
+              alt={reel.creatorName}
+              className="w-10 h-10 rounded-full object-cover border border-emerald-500/50 group-hover/creator:border-[#00e676] transition"
+              onError={(e) => {
+                e.currentTarget.src = DEFAULT_AVATAR_URL;
+              }}
+            />
+            {reel.isVerified && (
+              <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-[#00c853] text-black rounded-full flex items-center justify-center border-2 border-[#101914]">
+                <Check className="w-2.5 h-2.5 stroke-[3]" />
+              </span>
+            )}
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[13.5px] font-extrabold text-white truncate group-hover/creator:text-[#00e676] group-hover/creator:underline transition-colors">
+                {reel.creatorName}
+              </span>
+              {isOwnReel && (
+                <span className="text-[10px] font-bold text-emerald-400 shrink-0">
+                  · {lang === 'bn' ? 'আপনার পোস্ট' : 'Your post'}
+                </span>
+              )}
+            </div>
+
+            <div className="text-[11px] font-medium text-neutral-400 flex items-center gap-1.5 flex-wrap mt-0.5">
+              <span>{formatRelativeTime(reel.createdAt, lang)}</span>
+              <span aria-hidden="true">·</span>
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={handleCategoryClick}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleCategoryClick(e as unknown as React.MouseEvent);
+                  }
+                }}
+                className={`inline-flex items-center gap-1 font-bold hover:underline cursor-pointer ${
+                  activeCategory === reel.category ? 'text-[#00e676]' : 'text-emerald-300/90'
+                }`}
+                title={
+                  lang === 'bn'
+                    ? `${categoryMeta.labelBn} ক্যাটাগরির রিল ফিল্টার করুন`
+                    : `Filter feed by ${categoryMeta.labelEn}`
+                }
+              >
+                <span>{categoryMeta.icon}</span>
+                <span>{lang === 'bn' ? categoryMeta.labelBn : categoryMeta.labelEn}</span>
+              </span>
+              <span aria-hidden="true">·</span>
+              <span
+                data-testid="reel-view-count"
+                className={`inline-flex items-center gap-1 tabular-nums transition-colors ${
+                  viewJustIncremented ? 'text-emerald-300 font-bold' : 'text-neutral-400'
+                }`}
+              >
+                <Eye className="w-3 h-3 text-emerald-400/80" />
+                <span>{toBengaliNumber(viewsCount.toLocaleString('en-US'), lang)}</span>
+              </span>
+            </div>
+          </div>
+        </button>
+
+        {/* Right Header Controls: Status & Save */}
+        <div className="flex items-center gap-1 shrink-0">
+          {reel.isSpecialOffer && !isOwnReel && (
+            <span className="px-2 py-0.5 rounded-lg text-[10px] font-black bg-gradient-to-r from-amber-500 to-rose-500 text-black flex items-center gap-1">
+              <Flame className="w-3 h-3 fill-current text-black" />
+              <span>{reel.specialOfferBadge || (lang === 'bn' ? 'অফার' : 'Offer')}</span>
+            </span>
+          )}
+
+          <button
+            type="button"
+            onClick={handleBookmark}
+            className={`relative w-10 h-10 rounded-full flex items-center justify-center transition cursor-pointer select-none ${
+              isSaved
+                ? 'text-amber-400 bg-amber-500/10'
+                : 'text-neutral-300 hover:text-white hover:bg-[#192b20]'
+            }`}
+            aria-label={isSaved ? (lang === 'bn' ? 'আনসেভ করুন' : 'Remove Bookmark') : (lang === 'bn' ? 'সেভ করুন' : 'Bookmark')}
+            title={isSaved ? (lang === 'bn' ? 'সংরক্ষিত থেকে সরান' : 'Remove from saved') : (lang === 'bn' ? 'ফেভারিট সেভ করুন' : 'Save to favorites')}
+          >
+            {isBookmarkSpringing && isSaved && (
+              <span className="absolute inset-1 rounded-full border-2 border-amber-400/80 pointer-events-none animate-ping" />
+            )}
+            <Bookmark
+              className={`w-4 h-4 transition-transform duration-150 ${
+                isSaved ? 'fill-current text-amber-400 scale-110' : ''
+              } ${isBookmarkSpringing ? 'scale-125' : ''}`}
+            />
+          </button>
+        </div>
+      </div>
+
+      {/* 2. Facebook-Style Post Title & Caption Above Media (1-line preview + Show more) */}
+      <div className="px-3.5 pb-2.5">
+        {!isDescriptionExpanded ? (
+          <div className="flex items-baseline gap-1.5">
+            <p
+              ref={titleLineRef}
+              onClick={() => (hasMoreDescription ? setIsDescriptionExpanded(true) : onOpenReel(reel))}
+              className="text-[13px] font-bold text-slate-100 leading-snug truncate flex-1 min-w-0 cursor-pointer hover:text-emerald-200 transition-colors"
+            >
+              {reel.title || reel.caption}
+            </p>
+            {hasMoreDescription && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsDescriptionExpanded(true);
+                }}
+                className="shrink-0 text-xs font-extrabold text-[#00e676] hover:text-emerald-300 hover:underline cursor-pointer select-none"
+              >
+                ...Show more
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-1 animate-in fade-in duration-150">
+            {reel.title && (
+              <h3
+                onClick={() => onOpenReel(reel)}
+                className="text-[13.5px] font-bold text-slate-100 leading-snug whitespace-pre-line cursor-pointer hover:text-emerald-200 transition-colors"
+              >
+                {reel.title}
+              </h3>
+            )}
+            {hasDistinctCaption && (
+              <p className="text-xs text-neutral-300/95 leading-relaxed whitespace-pre-line">
+                {reel.caption}
+              </p>
+            )}
+            {reel.hashtags && reel.hashtags.length > 0 && (
+              <p className="text-[11px] font-semibold text-emerald-400/90 flex flex-wrap gap-x-1.5 gap-y-0.5">
+                {reel.hashtags.map((tag, idx) => (
+                  <span key={idx}>{tag.startsWith('#') ? tag : `#${tag}`}</span>
+                ))}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsDescriptionExpanded(false);
+              }}
+              className="inline-block text-xs font-extrabold text-emerald-400 hover:text-[#00e676] hover:underline cursor-pointer select-none pt-0.5"
+            >
+              Show less
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* 3. Full-Width Edge-to-Edge Media Container */}
       <div
         ref={cardContainerRef}
+        data-feed-media="true"
         onClick={() => onOpenReel(reel)}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
-        className="relative flex-1 h-64 sm:h-72 rounded-2xl overflow-hidden bg-[#101914] border border-emerald-950/60 cursor-pointer group shadow-lg"
+        className="relative w-full h-72 sm:h-80 bg-black cursor-pointer group overflow-hidden border-y border-emerald-950/60"
       >
         {/* Skeleton State */}
         {!imgLoaded && !videoReady && (
@@ -469,7 +730,7 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
           src={displayThumbnail}
           alt={reel.title}
           className={`w-full h-full object-cover transition-all duration-500 ${
-            isImageMotionReel ? 'animate-ken-burns' : 'group-hover:scale-105'
+            isImageMotionReel ? 'animate-ken-burns' : 'group-hover:scale-[1.02]'
           } ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
           style={reel.filter ? { filter: reel.filter } : {}}
           loading="lazy"
@@ -483,14 +744,14 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
           }}
         />
 
-        {/* Inline Muted Video Preview */}
+        {/* Inline Middle-Viewport Video Preview (plays continuously with sound when focused) */}
         {isNativeVideo && (
           <video
             ref={videoRef}
             src={videoSrc}
             poster={displayThumbnail}
             autoPlay={shouldPlayPreview}
-            muted
+            muted={!shouldPlayPreview || isMuted || autoplayBlockedMuted}
             playsInline
             loop
             preload={isNearView ? 'auto' : 'metadata'}
@@ -498,8 +759,14 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
             onCanPlay={(e) => {
               setVideoReady(true);
               if (shouldPlayPreview && e.currentTarget.paused) {
-                e.currentTarget.muted = true;
-                e.currentTarget.play().catch(() => {});
+                const wantMuted = isMuted;
+                e.currentTarget.muted = wantMuted;
+                if (!wantMuted) e.currentTarget.volume = 1;
+                e.currentTarget.play().catch(() => {
+                  e.currentTarget.muted = true;
+                  setAutoplayBlockedMuted(true);
+                  e.currentTarget.play().catch(() => {});
+                });
               }
             }}
             onPlaying={() => {
@@ -520,8 +787,8 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
           />
         )}
 
-        {/* Gradient overlays */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-black/30 pointer-events-none" />
+        {/* Subtle Edge Scrim */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-black/20 pointer-events-none" />
 
         {/* Creator Watermark Protection Overlay */}
         {reel.watermark?.enabled && (
@@ -532,75 +799,66 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
           />
         )}
 
+        {/* Subtle Top-Right Player Controls (Sound / Speed / AI Visual / No Earn) */}
+        <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10 pointer-events-none">
+          {isNativeVideo && shouldPlayPreview && (
+            <button
+              type="button"
+              onClick={handleToggleInlineSound}
+              className={`pointer-events-auto px-2 py-1 rounded-lg text-[10px] font-black backdrop-blur-md border transition-all cursor-pointer flex items-center gap-1 shadow-sm active:scale-95 ${
+                !isMuted && !autoplayBlockedMuted
+                  ? 'bg-black/75 text-[#00e676] border-[#00c853]/50 hover:bg-[#00c853] hover:text-black'
+                  : 'bg-black/80 text-amber-300 border-amber-400/60 hover:bg-amber-400 hover:text-black'
+              }`}
+              aria-label={isMuted || autoplayBlockedMuted ? (lang === 'bn' ? 'সাউন্ড চালু করুন' : 'Unmute sound') : (lang === 'bn' ? 'মিউট করুন' : 'Mute sound')}
+              title={isMuted || autoplayBlockedMuted ? (lang === 'bn' ? 'সাউন্ড চালু করুন' : 'Unmute sound') : (lang === 'bn' ? 'সাউন্ড বন্ধ করুন' : 'Mute sound')}
+            >
+              {!isMuted && !autoplayBlockedMuted ? (
+                <Volume2 className="w-3.5 h-3.5" />
+              ) : (
+                <>
+                  <VolumeX className="w-3.5 h-3.5" />
+                  {autoplayBlockedMuted && !isMuted && (
+                    <span>{lang === 'bn' ? 'সাউন্ড অন' : 'Sound'}</span>
+                  )}
+                </>
+              )}
+            </button>
+          )}
+          {isNativeVideo && (
+            <button
+              type="button"
+              onClick={handleToggleSpeed}
+              className="pointer-events-auto px-2 py-0.5 rounded-lg text-[10px] font-black bg-black/75 backdrop-blur-md text-emerald-300 border border-emerald-500/40 hover:bg-[#00c853] hover:text-black transition-all cursor-pointer tabular-nums shadow-sm active:scale-95"
+              title={lang === 'bn' ? 'প্লেব্যাক স্পিড পরিবর্তন (০.৫x / ১x / ২x)' : 'Toggle playback speed (0.5x / 1x / 2x)'}
+            >
+              {playbackSpeed}x
+            </button>
+          )}
+          {isImageMotionReel && (
+            <span className="px-2 py-0.5 rounded-lg text-[9px] font-black bg-black/65 backdrop-blur-md text-emerald-300 border border-emerald-500/35 flex items-center gap-1">
+              <Sparkles className="w-2.5 h-2.5" />
+              <span>{lang === 'bn' ? 'AI ভিজ্যুয়াল' : 'AI Visual'}</span>
+            </span>
+          )}
+          {!isOwnReel && !isEarningActive && (
+            <span className="px-2 py-0.5 rounded-lg text-[9px] font-bold bg-black/70 backdrop-blur-md text-neutral-300 border border-white/15 flex items-center gap-1">
+              <Eye className="w-2.5 h-2.5" />
+              <span>{lang === 'bn' ? 'শুধু বিনোদন' : 'Watch Only'}</span>
+            </span>
+          )}
+        </div>
+
         {/* Centered Circular Play Button */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div
-            className={`w-12 h-12 rounded-full bg-black/40 backdrop-blur-sm border-2 border-emerald-400/80 flex items-center justify-center text-emerald-400 group-hover:scale-110 group-hover:bg-emerald-500 group-hover:text-black group-hover:border-emerald-300 transition-all duration-200 shadow-lg shadow-black/50 ${
+            className={`w-14 h-14 rounded-full bg-black/45 backdrop-blur-sm border-2 border-[#00e676]/85 flex items-center justify-center text-[#00e676] group-hover:scale-110 group-hover:bg-[#00c853] group-hover:text-black group-hover:border-emerald-300 transition-all duration-200 shadow-lg shadow-black/50 ${
               isNativeVideo && videoReady && isPlaying
                 ? 'opacity-0 group-hover:opacity-100 scale-90'
                 : 'opacity-100'
             }`}
           >
-            <Play className="w-5 h-5 fill-current ml-0.5" />
-          </div>
-        </div>
-
-        {/* Category badge button on top left & Own Reel / Special Offer badge on top right */}
-        <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between gap-2 z-10 pointer-events-none">
-          <button
-            type="button"
-            onClick={handleCategoryClick}
-            className={`pointer-events-auto px-2.5 py-1 rounded-xl text-[11px] font-black backdrop-blur-md border shadow-md flex items-center gap-1.5 transition-all duration-200 cursor-pointer active:scale-95 group/cat hover:brightness-125 select-none ${
-              categoryMeta.badgeBg
-            } ${categoryMeta.badgeBorder} ${categoryMeta.badgeText} ${
-              activeCategory === reel.category ? 'ring-2 ring-emerald-400 ring-offset-1 ring-offset-black/50 shadow-emerald-500/25' : ''
-            }`}
-            title={
-              lang === 'bn'
-                ? `${categoryMeta.labelBn} ক্যাটাগরির রিল ফিল্টার করুন`
-                : `Filter feed by ${categoryMeta.labelEn}`
-            }
-          >
-            <span className="text-xs transition-transform duration-200 group-hover/cat:scale-125">
-              {categoryMeta.icon}
-            </span>
-            <span className="tracking-wide">
-              {lang === 'bn' ? categoryMeta.labelBn : categoryMeta.labelEn}
-            </span>
-          </button>
-
-          <div className="flex items-center gap-1.5 pointer-events-auto">
-            {isNativeVideo && (
-              <button
-                type="button"
-                onClick={handleToggleSpeed}
-                className="px-2 py-0.5 rounded-lg text-[10px] font-black bg-black/75 backdrop-blur-md text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500 hover:text-black transition-all cursor-pointer tabular-nums shadow-sm active:scale-95"
-                title={lang === 'bn' ? 'প্লেব্যাক স্পিড পরিবর্তন (০.৫x / ১x / ২x)' : 'Toggle playback speed (0.5x / 1x / 2x)'}
-              >
-                {playbackSpeed}x
-              </button>
-            )}
-            {isImageMotionReel && (
-              <span className="px-2 py-0.5 rounded-lg text-[9px] font-black bg-black/65 backdrop-blur-md text-cyan-300 border border-cyan-400/35 flex items-center gap-1">
-                <Sparkles className="w-2.5 h-2.5" />
-                <span>{lang === 'bn' ? 'AI ভিজ্যুয়াল' : 'AI Visual'}</span>
-              </span>
-            )}
-            {isOwnReel ? (
-              <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-black/70 backdrop-blur-md text-emerald-300 border border-emerald-500/35">
-                {lang === 'bn' ? 'আপনার রিল' : 'Your Reel'}
-              </span>
-            ) : reel.isSpecialOffer ? (
-              <span className="px-2 py-0.5 rounded-lg text-[10px] font-black bg-gradient-to-r from-amber-500 to-rose-500 text-black shadow-lg flex items-center gap-1 border border-amber-300">
-                <Flame className="w-3 h-3 fill-current text-black" />
-                <span>{reel.specialOfferBadge || (lang === 'bn' ? 'অফার রিল' : 'Offer')}</span>
-              </span>
-            ) : !isEarningActive ? (
-              <span className="px-2 py-0.5 rounded-lg text-[9px] font-bold bg-neutral-900/80 backdrop-blur-md text-neutral-300 border border-neutral-700/60 flex items-center gap-1">
-                <Eye className="w-2.5 h-2.5" />
-                <span>{lang === 'bn' ? 'শুধু বিনোদন' : 'No Earn'}</span>
-              </span>
-            ) : null}
+            <Play className="w-6 h-6 fill-current ml-0.5" />
           </div>
         </div>
 
@@ -616,7 +874,7 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
           </div>
         )}
 
-        {/* Subtle Animated Horizontal Watch Progress Bar at Bottom of Video Player */}
+        {/* Watch Progress Bar at Bottom of Video Player */}
         <div
           className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none"
           role="progressbar"
@@ -625,7 +883,7 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
           aria-valuemax={100}
           aria-valuenow={Math.round(effectiveProgress)}
         >
-          <div className="relative w-full h-[3px] group-hover:h-1 transition-[height] duration-200 bg-black/50 backdrop-blur-xs overflow-hidden">
+          <div className="relative w-full h-[3px] group-hover:h-1 transition-[height] duration-200 bg-black/60 overflow-hidden">
             <div
               className={`relative h-full w-full origin-left transition-transform duration-150 ease-linear ${
                 hasWatched || milestoneMetInline
@@ -658,238 +916,39 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
             />
           )}
         </div>
-
-        {/* Bottom Creator Pill & View Count Social Proof */}
-        <div className="absolute bottom-3 left-2.5 right-2.5 flex items-center justify-between gap-2">
-          <button
-            type="button"
-            className="flex items-center gap-2 cursor-pointer group/creator min-w-0 flex-1 text-left"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenCreatorProfile(reel.userId);
-            }}
-            title={
-              lang === 'bn'
-                ? `${reel.creatorName}-এর প্রোফাইল দেখুন`
-                : `View ${reel.creatorName}'s profile`
-            }
-          >
-            <div className="relative shrink-0">
-              <div className={`w-7 h-7 rounded-full bg-neutral-800 ${!imgLoaded ? 'animate-pulse' : ''}`}>
-                <img
-                  src={reel.creatorAvatar}
-                  alt={reel.creatorName}
-                  className={`w-7 h-7 rounded-full object-cover border border-emerald-400 group-hover/creator:border-white transition-all ${
-                    imgLoaded ? 'opacity-100' : 'opacity-0'
-                  }`}
-                />
-              </div>
-              {reel.isVerified && imgLoaded && (
-                <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-emerald-500 text-black rounded-full flex items-center justify-center text-[8px] font-black">
-                  <Check className="w-2.5 h-2.5 stroke-[3]" />
-                </span>
-              )}
-            </div>
-            <div className="min-w-0 flex-1">
-              {imgLoaded ? (
-                <>
-                  <p className="text-xs font-extrabold text-white truncate drop-shadow-sm group-hover/creator:text-emerald-400 group-hover/creator:underline transition-colors">
-                    {reel.creatorName}
-                  </p>
-                  <div className="text-[10px] font-medium text-neutral-300/90 truncate drop-shadow-sm flex items-center gap-1.5 mt-0.5">
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      onClick={handleCategoryClick}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCategoryClick(e as any); } }}
-                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-black border transition-all cursor-pointer hover:brightness-125 shrink-0 ${
-                        categoryMeta.badgeBg
-                      } ${categoryMeta.badgeBorder} ${categoryMeta.badgeText}`}
-                      title={
-                        lang === 'bn'
-                          ? `${categoryMeta.labelBn} ক্যাটাগরি ফিল্টার করুন`
-                          : `Filter by ${categoryMeta.labelEn}`
-                      }
-                    >
-                      <span>{categoryMeta.icon}</span>
-                      <span>{lang === 'bn' ? categoryMeta.labelBn : categoryMeta.labelEn}</span>
-                    </span>
-                    <span className="text-neutral-500 text-[8px] shrink-0">•</span>
-                    <span className="truncate">{reel.title}</span>
-                  </div>
-                </>
-              ) : (
-                <div className="h-3 bg-neutral-800 rounded w-24 animate-pulse" />
-              )}
-            </div>
-          </button>
-
-          {/* View Count Indicator */}
-          <div
-            data-testid="reel-view-count"
-            className={`shrink-0 px-2 py-0.5 rounded-full bg-black/65 backdrop-blur-md border text-[10px] font-bold flex items-center gap-1 tabular-nums shadow-sm transition-all duration-300 pointer-events-none ${
-              viewJustIncremented
-                ? 'border-emerald-400 text-emerald-300 scale-110 shadow-emerald-500/30'
-                : 'border-white/15 text-slate-100'
-            }`}
-            title={lang === 'bn' ? 'মোট ভিউ' : 'Total views'}
-          >
-            <Eye className="w-3 h-3 text-emerald-400 shrink-0" />
-            <span>{toBengaliNumber(viewsCount.toLocaleString('en-US'), lang)}</span>
-            <span className="text-[9px] text-slate-300 font-medium">
-              {lang === 'bn' ? 'ভিউ' : 'views'}
-            </span>
-          </div>
-        </div>
       </div>
 
-      {/* Right Side Vertical Action Dock matching Screenshot 1 + Prompt features */}
-      <div className="flex flex-col items-center gap-2 shrink-0 py-1">
-        {/* Heart / Like with spring animation and animated number increment */}
-        <button
-          onClick={handleLike}
-          className="relative flex flex-col items-center gap-0.5 text-slate-300 hover:text-white transition group cursor-pointer select-none"
-          aria-label={isLiked ? (lang === 'bn' ? 'আনলাইক করুন' : 'Unlike') : (lang === 'bn' ? 'লাইক করুন' : 'Like')}
-        >
-          {/* Animated floating number increment badge (+1 / +১) */}
-          {showIncrement && (
-            <div
-              key={incrementKey}
-              className="absolute -top-3.5 pointer-events-none z-20 flex items-center justify-center animate-increment-float select-none"
-            >
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md shadow-rose-500/50 flex items-center gap-0.5 tabular-nums ring-1 ring-white/30 drop-shadow-sm">
-                <span>+</span>
-                <span>{toBengaliNumber(1, lang)}</span>
-              </span>
-            </div>
+      {/* 4. Facebook-Style Engagement Count Row + Watch-to-Earn Claim Action */}
+      <div className="px-3.5 py-2 flex items-center justify-between gap-2 text-[11.5px] text-neutral-400 border-b border-emerald-950/70">
+        <div className="flex items-center gap-1.5 min-w-0 tabular-nums">
+          <span className="inline-flex items-center gap-1 text-slate-300 font-semibold">
+            <span className="w-4 h-4 rounded-full bg-rose-500/20 text-rose-400 inline-flex items-center justify-center">
+              <Heart className="w-2.5 h-2.5 fill-current" />
+            </span>
+            <span>{toBengaliNumber(likesDisplay, lang)}</span>
+          </span>
+          {isCommentsEnabled && (
+            <>
+              <span aria-hidden="true">·</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenComments(reel);
+                }}
+                className="hover:text-white hover:underline transition cursor-pointer"
+              >
+                {toBengaliNumber(reel.commentsCount, lang)} {lang === 'bn' ? 'মন্তব্য' : 'comments'}
+              </button>
+            </>
           )}
-
-          <div className="relative w-8 h-8 flex items-center justify-center">
-            {/* Burst shockwave ring & sparkles when springing */}
-            {isSpringing && isLiked && (
-              <>
-                <span className="absolute inset-0 rounded-full border-2 border-rose-500/80 pointer-events-none animate-heart-burst" />
-                <span className="absolute -top-1 w-1 h-1 rounded-full bg-rose-400 pointer-events-none animate-ping" />
-                <span className="absolute -right-1 w-1 h-1 rounded-full bg-pink-400 pointer-events-none animate-ping" />
-                <span className="absolute -bottom-1 w-1 h-1 rounded-full bg-rose-400 pointer-events-none animate-ping" />
-                <span className="absolute -left-1 w-1 h-1 rounded-full bg-pink-400 pointer-events-none animate-ping" />
-              </>
-            )}
-
-            <div
-              className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
-                isLiked
-                  ? 'text-rose-500 drop-shadow-[0_0_8px_rgba(244,63,94,0.6)]'
-                  : 'text-slate-200 hover:bg-neutral-800/60'
-              } ${isSpringing ? 'animate-heart-spring' : ''}`}
-            >
-              <Heart
-                className={`w-4 h-4 transition-transform duration-150 ${
-                  isLiked ? 'fill-current text-rose-500 scale-105' : ''
-                }`}
-              />
-            </div>
-          </div>
-
-          <span
-            className={`text-[10px] font-semibold tabular-nums transition-colors duration-200 ${
-              isLiked ? 'text-rose-400 font-bold' : 'text-slate-300'
-            } ${showIncrement ? 'animate-number-bump' : ''}`}
-          >
-            {toBengaliNumber(likesDisplay, lang)}
+          <span aria-hidden="true">·</span>
+          <span>
+            {toBengaliNumber(reel.sharesCount || 0, lang)} {lang === 'bn' ? 'শেয়ার' : 'shares'}
           </span>
-        </button>
+        </div>
 
-        {/* Comment */}
-        {isCommentsEnabled && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenComments(reel);
-            }}
-            className="flex flex-col items-center gap-0.5 text-slate-300 hover:text-white transition cursor-pointer"
-          >
-            <div className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-neutral-800/60 text-slate-200">
-              <MessageCircle className="w-4 h-4" />
-            </div>
-            <span className="text-[10px] font-medium text-slate-300">
-              {toBengaliNumber(reel.commentsCount, lang)}
-            </span>
-          </button>
-        )}
-
-        {/* Bookmark / সেভ */}
-        <button
-          onClick={handleBookmark}
-          className={`relative flex flex-col items-center gap-0.5 transition group cursor-pointer select-none ${
-            isSaved ? 'text-amber-400' : 'text-slate-300 hover:text-white'
-          }`}
-          aria-label={isSaved ? (lang === 'bn' ? 'আনসেভ করুন' : 'Remove Bookmark') : (lang === 'bn' ? 'সেভ করুন' : 'Bookmark')}
-          title={isSaved ? (lang === 'bn' ? 'সংরক্ষিত থেকে সরান' : 'Remove from saved') : (lang === 'bn' ? 'ফেভারিট সেভ করুন' : 'Save to favorites')}
-        >
-          <div className="relative w-8 h-8 flex items-center justify-center">
-            {isBookmarkSpringing && isSaved && (
-              <span className="absolute inset-0 rounded-full border-2 border-amber-400/80 pointer-events-none animate-ping" />
-            )}
-            <div
-              className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
-                isSaved
-                  ? 'bg-amber-500/20 text-amber-400 drop-shadow-[0_0_8px_rgba(245,158,11,0.6)]'
-                  : 'text-slate-200 hover:bg-neutral-800/60'
-              } ${isBookmarkSpringing ? 'scale-125' : ''}`}
-            >
-              <Bookmark
-                className={`w-4 h-4 transition-transform duration-150 ${
-                  isSaved ? 'fill-current text-amber-400 scale-105' : ''
-                }`}
-              />
-            </div>
-          </div>
-          <span
-            className={`text-[10px] font-medium tabular-nums transition-colors duration-200 ${
-              isSaved ? 'text-amber-300 font-bold' : 'text-slate-300'
-            }`}
-          >
-            {lang === 'bn' ? (isSaved ? 'সংরক্ষিত' : 'সেভ') : (isSaved ? 'Saved' : 'Save')}
-          </span>
-        </button>
-
-        {/* Share */}
-        <button
-          onClick={handleShare}
-          className="flex flex-col items-center gap-0.5 text-slate-300 hover:text-white transition cursor-pointer"
-        >
-          <div className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-neutral-800/60 text-slate-200">
-            <Share2 className="w-4 h-4" />
-          </div>
-          <span className="text-[10px] font-medium text-slate-300 tabular-nums">
-            {reel.sharesCount ? toBengaliNumber(reel.sharesCount, lang) : (lang === 'bn' ? 'শেয়ার' : 'Share')}
-          </span>
-        </button>
-
-
-
-        {/* Gift Button: strictly hidden on user's own reels */}
-        {isGiftsEnabled && !isOwnReel && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenGift(reel);
-            }}
-            className="flex flex-col items-center gap-0.5 cursor-pointer"
-            title={lang === 'bn' ? 'গিফট পাঠান' : 'Send Gift'}
-          >
-            <div className="w-8 h-8 rounded-xl bg-[#ff2d55]/20 border border-[#ff2d55]/60 hover:bg-[#ff2d55] text-white flex items-center justify-center shadow-md transition active:scale-95 text-xs">
-              🎁
-            </div>
-            <span className="text-[9px] font-bold text-rose-300">
-              {lang === 'bn' ? 'গিফট' : 'Gift'}
-            </span>
-          </button>
-        )}
-
-        {/* Action Button: + পয়েন্ট বা শুধু দেখা (Own reels never earn points) */}
+        {/* Watch-to-Earn Direct Claim CTA */}
         {isEarningActive && allowFeedClaim ? (
           <button
             type="button"
@@ -897,17 +956,17 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
               e.stopPropagation();
               onClaimDirect(reel);
             }}
-            className={`px-2 py-1.5 rounded-xl text-[10px] font-extrabold flex items-center gap-1 shadow-md transition-all active:scale-95 cursor-pointer tabular-nums ${
+            className={`shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-extrabold flex items-center gap-1 transition-all active:scale-95 cursor-pointer tabular-nums ${
               hasWatched
-                ? 'bg-emerald-950/85 text-emerald-400 border border-emerald-500/40'
+                ? 'bg-emerald-950/85 text-emerald-400 border border-emerald-500/35'
                 : isDailyLimitReached
-                ? 'bg-neutral-900/90 text-amber-300 border border-amber-500/40'
+                ? 'bg-neutral-900/90 text-amber-300 border border-amber-500/35'
                 : reel.isSpecialOffer
-                ? 'bg-gradient-to-r from-amber-400 to-[#00c853] text-black border border-amber-300 shadow-amber-500/30'
-                : 'bg-[#00c853] hover:bg-[#00e676] text-black shadow-emerald-500/30'
+                ? 'bg-gradient-to-r from-amber-400 to-[#00c853] text-black shadow-sm shadow-amber-500/20'
+                : 'bg-[#00c853] hover:bg-[#00e676] text-black shadow-sm shadow-emerald-500/20'
             } ${
               milestoneMetInline && !hasWatched && !isDailyLimitReached
-                ? 'ring-2 ring-emerald-300/70 ring-offset-1 ring-offset-black/60'
+                ? 'ring-2 ring-emerald-300/80 ring-offset-1 ring-offset-[#101914]'
                 : ''
             }`}
             title={
@@ -920,15 +979,19 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
           >
             {hasWatched ? (
               <>
-                <Check className="w-2.5 h-2.5 stroke-[3]" />
-                <span>+{toBengaliNumber(rewardPoints, lang)}</span>
+                <Check className="w-3 h-3 stroke-[3]" />
+                <span>+{toBengaliNumber(rewardPoints, lang)} {lang === 'bn' ? 'সংগৃহীত' : 'Claimed'}</span>
               </>
             ) : isDailyLimitReached ? (
               <span>🔒 {lang === 'bn' ? 'লিমিট' : 'Limit'}</span>
             ) : (
               <>
-                {reel.isSpecialOffer ? <Flame className="w-2.5 h-2.5 fill-current text-black" /> : <Sparkles className="w-2.5 h-2.5" />}
-                <span>+{toBengaliNumber(rewardPoints, lang)}</span>
+                {reel.isSpecialOffer ? (
+                  <Flame className="w-3 h-3 fill-current text-black" />
+                ) : (
+                  <Sparkles className="w-3 h-3" />
+                )}
+                <span>+{toBengaliNumber(rewardPoints, lang)} {lang === 'bn' ? 'পয়েন্ট' : 'Pts'}</span>
               </>
             )}
           </button>
@@ -939,14 +1002,80 @@ export const ReelFeedCard: React.FC<ReelFeedCardProps> = ({
               e.stopPropagation();
               onOpenReel(reel);
             }}
-            className="px-2.5 py-1.5 rounded-xl text-[10px] font-bold flex items-center gap-1 bg-neutral-800/90 hover:bg-neutral-700 text-neutral-200 border border-neutral-700/60 shadow-sm transition active:scale-95 cursor-pointer"
-            title={lang === 'bn' ? 'রিলটি প্লে করুন' : 'Watch reel'}
+            className="shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 bg-[#16271d] hover:bg-[#1d3326] text-emerald-300 border border-emerald-900/60 transition active:scale-95 cursor-pointer"
           >
-            <Play className="w-2.5 h-2.5 fill-current" />
-            <span>{lang === 'bn' ? 'দেখুন' : 'Watch'}</span>
+            <Play className="w-3 h-3 fill-current" />
+            <span>{lang === 'bn' ? 'পূর্ণ দেখুন' : 'Watch Full'}</span>
           </button>
         )}
       </div>
-    </div>
+
+      {/* 5. Facebook-Style Equal-Column Bottom Action Bar */}
+      <div className={`grid ${actionGridClass} px-1.5 py-1 gap-1`}>
+        {/* Like Button with Spring + Floating +1 */}
+        <button
+          type="button"
+          onClick={handleLike}
+          className={`relative min-h-[44px] rounded-xl flex items-center justify-center gap-1.5 text-xs font-bold transition cursor-pointer select-none active:scale-95 ${
+            isLiked
+              ? 'text-rose-400 bg-rose-500/10'
+              : 'text-slate-300 hover:text-white hover:bg-[#16271d]'
+          }`}
+          aria-label={isLiked ? (lang === 'bn' ? 'আনলাইক করুন' : 'Unlike') : (lang === 'bn' ? 'লাইক করুন' : 'Like')}
+        >
+          {showIncrement && (
+            <div
+              key={incrementKey}
+              className="absolute -top-2.5 left-1/2 -translate-x-1/2 pointer-events-none z-20 flex items-center justify-center animate-increment-float select-none"
+            >
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md shadow-rose-500/50 flex items-center gap-0.5 tabular-nums ring-1 ring-white/30">
+                <span>+</span>
+                <span>{toBengaliNumber(1, lang)}</span>
+              </span>
+            </div>
+          )}
+
+          <span className="relative inline-flex items-center justify-center">
+            {isSpringing && isLiked && (
+              <span className="absolute inset-0 rounded-full border-2 border-rose-500/80 pointer-events-none animate-heart-burst" />
+            )}
+            <Heart
+              className={`w-4 h-4 transition-transform duration-150 ${
+                isLiked ? 'fill-current text-rose-500 scale-110' : ''
+              } ${isSpringing ? 'animate-heart-spring' : ''}`}
+            />
+          </span>
+          <span className={showIncrement ? 'animate-number-bump' : ''}>
+            {lang === 'bn' ? 'লাইক' : 'Like'}
+          </span>
+        </button>
+
+        {/* Comment Button */}
+        {isCommentsEnabled && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenComments(reel);
+            }}
+            className="min-h-[44px] rounded-xl flex items-center justify-center gap-1.5 text-xs font-bold text-slate-300 hover:text-white hover:bg-[#16271d] transition cursor-pointer active:scale-95"
+          >
+            <MessageCircle className="w-4 h-4" />
+            <span>{lang === 'bn' ? 'মন্তব্য' : 'Comment'}</span>
+          </button>
+        )}
+
+        {/* Share Button (includes Gift, Download, Report inside ShareSheet) */}
+        <button
+          type="button"
+          onClick={handleShare}
+          className="min-h-[44px] rounded-xl flex items-center justify-center gap-1.5 text-xs font-bold text-slate-300 hover:text-white hover:bg-[#16271d] transition cursor-pointer active:scale-95"
+        >
+          <Share2 className="w-4 h-4" />
+          <span>{lang === 'bn' ? 'শেয়ার' : 'Share'}</span>
+        </button>
+      </div>
+    </article>
   );
 };
+

@@ -27,7 +27,7 @@ export async function seedInitialData(currentUserUid: string) {
     // Seed or sync all new app reels
     INITIAL_REELS.forEach((reel) => {
       const docRef = doc(collection(db, 'reels'), reel.id);
-      batch.set(docRef, { ...reel, userId: currentUserUid, createdAt: reel.createdAt || new Date().toISOString() }, { merge: true });
+      batch.set(docRef, { ...reel, userId: reel.userId || currentUserUid, createdAt: reel.createdAt || new Date().toISOString() }, { merge: true });
       needsCommit = true;
     });
 

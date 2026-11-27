@@ -4,12 +4,13 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from 'react';
-import { User, Reel, WithdrawalRequest, Comment, TaskItem, DepositRequest, Notification, LiveStream, LiveMode, ChatSession, ChatMessage, EarningSettings, DEFAULT_EARNING_SETTINGS, SiteSettings, DEFAULT_SITE_SETTINGS } from './types';
-import { INITIAL_REELS, INITIAL_TASKS } from './data/initialData';
+import { User, Reel, WithdrawalRequest, Comment, TaskItem, DepositRequest, Notification, LiveStream, LiveMode, ChatSession, ChatMessage, EarningSettings, DEFAULT_EARNING_SETTINGS, SiteSettings, DEFAULT_SITE_SETTINGS, UserStory } from './types';
+import { INITIAL_REELS, INITIAL_TASKS, SEEDED_CREATOR_USERS, SEEDED_CREATOR_IDS, SEEDED_CREATOR_CATEGORIES } from './data/initialData';
 import { Header } from './components/Header';
 import { ReelFeedCard } from './components/ReelFeedCard';
+import { FacebookStoriesRow } from './components/FacebookStoriesRow';
 import { BottomNav, TabType } from './components/BottomNav';
-import { ChevronRight, Sparkles, Radio, Mic, Video, Loader2, Headphones, Play, Users, Wrench, Filter, Search, X, Tag } from 'lucide-react';
+import { ChevronRight, Sparkles, Radio, Mic, Video, Loader2, Headphones, Play, Users, Wrench, Filter, Search, X, Tag, Film, Coins, BookOpen } from 'lucide-react';
 import type { StartLivePayload } from './components/GoLiveSetupModal';
 import { GiftItem } from './types';
 import { playCoinSound, playSuccessChime, playPopSound } from './utils/audio';
@@ -35,6 +36,8 @@ const GoLiveSetupModal = lazy(() => import('./components/GoLiveSetupModal').then
 const PlusSheet = lazy(() => import('./components/PlusSheet').then(m => ({ default: m.PlusSheet })));
 const ShareSheet = lazy(() => import('./components/ShareSheet').then(m => ({ default: m.ShareSheet })));
 const EditReelModal = lazy(() => import('./components/EditReelModal').then(m => ({ default: m.EditReelModal })));
+const CreateStoryModal = lazy(() => import('./components/CreateStoryModal').then(m => ({ default: m.CreateStoryModal })));
+const StoryViewerModal = lazy(() => import('./components/StoryViewerModal').then(m => ({ default: m.StoryViewerModal })));
 const ChatModal = lazy(() => import('./components/ChatModal').then(m => ({ default: m.ChatModal })));
 const UserProfileModal = lazy(() => import('./components/UserProfileModal').then(m => ({ default: m.UserProfileModal })));
 const FollowListModal = lazy(() => import('./components/FollowListModal').then(m => ({ default: m.FollowListModal })));
@@ -52,8 +55,8 @@ import { useFirebase, formatFirebaseAuthError } from './hooks/useFirebase';
 import { where, orderBy, increment, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { normalizeVideoUrl } from './utils/video';
 import { downloadReelVideo } from './utils/videoDownload';
-import { buildUserMap, resolveReelWithOwner, resolveMasudRanaCreator, MASUD_RANA_FALLBACK_ID, MASUD_RANA_AVATAR, MASUD_RANA_NAME } from './utils/reelOwner';
-import { generateUnlimitedAiReelsBatch } from './utils/aiReelGenerator';
+import { buildUserMap, resolveReelWithOwner, resolveMasudRanaCreator, buildCreatorHandle, MASUD_RANA_FALLBACK_ID, MASUD_RANA_AVATAR, MASUD_RANA_NAME } from './utils/reelOwner';
+import { generateUnlimitedAiReelsBatch, CategoryCreatorIdentity, ContentCategory } from './utils/aiReelGenerator';
 import {
   buildScaledSpinPrizes,
   getDailyEarningUsage,
@@ -139,6 +142,7 @@ const DEMO_USER_IDS = new Set<string>([
   'user_006',
   'user_7788',
   MASUD_RANA_FALLBACK_ID,
+  ...SEEDED_CREATOR_IDS,
 ]);
 
 const DEMO_REEL_IDS = new Set<string>([
@@ -260,7 +264,18 @@ function UserApp() {
   const [syncRetryNonce, setSyncRetryNonce] = useState<number>(0);
 
   // Persistent State
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<User[]>(() => {
+    try {
+      const deleted = new Set<string>(JSON.parse(localStorage.getItem('rt_deleted_seed_users') || '[]'));
+      const savedSite = JSON.parse(localStorage.getItem('rt_site_settings') || '{}');
+      if (Array.isArray(savedSite?.deletedSeedUserIds)) {
+        savedSite.deletedSeedUserIds.forEach((id: string) => deleted.add(id));
+      }
+      return SEEDED_CREATOR_USERS.filter((u) => !deleted.has(u.id));
+    } catch {
+      return SEEDED_CREATOR_USERS;
+    }
+  });
   const [guestId] = useState<string>(() => {
     try {
       const existing = localStorage.getItem('rt_guest_id');
@@ -374,6 +389,14 @@ function UserApp() {
   const [depositRequests, setDepositRequests] = useState<DepositRequest[]>([]);
   const [personalNotifications, setPersonalNotifications] = useState<Notification[]>([]);
   const [activeLiveStreams, setActiveLiveStreams] = useState<LiveStream[]>([]);
+  const [stories, setStories] = useState<UserStory[]>([]);
+  const [likedStoryIds, setLikedStoryIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('rt_liked_stories') || '[]');
+    } catch {
+      return [];
+    }
+  });
 
   // Spin Wheel & Scratch Card Admin Control State
   const [spinMaxPrize, setSpinMaxPrize] = useState<number>(() => {
@@ -681,6 +704,29 @@ function UserApp() {
   const aiSeqRef = useRef<number>(1);
   const feedSentinelRef = useRef<HTMLDivElement | null>(null);
 
+  const deletedSeedSet = React.useMemo(() => {
+    const set = new Set<string>();
+    try {
+      const localList = JSON.parse(localStorage.getItem('rt_deleted_seed_users') || '[]');
+      if (Array.isArray(localList)) {
+        localList.forEach((id: string) => set.add(id));
+      }
+    } catch {}
+    if (Array.isArray(siteSettings.deletedSeedUserIds)) {
+      siteSettings.deletedSeedUserIds.forEach((id) => set.add(id));
+    }
+    return set;
+  }, [siteSettings.deletedSeedUserIds]);
+
+  const deletedSeedSetRef = useRef<Set<string>>(deletedSeedSet);
+  deletedSeedSetRef.current = deletedSeedSet;
+
+  useEffect(() => {
+    if (deletedSeedSet.size === 0) return;
+    setUsers((prev) => prev.filter((u) => !deletedSeedSet.has(u.id)));
+    setReels((prev) => prev.filter((r) => !deletedSeedSet.has(r.userId || '')));
+  }, [deletedSeedSet]);
+
   const masudCreator = React.useMemo(
     () =>
       resolveMasudRanaCreator(
@@ -694,6 +740,33 @@ function UserApp() {
   const masudCreatorRef = useRef(masudCreator);
   masudCreatorRef.current = masudCreator;
 
+  const activeCategoryCreators = React.useMemo<CategoryCreatorIdentity[]>(() => {
+    const list: CategoryCreatorIdentity[] = [
+      {
+        ...masudCreator,
+        categories: ['মোটিভেশন', 'কমেডি', 'বিনোদন', 'শিক্ষা'],
+      },
+    ];
+    for (const u of users) {
+      if (!u || !u.id || deletedSeedSet.has(u.id)) continue;
+      const cats = SEEDED_CREATOR_CATEGORIES[u.id] as ContentCategory[] | undefined;
+      if (cats && cats.length > 0) {
+        list.push({
+          id: u.id,
+          name: u.name,
+          handle: `@${buildCreatorHandle(u.name, u.phone)}`,
+          avatar: u.avatar,
+          isVerified: Boolean(u.isVerified),
+          categories: cats,
+        });
+      }
+    }
+    return list;
+  }, [masudCreator, users, deletedSeedSet]);
+
+  const categoryCreatorsRef = useRef<CategoryCreatorIdentity[]>(activeCategoryCreators);
+  categoryCreatorsRef.current = activeCategoryCreators;
+
   const loadMoreInfiniteReels = useCallback((targetCategory?: string) => {
     const startSeq = aiSeqRef.current;
     const count = 8;
@@ -703,6 +776,7 @@ function UserApp() {
       count,
       category: targetCategory === '🔴 লাইভ' ? 'সকল' : (targetCategory || 'সকল'),
       creator: masudCreatorRef.current,
+      categoryCreators: categoryCreatorsRef.current,
     });
     setReels((prev) => {
       const existingIds = new Set(prev.map((r) => r.id));
@@ -743,7 +817,7 @@ function UserApp() {
         ...remoteData,
         ...INITIAL_REELS.filter((r) => !remoteIds.has(r.id)),
       ]
-        .filter((r) => !deleted.includes(r.id))
+        .filter((r) => !deleted.includes(r.id) && (!r.userId || !deletedSeedSetRef.current.has(r.userId)))
         .map((r, idx) => {
           const patched = edited[r.id] ? { ...r, ...edited[r.id] } : r;
           return {
@@ -760,7 +834,11 @@ function UserApp() {
 
       setReels((prev) => {
         const existingAiReels = prev.filter(
-          (r) => r.id.startsWith('ai_reel_') && !baseIds.has(r.id) && !deleted.includes(r.id)
+          (r) =>
+            r.id.startsWith('ai_reel_') &&
+            !baseIds.has(r.id) &&
+            !deleted.includes(r.id) &&
+            (!r.userId || !deletedSeedSetRef.current.has(r.userId))
         );
         if (existingAiReels.length > 0) {
           return [...combinedBase, ...existingAiReels];
@@ -770,6 +848,7 @@ function UserApp() {
           count: 10,
           category: 'সকল',
           creator: masudCreatorRef.current,
+          categoryCreators: categoryCreatorsRef.current,
         });
         aiSeqRef.current += 10;
         return [...combinedBase, ...initialAiBatch];
@@ -787,7 +866,24 @@ function UserApp() {
 
     // Public discovery profiles (non-PII directory)
     const unsubPublicProfiles = firebaseOnSnapshot('public_profiles', (data) => {
-      setUsers(((data || []) as User[]).filter((u) => isRealUserId(u.id)));
+      const realUsers = ((data || []) as User[]).filter((u) => isRealUserId(u.id));
+      const realIds = new Set(realUsers.map((u) => u.id));
+      setUsers((prev) => {
+        const prevMap = new Map(prev.map((u) => [u.id, u]));
+        const activeSeeded = SEEDED_CREATOR_USERS.filter(
+          (su) => !deletedSeedSetRef.current.has(su.id) && !realIds.has(su.id)
+        ).map((su) => {
+          const existing = prevMap.get(su.id);
+          return existing
+            ? {
+                ...su,
+                followersCount: existing.followersCount,
+                followers: existing.followers,
+              }
+            : su;
+        });
+        return [...realUsers, ...activeSeeded];
+      });
     });
 
     // User-specific financial listeners (Owner only - client-side sort avoids composite index requirement)
@@ -851,6 +947,19 @@ function UserApp() {
       setActiveLiveStreams(active);
     });
     return unsub;
+  }, [firebaseUser?.uid, emailVerified]);
+
+  // Sync active 24h user stories (viewable in Guest preview & Verified User mode)
+  useEffect(() => {
+    if (firebaseUser && !emailVerified) return;
+    const unsubStories = firebaseOnSnapshot('stories', (data) => {
+      const nowMs = Date.now();
+      const active = ((data || []) as UserStory[])
+        .filter((s) => s && s.id && (!s.expiresAt || new Date(s.expiresAt).getTime() > nowMs))
+        .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      setStories(active);
+    }, [orderBy('createdAt', 'desc')]);
+    return () => unsubStories();
   }, [firebaseUser?.uid, emailVerified]);
 
   // Sync tasks from Firestore
@@ -955,7 +1064,23 @@ function UserApp() {
   const [durationFilter, setDurationFilter] = useState<'all' | 'short' | 'long'>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'most_watched' | 'popular'>('newest');
   const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [isFeedAudioUnlocked, setIsFeedAudioUnlocked] = useState<boolean>(false);
+  const [activeFeedReelId, setActiveFeedReelId] = useState<string | null>(null);
   const [showInstallModal, setShowInstallModal] = useState<boolean>(false);
+
+  // Unlock browser media sound on the user's first tap/gesture anywhere
+  useEffect(() => {
+    if (isFeedAudioUnlocked) return;
+    const unlock = () => setIsFeedAudioUnlocked(true);
+    window.addEventListener('pointerdown', unlock, { passive: true, once: true });
+    window.addEventListener('touchstart', unlock, { passive: true, once: true });
+    window.addEventListener('keydown', unlock, { passive: true, once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('touchstart', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, [isFeedAudioUnlocked]);
 
   // Category selection handler with horizontal pill auto-scroll and audio feedback
   const handleSelectCategory = useCallback((cat: ReelCategory | string) => {
@@ -1038,6 +1163,7 @@ function UserApp() {
 
   // Modal Dialogs & Sheets
   const [fullScreenReelId, setFullScreenReelId] = useState<string | null>(null);
+  const [fullScreenOwnerUserId, setFullScreenOwnerUserId] = useState<string | null>(null);
   const [activeCommentReel, setActiveCommentReel] = useState<Reel | null>(null);
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
   const [showGiftSheet, setShowGiftSheet] = useState<boolean>(false);
@@ -1047,6 +1173,8 @@ function UserApp() {
   const [showGoLiveSetupModal, setShowGoLiveSetupModal] = useState<boolean>(false);
   const [goLiveInitialMode, setGoLiveInitialMode] = useState<LiveMode>('audio');
   const [showPlusSheet, setShowPlusSheet] = useState<boolean>(false);
+  const [showCreateStoryModal, setShowCreateStoryModal] = useState<boolean>(false);
+  const [storyViewerIndex, setStoryViewerIndex] = useState<number | null>(null);
   const [showShareSheet, setShowShareSheet] = useState<boolean>(false);
   const [sharingReel, setSharingReel] = useState<Reel | null>(null);
   const [sharingLiveStream, setSharingLiveStream] = useState<LiveStream | null>(null);
@@ -2235,9 +2363,29 @@ function UserApp() {
   );
 
   const resolvedReels = React.useMemo(
-    () => reels.map((r) => resolveReelWithOwner(r, userMap, masudCreator)),
-    [reels, userMap, masudCreator]
+    () =>
+      reels
+        .filter((r) => !r.userId || !deletedSeedSet.has(r.userId))
+        .map((r) => resolveReelWithOwner(r, userMap, masudCreator)),
+    [reels, userMap, masudCreator, deletedSeedSet]
   );
+
+  const activeStories = React.useMemo(() => {
+    const nowMs = Date.now();
+    return stories
+      .filter((s) => !s.expiresAt || new Date(s.expiresAt).getTime() > nowMs)
+      .map((s) => {
+        const owner = userMap.get(s.userId);
+        return owner
+          ? {
+              ...s,
+              creatorName: owner.name || s.creatorName,
+              creatorAvatar: owner.avatar || s.creatorAvatar,
+              isVerified: Boolean(owner.isVerified ?? s.isVerified),
+            }
+          : s;
+      });
+  }, [stories, userMap]);
 
   const handleOpenUserProfile = async (userId: string) => {
     if (!userId) {
@@ -2750,15 +2898,163 @@ function UserApp() {
     }
   };
 
+  const buildLinkedStoryFromReel = (reelObj: Reel): UserStory => {
+    const nowIso = reelObj.createdAt || new Date().toISOString();
+    const expiryIso = reelObj.storyExpiresAt || new Date(Date.now() + 86400000).toISOString();
+    const rawVideo = reelObj.videoUrl;
+    const canUseVideo = Boolean(
+      rawVideo && (rawVideo.startsWith('local:') || rawVideo.length <= 480000)
+    );
+    const safeThumb =
+      reelObj.thumbnailUrl && reelObj.thumbnailUrl.length <= 200000
+        ? reelObj.thumbnailUrl
+        : '/images/ai_comedy_tea_stall.jpg';
+    const rawStory: UserStory = {
+      id: `story_${reelObj.id}`,
+      userId: reelObj.userId,
+      creatorName: (reelObj.creatorName || 'User').slice(0, 100),
+      ...(reelObj.creatorAvatar && reelObj.creatorAvatar.length <= 200000
+        ? { creatorAvatar: reelObj.creatorAvatar }
+        : {}),
+      isVerified: Boolean(reelObj.isVerified),
+      mediaType: canUseVideo ? 'video' : 'image',
+      mediaUrl: (canUseVideo ? rawVideo : safeThumb) || safeThumb,
+      thumbnailUrl: safeThumb,
+      caption: (reelObj.title || reelObj.caption || '').slice(0, 280),
+      ...(reelObj.filter ? { filter: reelObj.filter.slice(0, 120) } : {}),
+      linkedReelId: reelObj.id,
+      viewsCount: 0,
+      likesCount: 0,
+      createdAt: nowIso,
+      expiresAt: expiryIso,
+    };
+    return Object.fromEntries(
+      Object.entries(rawStory).filter(([, value]) => value !== undefined)
+    ) as UserStory;
+  };
+
+  const handleCreateStory = async (
+    storyInput: Omit<UserStory, 'id' | 'viewsCount' | 'likesCount' | 'createdAt' | 'expiresAt'> & { id?: string }
+  ) => {
+    if (!isAuthenticated || !firebaseUser) {
+      triggerAuthPrompt(
+        lang === 'bn'
+          ? 'হিস্টরি দিতে অনুগ্রহ করে লগইন করুন!'
+          : 'Please log in to share a story!'
+      );
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    const expiresIso = new Date(Date.now() + 86400000).toISOString();
+    const rawStory: UserStory = {
+      ...storyInput,
+      id: storyInput.id || `story_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      userId: storyInput.userId || firebaseUser.uid || currentUser.id,
+      creatorName: (storyInput.creatorName || currentUser.name || 'User').slice(0, 100),
+      ...(storyInput.creatorAvatar && storyInput.creatorAvatar.length <= 200000
+        ? { creatorAvatar: storyInput.creatorAvatar }
+        : {}),
+      viewsCount: 0,
+      likesCount: 0,
+      createdAt: nowIso,
+      expiresAt: expiresIso,
+    };
+    const cleanStory = Object.fromEntries(
+      Object.entries(rawStory).filter(([, value]) => value !== undefined)
+    ) as UserStory;
+
+    setStories((prev) => [cleanStory, ...prev.filter((s) => s.id !== cleanStory.id)]);
+    showToast(lang === 'bn' ? '🎉 আপনার হিস্টরি সফলভাবে শেয়ার হয়েছে!' : '🎉 Your story has been published!');
+    try {
+      await setDocument('stories', cleanStory.id, cleanStory);
+    } catch (err) {
+      console.warn('Firestore create story note:', err);
+    }
+  };
+
+  const handleViewStory = useCallback((storyId: string) => {
+    setStories((prev) =>
+      prev.map((s) => (s.id === storyId ? { ...s, viewsCount: (s.viewsCount || 0) + 1 } : s))
+    );
+    if (isAuthenticated && firebaseUser && emailVerified) {
+      updateDocument('stories', storyId, { viewsCount: increment(1) }).catch(() => {});
+    }
+  }, [isAuthenticated, firebaseUser, emailVerified, updateDocument]);
+
+  const handleLikeStory = (storyId: string) => {
+    if (!isAuthenticated || !firebaseUser) {
+      triggerAuthPrompt(
+        lang === 'bn' ? 'হিস্টরিতে লাইক দিতে লগইন করুন!' : 'Please log in to like stories!'
+      );
+      return;
+    }
+    const alreadyLiked = likedStoryIds.includes(storyId);
+    const nextLiked = alreadyLiked
+      ? likedStoryIds.filter((id) => id !== storyId)
+      : [...likedStoryIds, storyId];
+    setLikedStoryIds(nextLiked);
+    try {
+      localStorage.setItem('rt_liked_stories', JSON.stringify(nextLiked));
+    } catch {}
+    const delta = alreadyLiked ? -1 : 1;
+    setStories((prev) =>
+      prev.map((s) =>
+        s.id === storyId ? { ...s, likesCount: Math.max(0, (s.likesCount || 0) + delta) } : s
+      )
+    );
+    if (!alreadyLiked) vibrateLike();
+    updateDocument('stories', storyId, { likesCount: increment(delta) }).catch(() => {});
+  };
+
+  const handleDeleteStory = async (story: UserStory) => {
+    setStories((prev) => prev.filter((s) => s.id !== story.id));
+    showToast(lang === 'bn' ? '🗑️ হিস্টরি মুছে ফেলা হয়েছে।' : '🗑️ Story deleted.');
+    try {
+      await deleteDocument('stories', story.id);
+      if (story.linkedReelId) {
+        setReels((prev) =>
+          prev.map((r) => (r.id === story.linkedReelId ? { ...r, shareToStory: false } : r))
+        );
+        updateDocument('reels', story.linkedReelId, { shareToStory: false }).catch(() => {});
+      }
+    } catch (err) {
+      console.warn('Delete story note:', err);
+    }
+  };
+
   const handleAddNewReel = async (
-    newReelData: Pick<Reel, 'title' | 'userId' | 'creatorName' | 'creatorHandle' | 'creatorAvatar' | 'category' | 'thumbnailUrl' | 'videoUrl' | 'pointsReward' | 'audioTrack' | 'caption' | 'hashtags' | 'isVerified' | 'filter' | 'watermark'>
+    newReelData: Pick<
+      Reel,
+      | 'title'
+      | 'userId'
+      | 'creatorName'
+      | 'creatorHandle'
+      | 'creatorAvatar'
+      | 'category'
+      | 'thumbnailUrl'
+      | 'videoUrl'
+      | 'pointsReward'
+      | 'audioTrack'
+      | 'caption'
+      | 'hashtags'
+      | 'isVerified'
+      | 'filter'
+      | 'watermark'
+      | 'shareToStory'
+      | 'storyExpiresAt'
+    >
   ) => {
     if (!siteSettings.allowUserReelUpload) {
       showToast(lang === 'bn' ? '🔒 এডমিন কর্তৃক ইউজার রিল আপলোড সাময়িকভাবে বন্ধ রয়েছে।' : '🔒 Reel upload disabled by Admin.');
       return;
     }
+    const wantsStory = Boolean(newReelData.shareToStory);
     const rawReel: Reel = {
       ...newReelData,
+      shareToStory: wantsStory,
+      storyExpiresAt: wantsStory
+        ? newReelData.storyExpiresAt || new Date(Date.now() + 86400000).toISOString()
+        : undefined,
       pointsReward: newReelData.pointsReward ?? siteSettings.defaultUserReelRewardPoints ?? 10,
       id: `reel_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       videoUrl: newReelData.videoUrl,
@@ -2775,9 +3071,25 @@ function UserApp() {
     ) as Reel;
     // Optimistic addition
     setReels((prev) => [newReel, ...prev]);
-    showToast(lang === 'bn' ? '🎉 রিলটি সফলভাবে পাবলিশ হয়েছে!' : '🎉 Reel published successfully!');
+
+    let linkedStory: UserStory | null = null;
+    if (wantsStory) {
+      linkedStory = buildLinkedStoryFromReel(newReel);
+      setStories((prev) => [linkedStory!, ...prev.filter((s) => s.id !== linkedStory!.id)]);
+      showToast(
+        lang === 'bn'
+          ? '🎉 রিল ও হিস্টরি সফলভাবে পাবলিশ হয়েছে!'
+          : '🎉 Reel & Story published successfully!'
+      );
+    } else {
+      showToast(lang === 'bn' ? '🎉 রিলটি সফলভাবে পাবলিশ হয়েছে!' : '🎉 Reel published successfully!');
+    }
+
     try {
       await setDocument('reels', newReel.id, newReel);
+      if (linkedStory) {
+        await setDocument('stories', linkedStory.id, linkedStory);
+      }
     } catch (err) {
       console.warn('Firestore add reel note:', err);
     }
@@ -2948,11 +3260,29 @@ function UserApp() {
     }
 
     // 2. Immediately update in memory
+    const targetBefore = reels.find((r) => r.id === reelId);
+    const mergedReel = targetBefore ? { ...targetBefore, ...updatedData } : null;
     setReels((prev) =>
       prev.map((r) => (r.id === reelId ? { ...r, ...updatedData } : r))
     );
     playSuccessChime();
     showToast(lang === 'bn' ? '✅ রিলটি সফলভাবে আপডেট হয়েছে!' : '✅ Reel updated successfully!');
+
+    // Sync linked story visibility when shareToStory changes
+    if (updatedData.shareToStory === true && mergedReel) {
+      const existingLinked = stories.find((s) => s.linkedReelId === reelId);
+      if (!existingLinked) {
+        const linked = buildLinkedStoryFromReel(mergedReel);
+        setStories((prev) => [linked, ...prev]);
+        setDocument('stories', linked.id, linked).catch(() => {});
+      }
+    } else if (updatedData.shareToStory === false) {
+      const toRemove = stories.filter((s) => s.linkedReelId === reelId);
+      if (toRemove.length > 0) {
+        setStories((prev) => prev.filter((s) => s.linkedReelId !== reelId));
+        toRemove.forEach((st) => deleteDocument('stories', st.id).catch(() => {}));
+      }
+    }
 
     // 3. Persist to Firestore
     try {
@@ -2972,8 +3302,12 @@ function UserApp() {
       console.warn('LocalStorage save failed', e);
     }
 
-    // 2. Immediately remove from local state
+    // 2. Immediately remove from local state (including any linked Story)
     setReels((prev) => prev.filter((r) => r.id !== reel.id));
+    const linkedStories = stories.filter((s) => s.linkedReelId === reel.id);
+    if (linkedStories.length > 0) {
+      setStories((prev) => prev.filter((s) => s.linkedReelId !== reel.id));
+    }
     if (fullScreenReelId === reel.id) {
       setFullScreenReelId(null);
     }
@@ -2985,6 +3319,7 @@ function UserApp() {
     // 4. Remote delete from Firestore
     try {
       await deleteDocument('reels', reel.id);
+      linkedStories.forEach((st) => deleteDocument('stories', st.id).catch(() => {}));
       
       // 5. Send notification to user
       if (reel.userId) {
@@ -3106,6 +3441,63 @@ function UserApp() {
 
     return result;
   })();
+
+  // Determine which video card sits in the middle of the homepage viewport so it plays continuously with sound
+  useEffect(() => {
+    if (activeTab !== 'home' || selectedCategory === '🔴 লাইভ' || fullScreenReelId || storyViewerIndex !== null) {
+      setActiveFeedReelId(null);
+      return;
+    }
+
+    let rafId: number | null = null;
+    const computeMiddleFeedReel = () => {
+      rafId = null;
+      const nodes = document.querySelectorAll<HTMLElement>('[data-feed-reel-id]');
+      if (nodes.length === 0) {
+        setActiveFeedReelId(null);
+        return;
+      }
+
+      const viewportCenter = window.innerHeight * 0.5;
+      let bestId: string | null = null;
+      let bestDistance = Infinity;
+
+      nodes.forEach((node) => {
+        const mediaEl = node.querySelector<HTMLElement>('[data-feed-media="true"]') || node;
+        const rect = mediaEl.getBoundingClientRect();
+        const visibleTop = Math.max(0, rect.top);
+        const visibleBottom = Math.min(window.innerHeight, rect.bottom);
+        const visibleHeight = visibleBottom - visibleTop;
+        if (visibleHeight < 60) return;
+
+        const mediaCenter = (rect.top + rect.bottom) * 0.5;
+        const distance = Math.abs(mediaCenter - viewportCenter);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestId = node.getAttribute('data-feed-reel-id');
+        }
+      });
+
+      setActiveFeedReelId((prev) => (prev === bestId ? prev : bestId));
+    };
+
+    const scheduleCompute = () => {
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(computeMiddleFeedReel);
+    };
+
+    scheduleCompute();
+    const initialSettleTimer = setTimeout(scheduleCompute, 250);
+    window.addEventListener('scroll', scheduleCompute, { passive: true });
+    window.addEventListener('resize', scheduleCompute, { passive: true });
+
+    return () => {
+      clearTimeout(initialSettleTimer);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      window.removeEventListener('scroll', scheduleCompute);
+      window.removeEventListener('resize', scheduleCompute);
+    };
+  }, [activeTab, selectedCategory, filteredReels.length, fullScreenReelId, storyViewerIndex]);
 
   // Ensure every category immediately has plenty of AI videos & visuals
   useEffect(() => {
@@ -3280,13 +3672,42 @@ function UserApp() {
         )}
 
         {/* Dynamic Body Content (User Portal Only) */}
-        <main className="flex-1 p-3.5 space-y-3.5">
+        <main className="flex-1 px-2.5 sm:px-3.5 pt-2.5 pb-3.5 space-y-3">
           <Suspense fallback={<LoadingSpinner />}>
             <>
                 {activeTab === 'home' && (
-                  <div className="space-y-3.5 pb-20">
-
-                    {/* Quick Search removed */}
+                  <div className="space-y-3 pb-20">
+                    {/* 1. Facebook-Style Stories & Active Live Tray */}
+                    {selectedCategory !== '🔴 লাইভ' && !feedSearchQuery.trim() && (
+                      <FacebookStoriesRow
+                        stories={activeStories}
+                        reels={resolvedReels}
+                        activeLiveStreams={activeLiveStreams}
+                        currentUserAvatar={currentUser.avatar}
+                        currentUserName={currentUser.name}
+                        appLogoUrl={siteSettings.appLogoUrl}
+                        isAuthenticated={isAuthenticated}
+                        onCreateStory={() => {
+                          if (!isAuthenticated) {
+                            triggerAuthPrompt(
+                              lang === 'bn'
+                                ? 'হিস্টরি তৈরি করতে অনুগ্রহ করে লগইন করুন!'
+                                : 'Please log in to create a story!'
+                            );
+                            return;
+                          }
+                          setShowCreateStoryModal(true);
+                        }}
+                        onOpenStory={(idx) => setStoryViewerIndex(idx)}
+                        onOpenReel={(r) => {
+                          setFullScreenOwnerUserId(null);
+                          setFullScreenReelId(r.id);
+                        }}
+                        onJoinLive={handleJoinLiveStream}
+                        onViewAllLive={() => handleSelectCategory('🔴 লাইভ')}
+                        lang={lang}
+                      />
+                    )}
 
                     {/* DEDICATED LIVE STREAMS FEED WHEN '🔴 লাইভ' CATEGORY IS SELECTED */}
                     {selectedCategory === '🔴 লাইভ' ? (
@@ -3394,10 +3815,8 @@ function UserApp() {
                       </div>
                     ) : (
                       <>
-                        {/* Toolbar removed */}
-
-                        {/* Feed List of Reels matching Screenshot 1 + Download + Gift */}
-                        <div className="space-y-1">
+                        {/* Facebook-Style Feed Stream */}
+                        <div className="space-y-3">
                           {filteredReels.length === 0 ? (
                             <div className="p-8 rounded-3xl bg-[#0f1913] border border-emerald-950/60 text-center space-y-3 my-2">
                               <div className="w-14 h-14 rounded-2xl bg-emerald-950/50 border border-emerald-500/30 flex items-center justify-center mx-auto text-2xl shadow-inner">
@@ -3430,54 +3849,68 @@ function UserApp() {
                             </div>
                           ) : (
                             filteredReels.map((reel) => (
-                              <ReelFeedCard
-                                key={reel.id}
-                                reel={reel}
-                                currentUserId={isAuthenticated ? currentUser.id : undefined}
-                                isLiked={likedReelIds.includes(reel.id)}
-                                hasWatched={(isAuthenticated ? watchedReelIds : guestWatchedReelIds).includes(reel.id)}
-                                onLikeToggle={handleToggleLike}
-                                onOpenReel={(r) => setFullScreenReelId(r.id)}
-                                onOpenComments={(r) => setActiveCommentReel(r)}
-                                onClaimDirect={handleClaimDirect}
-                                onOpenGift={() => {
-                                  if (!isAuthenticated) {
-                                    triggerAuthPrompt(
-                                      lang === 'bn'
-                                        ? 'ক্রিয়েটরকে গিফট পাঠাতে অনুগ্রহ করে রিয়েল আইডিতে লগইন করুন!'
-                                        : 'Please log in with a real account to send gifts!'
-                                    );
-                                    return;
-                                  }
-                                  if (isOwnContentUser(reel.userId)) {
-                                    vibrateError();
-                                    showToast(
-                                      lang === 'bn'
-                                        ? '🎁 নিজের ভিডিওতে গিফট পাঠানো যাবে না! গিফট শুধুমাত্র অন্য ইউজারদের জন্য।'
-                                        : '🎁 You cannot send gifts to your own video!'
-                                    );
-                                    return;
-                                  }
-                                  setGiftTarget({ userId: reel.userId, creatorName: reel.creatorName });
-                                  setShowGiftSheet(true);
-                                }}
-                                onOpenCreatorProfile={(userId) => handleOpenUserProfile(userId)}
-                                onShare={handleOpenShare}
-                                lang={lang}
-                                isMuted={isMuted}
-                                levelProgress={levelProgress}
-                                earningSettings={earningSettings}
-                                isDailyLimitReached={isDailyReelLimitReached}
-                                isSaved={savedReelIds.includes(reel.id)}
-                                onToggleSave={handleToggleSave}
-                                isGiftsEnabled={siteSettings.isGiftsEnabled}
-                                isCommentsEnabled={siteSettings.isCommentsEnabled}
-                                onSelectCategory={handleSelectCategory}
-                                activeCategory={selectedCategory}
-                                watchProgress={reelWatchProgressMap[reel.id] || 0}
-                                onWatchProgressChange={handleWatchProgressChange}
-                                isModalOpen={Boolean(fullScreenReelId)}
-                              />
+                              <div key={reel.id} data-feed-reel-id={reel.id}>
+                                <ReelFeedCard
+                                  reel={reel}
+                                  currentUserId={isAuthenticated ? currentUser.id : undefined}
+                                  isLiked={likedReelIds.includes(reel.id)}
+                                  hasWatched={(isAuthenticated ? watchedReelIds : guestWatchedReelIds).includes(reel.id)}
+                                  onLikeToggle={handleToggleLike}
+                                  onOpenReel={(r) => {
+                                    setFullScreenOwnerUserId(null);
+                                    setFullScreenReelId(r.id);
+                                  }}
+                                  onOpenComments={(r) => setActiveCommentReel(r)}
+                                  onClaimDirect={handleClaimDirect}
+                                  onOpenGift={() => {
+                                    if (!isAuthenticated) {
+                                      triggerAuthPrompt(
+                                        lang === 'bn'
+                                          ? 'ক্রিয়েটরকে গিফট পাঠাতে অনুগ্রহ করে রিয়েল আইডিতে লগইন করুন!'
+                                          : 'Please log in with a real account to send gifts!'
+                                      );
+                                      return;
+                                    }
+                                    if (isOwnContentUser(reel.userId)) {
+                                      vibrateError();
+                                      showToast(
+                                        lang === 'bn'
+                                          ? '🎁 নিজের ভিডিওতে গিফট পাঠানো যাবে না! গিফট শুধুমাত্র অন্য ইউজারদের জন্য।'
+                                          : '🎁 You cannot send gifts to your own video!'
+                                      );
+                                      return;
+                                    }
+                                    setGiftTarget({ userId: reel.userId, creatorName: reel.creatorName });
+                                    setShowGiftSheet(true);
+                                  }}
+                                  onOpenCreatorProfile={(userId) => handleOpenUserProfile(userId)}
+                                  onShare={handleOpenShare}
+                                  lang={lang}
+                                  isMuted={isMuted}
+                                  onToggleMute={() => setIsMuted((m) => !m)}
+                                  isFocusedInFeed={activeFeedReelId === reel.id}
+                                  isAudioUnlocked={isFeedAudioUnlocked}
+                                  onAudioUnlock={() => setIsFeedAudioUnlocked(true)}
+                                  levelProgress={levelProgress}
+                                  earningSettings={earningSettings}
+                                  isDailyLimitReached={isDailyReelLimitReached}
+                                  isSaved={savedReelIds.includes(reel.id)}
+                                  onToggleSave={handleToggleSave}
+                                  isGiftsEnabled={siteSettings.isGiftsEnabled}
+                                  isCommentsEnabled={siteSettings.isCommentsEnabled}
+                                  onSelectCategory={handleSelectCategory}
+                                  activeCategory={selectedCategory}
+                                  watchProgress={reelWatchProgressMap[reel.id] || 0}
+                                  onWatchProgressChange={handleWatchProgressChange}
+                                  isModalOpen={Boolean(
+                                    fullScreenReelId ||
+                                      storyViewerIndex !== null ||
+                                      showLiveSheet ||
+                                      showPlusSheet ||
+                                      showCreateStoryModal
+                                  )}
+                                />
+                              </div>
                             ))
                           )}
 
@@ -3588,7 +4021,10 @@ function UserApp() {
                       onManageMyLive={(liveId) => handleJoinLiveStream(liveId)}
                       onEndMyLive={handleEndLive}
                       reels={resolvedReels}
-                      onOpenReel={(r) => setFullScreenReelId(r.id)}
+                      onOpenReel={(r) => {
+                        setFullScreenOwnerUserId(r.userId === currentUser.id ? currentUser.id : null);
+                        setFullScreenReelId(r.id);
+                      }}
                       onEditReel={(r) => setEditingReel(r)}
                       onDeleteReel={handleDeleteReel}
                       onOpenChatList={() => {
@@ -3650,18 +4086,27 @@ function UserApp() {
         <Suspense fallback={null}>
           {/* Full-Screen Immersive Reel Player Modal */}
           {fullScreenReelId && (() => {
-            const fullScreenReelsList = filteredReels.some((r) => r.id === fullScreenReelId)
-              ? filteredReels
-              : resolvedReels;
+            const ownerScopedReels = fullScreenOwnerUserId
+              ? resolvedReels.filter((r) => r.userId === fullScreenOwnerUserId)
+              : null;
+            const isOwnerScoped = Boolean(fullScreenOwnerUserId && ownerScopedReels && ownerScopedReels.length > 0);
+            const fullScreenReelsList = isOwnerScoped
+              ? ownerScopedReels!
+              : filteredReels.some((r) => r.id === fullScreenReelId)
+                ? filteredReels
+                : resolvedReels;
             return (
             <FullScreenReelModal
               reels={fullScreenReelsList}
               initialReelId={fullScreenReelId}
-              onClose={() => setFullScreenReelId(null)}
+              onClose={() => {
+                setFullScreenReelId(null);
+                setFullScreenOwnerUserId(null);
+              }}
               isLiked={likedReelIds.includes(fullScreenReelId)}
               likedReelIds={likedReelIds}
-              onLoadMoreReels={() => loadMoreInfiniteReels(selectedCategory)}
-              hasMore={true}
+              onLoadMoreReels={isOwnerScoped ? undefined : () => loadMoreInfiniteReels(selectedCategory)}
+              hasMore={!isOwnerScoped}
               onToggleLike={handleToggleLike}
               onOpenComments={(r) => setActiveCommentReel(r)}
               onRewardEarned={handleEarnReelReward}
@@ -3706,6 +4151,7 @@ function UserApp() {
                   return;
                 }
                 setFullScreenReelId(null);
+                setFullScreenOwnerUserId(null);
                 if (activeLiveStreams.length > 0) {
                   handleJoinLiveStream(activeLiveStreams[0].id);
                 } else {
@@ -3746,9 +4192,11 @@ function UserApp() {
                 const known = users.find((u) => u.id === creatorId) || (await getDocument('public_profiles', creatorId) as User | null);
                 if (known) {
                   setFullScreenReelId(null);
+                  setFullScreenOwnerUserId(null);
                   handleOpenChat(known);
                 } else {
                   setFullScreenReelId(null);
+                  setFullScreenOwnerUserId(null);
                   handleOpenUserProfile(creatorId);
                 }
               }}
@@ -3803,11 +4251,45 @@ function UserApp() {
               currentUser={currentUser}
               onPublishReel={handleAddNewReel}
               onOpenLive={() => openPersonalLiveStudio('audio')}
+              onOpenCreateStory={() => setShowCreateStoryModal(true)}
               lang={lang}
               isMuted={isMuted}
               allowUserReelUpload={siteSettings.allowUserReelUpload}
               defaultReelRewardPoints={siteSettings.defaultUserReelRewardPoints}
               allowUserLive={siteSettings.allowUserAudioLive || siteSettings.allowUserVideoLive}
+            />
+          )}
+
+          {/* Create Standalone Story Modal */}
+          {showCreateStoryModal && isAuthenticated && (
+            <CreateStoryModal
+              isOpen={showCreateStoryModal}
+              onClose={() => setShowCreateStoryModal(false)}
+              currentUser={currentUser}
+              onCreateStory={handleCreateStory}
+              lang={lang}
+              isMuted={isMuted}
+            />
+          )}
+
+          {/* Full-screen Story Viewer Modal */}
+          {storyViewerIndex !== null && activeStories.length > 0 && (
+            <StoryViewerModal
+              stories={activeStories}
+              initialIndex={storyViewerIndex}
+              currentUserId={isAuthenticated ? currentUser.id : undefined}
+              isAdmin={currentUser.role === 'admin'}
+              onClose={() => setStoryViewerIndex(null)}
+              onLikeStory={handleLikeStory}
+              onViewStory={handleViewStory}
+              onDeleteStory={handleDeleteStory}
+              onOpenLinkedReel={(reelId) => {
+                setFullScreenOwnerUserId(null);
+                setFullScreenReelId(reelId);
+              }}
+              onOpenCreatorProfile={handleOpenUserProfile}
+              likedStoryIds={likedStoryIds}
+              lang={lang}
             />
           )}
 
@@ -3952,6 +4434,33 @@ function UserApp() {
             onSendInChat={handleShareInChat}
             onDownloadReel={(r) => downloadReelVideo(r, lang)}
             onShareTracked={handleRecordReelShare}
+            isGiftsEnabled={siteSettings.isGiftsEnabled}
+            onOpenGift={({ reel: targetReel, liveStream: targetLive }) => {
+              if (!isAuthenticated) {
+                triggerAuthPrompt(
+                  lang === 'bn'
+                    ? 'ক্রিয়েটরকে গিফট পাঠাতে অনুগ্রহ করে রিয়েল আইডিতে লগইন করুন!'
+                    : 'Please log in with a real account to send gifts!'
+                );
+                return;
+              }
+              if (targetLive) {
+                setGiftTarget({
+                  userId: targetLive.hostId,
+                  creatorName: targetLive.hostName,
+                  liveId: targetLive.id,
+                });
+                setShowGiftSheet(true);
+                return;
+              }
+              if (targetReel) {
+                setGiftTarget({
+                  userId: targetReel.userId,
+                  creatorName: targetReel.creatorName,
+                });
+                setShowGiftSheet(true);
+              }
+            }}
             onReport={(r, reason) => {
               showToast(
                 lang === 'bn'
@@ -3985,6 +4494,7 @@ function UserApp() {
               lang={lang}
               allReels={resolvedReels}
               onOpenReel={(r) => {
+                setFullScreenOwnerUserId(selectedUserProfileUser.id);
                 setFullScreenReelId(r.id);
                 setIsUserProfileModalOpen(false);
               }}

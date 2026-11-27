@@ -31,7 +31,7 @@ import {
   ChatSession,
   Notification,
 } from '../types';
-import { INITIAL_REELS, INITIAL_TASKS, INITIAL_USER } from '../data/initialData';
+import { INITIAL_REELS, INITIAL_TASKS, INITIAL_USER, SEEDED_CREATOR_USERS, SEEDED_CREATOR_IDS } from '../data/initialData';
 import { playSuccessChime } from '../utils/audio';
 import { toBengaliNumber } from '../utils/bengali';
 import { normalizeVideoUrl } from '../utils/video';
@@ -83,7 +83,18 @@ export const AdminPortal: React.FC = () => {
   };
 
   // Admin data states
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<User[]>(() => {
+    try {
+      const deleted = new Set<string>(JSON.parse(localStorage.getItem('rt_deleted_seed_users') || '[]'));
+      const savedSite = JSON.parse(localStorage.getItem('rt_site_settings') || '{}');
+      if (Array.isArray(savedSite?.deletedSeedUserIds)) {
+        savedSite.deletedSeedUserIds.forEach((id: string) => deleted.add(id));
+      }
+      return SEEDED_CREATOR_USERS.filter((u) => !deleted.has(u.id));
+    } catch {
+      return SEEDED_CREATOR_USERS;
+    }
+  });
   const [reels, setReels] = useState<Reel[]>([]);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
   const [depositRequests, setDepositRequests] = useState<DepositRequest[]>([]);
@@ -182,6 +193,29 @@ export const AdminPortal: React.FC = () => {
   adminIdRef.current = firebaseUser?.uid || '';
   const firestoreTaskIdsRef = useRef<Set<string>>(new Set());
 
+  const deletedSeedSet = React.useMemo(() => {
+    const set = new Set<string>();
+    try {
+      const localList = JSON.parse(localStorage.getItem('rt_deleted_seed_users') || '[]');
+      if (Array.isArray(localList)) {
+        localList.forEach((id: string) => set.add(id));
+      }
+    } catch {}
+    if (Array.isArray(siteSettings.deletedSeedUserIds)) {
+      siteSettings.deletedSeedUserIds.forEach((id) => set.add(id));
+    }
+    return set;
+  }, [siteSettings.deletedSeedUserIds]);
+
+  const deletedSeedSetRef = useRef<Set<string>>(deletedSeedSet);
+  deletedSeedSetRef.current = deletedSeedSet;
+
+  useEffect(() => {
+    if (deletedSeedSet.size === 0) return;
+    setUsers((prev) => prev.filter((u) => !deletedSeedSet.has(u.id)));
+    setReels((prev) => prev.filter((r) => !r.userId || !deletedSeedSet.has(r.userId)));
+  }, [deletedSeedSet]);
+
   const resolvedEmail = (
     firebaseUser?.email ||
     firebaseUser?.providerData?.find((p) => p.email)?.email ||
@@ -241,7 +275,12 @@ export const AdminPortal: React.FC = () => {
     if (!isAuthorizedAdmin || !firebaseUser || !emailVerified) return;
 
     const unsubUsers = firebaseOnSnapshot('users', (data) => {
-      setUsers(data as User[]);
+      const realUsers = (data as User[]) || [];
+      const realIds = new Set(realUsers.map((u) => u.id));
+      const activeSeeded = SEEDED_CREATOR_USERS.filter(
+        (su) => !deletedSeedSetRef.current.has(su.id) && !realIds.has(su.id)
+      );
+      setUsers([...realUsers, ...activeSeeded]);
     });
 
     const unsubWithdrawals = firebaseOnSnapshot(
@@ -265,10 +304,12 @@ export const AdminPortal: React.FC = () => {
         const merged = [
           ...remote,
           ...INITIAL_REELS.filter((r) => !seenIds.has(r.id)),
-        ].map((r, idx) => ({
-          ...r,
-          videoUrl: normalizeVideoUrl(r.videoUrl, idx) ?? r.videoUrl,
-        }));
+        ]
+          .filter((r) => !r.userId || !deletedSeedSetRef.current.has(r.userId))
+          .map((r, idx) => ({
+            ...r,
+            videoUrl: normalizeVideoUrl(r.videoUrl, idx) ?? r.videoUrl,
+          }));
         setReels(merged);
       },
       [orderBy('createdAt', 'desc')]
@@ -626,12 +667,71 @@ export const AdminPortal: React.FC = () => {
   };
 
   const handleDeleteUser = async (userId: string, userName: string) => {
+    const targetUser = users.find((u) => u.id === userId);
+    const isSeedOrFake = Boolean(targetUser?.isFakeAccount || SEEDED_CREATOR_IDS.has(userId));
+    const ownedReels = reels.filter((r) => r.userId === userId);
+
     setUsers((prev) => prev.filter((u) => u.id !== userId));
+    setReels((prev) => prev.filter((r) => r.userId !== userId));
+
+    if (isSeedOrFake) {
+      const nextDeletedIds = Array.from(
+        new Set([...deletedSeedSetRef.current, userId])
+      );
+      try {
+        localStorage.setItem('rt_deleted_seed_users', JSON.stringify(nextDeletedIds));
+      } catch {}
+      await handleUpdateSiteSettings(
+        {
+          ...siteSettings,
+          deletedSeedUserIds: nextDeletedIds,
+        },
+        `🗑️ ${userName} এবং তার সব ভিডিও রিমুভ করা হয়েছে!`
+      );
+    }
+
     await Promise.all([
       deleteDocument('users', userId).catch(() => {}),
       deleteDocument('public_profiles', userId).catch(() => {}),
+      ...ownedReels.map((r) => deleteDocument('reels', r.id).catch(() => {})),
     ]);
-    showToast(`🗑️ ${userName} কে সফলভাবে রিমুভ করা হয়েছে!`);
+    if (!isSeedOrFake) {
+      showToast(`🗑️ ${userName} কে সফলভাবে রিমুভ করা হয়েছে!`);
+    }
+  };
+
+  const handleDeleteAllFakeUsers = async () => {
+    const fakeUsers = users.filter((u) => Boolean(u.isFakeAccount || SEEDED_CREATOR_IDS.has(u.id)));
+    if (fakeUsers.length === 0) {
+      showToast('কোনো ফেক ইউজার অবশিষ্ট নেই!');
+      return;
+    }
+    const fakeIds = new Set(fakeUsers.map((u) => u.id));
+    const ownedReels = reels.filter((r) => r.userId && fakeIds.has(r.userId));
+
+    setUsers((prev) => prev.filter((u) => !fakeIds.has(u.id)));
+    setReels((prev) => prev.filter((r) => !r.userId || !fakeIds.has(r.userId)));
+
+    const nextDeletedIds = Array.from(
+      new Set([...deletedSeedSetRef.current, ...fakeIds])
+    );
+    try {
+      localStorage.setItem('rt_deleted_seed_users', JSON.stringify(nextDeletedIds));
+    } catch {}
+
+    await Promise.all([
+      handleUpdateSiteSettings(
+        {
+          ...siteSettings,
+          deletedSeedUserIds: nextDeletedIds,
+        },
+        `🗑️ মোট ${toBengaliNumber(fakeUsers.length)} জন ফেক ইউজার ও তাদের ভিডিও ডিলিট করা হয়েছে!`
+      ),
+      ...fakeUsers.map((u) => deleteDocument('users', u.id).catch(() => {})),
+      ...fakeUsers.map((u) => deleteDocument('public_profiles', u.id).catch(() => {})),
+      ...ownedReels.map((r) => deleteDocument('reels', r.id).catch(() => {})),
+    ]);
+    playSuccessChime();
   };
 
   const ensureDefaultTasksInFirestore = async (excludeId?: string) => {
@@ -1154,6 +1254,7 @@ export const AdminPortal: React.FC = () => {
           onGiveUserBonus={handleGiveUserBonus}
           onUpdateUser={handleUpdateUser}
           onDeleteUser={handleDeleteUser}
+          onDeleteAllFakeUsers={handleDeleteAllFakeUsers}
           onExitAdmin={() => logout()}
           currentUserUid={firebaseUser.uid}
           adminPaymentNumbers={adminPaymentNumbers}

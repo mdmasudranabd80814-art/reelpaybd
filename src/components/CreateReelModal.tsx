@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { X, Video, Sparkles, UploadCloud, Link as LinkIcon, SlidersHorizontal } from 'lucide-react';
+import { X, Video, Sparkles, UploadCloud, Link as LinkIcon, SlidersHorizontal, BookOpen, CheckCircle2 } from 'lucide-react';
 import { Reel, User, ReelWatermark } from '../types';
 import { playSuccessChime } from '../utils/audio';
 import { storeVideoInDB, fileToDataUrl, captureVideoThumbnail } from '../utils/videoStorage';
@@ -32,6 +32,8 @@ interface CreateReelModalProps {
       | 'isVerified'
       | 'filter'
       | 'watermark'
+      | 'shareToStory'
+      | 'storyExpiresAt'
     >
   ) => void;
   isMuted: boolean;
@@ -56,6 +58,7 @@ export const CreateReelModal: React.FC<CreateReelModalProps> = ({
   const [editConfig, setEditConfig] = useState<MediaEditConfig | undefined>(undefined);
   const [showMasterEditor, setShowMasterEditor] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [shareToStory, setShareToStory] = useState(false);
 
   const creatorHandle = `@${buildCreatorHandle(currentUser.name, currentUser.phone)}`;
   const [watermark, setWatermark] = useState<ReelWatermark>(() => ({
@@ -164,6 +167,8 @@ export const CreateReelModal: React.FC<CreateReelModalProps> = ({
       hashtags: ['#রিলতাকা', '#আমারভিডিও', '#নতুনরিল'],
       filter: filter !== 'none' ? filter : undefined,
       watermark: watermark.enabled ? watermark : undefined,
+      shareToStory,
+      storyExpiresAt: shareToStory ? new Date(Date.now() + 86400000).toISOString() : undefined,
     });
 
     if (!isMuted) playSuccessChime();
@@ -310,6 +315,40 @@ export const CreateReelModal: React.FC<CreateReelModalProps> = ({
               previewThumbnailUrl={thumbnailUrl || undefined}
               lang="bn"
             />
+
+            {/* Story Choice */}
+            <div className="p-2.5 rounded-2xl bg-[#0d1611] border border-emerald-900/70 space-y-2">
+              <span className="text-[11.5px] font-extrabold text-white flex items-center gap-1.5">
+                <BookOpen className="w-3.5 h-3.5 text-[#00e676]" />
+                <span>রিলটি কি হিস্টরিতেও (Story) যাবে?</span>
+              </span>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShareToStory(true)}
+                  className={`min-h-[40px] px-2 py-1.5 rounded-xl border text-left flex items-center gap-1.5 cursor-pointer transition ${
+                    shareToStory
+                      ? 'bg-[#00c853]/20 border-[#00e676] text-white'
+                      : 'bg-[#132018] border-emerald-950 text-neutral-300'
+                  }`}
+                >
+                  <CheckCircle2 className={`w-3.5 h-3.5 shrink-0 ${shareToStory ? 'text-[#00e676]' : 'text-neutral-600'}`} />
+                  <span className="text-[11px] font-bold">হ্যাঁ, হিস্টরিতে যাবে</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShareToStory(false)}
+                  className={`min-h-[40px] px-2 py-1.5 rounded-xl border text-left flex items-center gap-1.5 cursor-pointer transition ${
+                    !shareToStory
+                      ? 'bg-[#152a1e] border-emerald-500/70 text-white'
+                      : 'bg-[#132018] border-emerald-950 text-neutral-300'
+                  }`}
+                >
+                  <CheckCircle2 className={`w-3.5 h-3.5 shrink-0 ${!shareToStory ? 'text-emerald-400' : 'text-neutral-600'}`} />
+                  <span className="text-[11px] font-bold">না, যাবে না</span>
+                </button>
+              </div>
+            </div>
 
             <button
               type="submit"

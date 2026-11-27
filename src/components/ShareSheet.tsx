@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Copy, Share2, Facebook, MessageCircle, Send, Download, Check, Flag } from 'lucide-react';
+import { X, Copy, Share2, Facebook, MessageCircle, Send, Download, Check, Flag, Gift } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Reel, LiveStream } from '../types';
 import { downloadReelVideo } from '../utils/videoDownload';
@@ -15,6 +15,8 @@ interface ShareSheetProps {
   onDownloadReel?: (reel: Reel) => void;
   onShareTracked?: (reelId: string) => void;
   onReport?: (reel: Reel, reason: string) => void;
+  isGiftsEnabled?: boolean;
+  onOpenGift?: (target: { reel?: Reel | null; liveStream?: LiveStream | null }) => void;
 }
 
 export const ShareSheet: React.FC<ShareSheetProps> = ({
@@ -27,6 +29,8 @@ export const ShareSheet: React.FC<ShareSheetProps> = ({
   onDownloadReel,
   onShareTracked,
   onReport,
+  isGiftsEnabled = true,
+  onOpenGift,
 }) => {
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadDone, setDownloadDone] = useState(false);
@@ -196,6 +200,27 @@ export const ShareSheet: React.FC<ShareSheetProps> = ({
             </div>
 
             <div className="grid grid-cols-4 gap-4 mb-8">
+              {/* GIFT OPTION INSIDE SHARE SHEET */}
+              {isGiftsEnabled && onOpenGift && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    vibrateLight();
+                    const target = { reel, liveStream };
+                    onClose();
+                    onOpenGift(target);
+                  }}
+                  className="flex flex-col items-center gap-2 group cursor-pointer"
+                >
+                  <div className="w-14 h-14 rounded-2xl bg-[#ff2d55]/15 border border-[#ff2d55]/40 flex items-center justify-center text-[#ff2d55] group-hover:bg-[#ff2d55] group-hover:text-white transition-all shadow-lg">
+                    <Gift className="w-7 h-7" />
+                  </div>
+                  <span className="text-[11px] font-bold text-rose-300">
+                    {lang === 'bn' ? 'গিফট' : 'Gift'}
+                  </span>
+                </button>
+              )}
+
               {/* DOWNLOAD BUTTON INSIDE SHARE SHEET (Reels only) */}
               {!isLiveShare && reel && (
                 <button

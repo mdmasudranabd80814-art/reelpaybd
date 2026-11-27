@@ -24,6 +24,16 @@ export const AppInstallModal: React.FC<AppInstallModalProps> = ({
   const [isInstalled, setIsInstalled] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
   const [manualGuideHint, setManualGuideHint] = useState<string | null>(null);
+  const onCloseRef = React.useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const timer = setTimeout(() => {
+      onCloseRef.current();
+    }, 30000);
+    return () => clearTimeout(timer);
+  }, [isOpen]);
 
   useEffect(() => {
     const standalone =

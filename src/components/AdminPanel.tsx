@@ -125,6 +125,7 @@ export interface AdminPanelProps {
   onGiveUserBonus: (userId: string, points: number) => void;
   onUpdateUser: (updatedUser: User) => void;
   onDeleteUser: (userId: string, userName: string) => void;
+  onDeleteAllFakeUsers?: () => void;
   onExitAdmin: () => void;
   currentUserUid: string;
   adminPaymentNumbers?: { bKash: string; Nagad: string; Rocket: string };
@@ -171,6 +172,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onGiveUserBonus,
   onUpdateUser,
   onDeleteUser,
+  onDeleteAllFakeUsers,
   onExitAdmin,
   currentUserUid,
   adminPaymentNumbers = { bKash: '01700000000', Nagad: '01800000000', Rocket: '01900000000' },
@@ -447,6 +449,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // User management states
   const [userSearchTerm, setUserSearchTerm] = useState('');
+  const [userTypeFilter, setUserTypeFilter] = useState<'all' | 'real' | 'fake'>('all');
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editUserPointsInput, setEditUserPointsInput] = useState<string>('');
   const [showPasswordMap, setShowPasswordMap] = useState<Record<string, boolean>>({});
@@ -1485,21 +1488,88 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="নাম বা ফোন দিয়ে খুঁজুন..."
+                placeholder="নাম, ফোন বা ইমেইল দিয়ে খুঁজুন..."
                 value={userSearchTerm}
                 onChange={(e) => setUserSearchTerm(e.target.value)}
-                className="w-full sm:w-56 bg-[#0d1611] border border-emerald-950 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                className="w-full sm:w-60 bg-[#0d1611] border border-emerald-950 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500"
               />
             </div>
           </div>
 
+          {(() => {
+            const fakeCount = users.filter((u) => Boolean(u.isFakeAccount)).length;
+            const realCount = users.length - fakeCount;
+            return (
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-[#0b140f] p-2.5 rounded-xl border border-emerald-950/80">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setUserTypeFilter('all')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                      userTypeFilter === 'all'
+                        ? 'bg-[#00c853] text-black shadow'
+                        : 'bg-[#132219] text-neutral-300 hover:text-white'
+                    }`}
+                  >
+                    সকল ইউজার ({toBengaliNumber(users.length)})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUserTypeFilter('real')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                      userTypeFilter === 'real'
+                        ? 'bg-emerald-500 text-black shadow'
+                        : 'bg-[#132219] text-emerald-300 hover:bg-emerald-950'
+                    }`}
+                  >
+                    ✓ রিয়েল ইউজার ({toBengaliNumber(realCount)})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUserTypeFilter('fake')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                      userTypeFilter === 'fake'
+                        ? 'bg-amber-400 text-black shadow'
+                        : 'bg-[#132219] text-amber-300 hover:bg-amber-950/40'
+                    }`}
+                  >
+                    🎭 ফেক ইউজার ({toBengaliNumber(fakeCount)})
+                  </button>
+                </div>
+
+                {fakeCount > 0 && onDeleteAllFakeUsers && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerConfirm(
+                        'সব ফেক ইউজার ডিলিট করবেন?',
+                        `মোট ${toBengaliNumber(fakeCount)} জন ফেক ইউজার এবং তাদের আপলোড করা সকল ভিডিও স্থায়ীভাবে রিমুভ হয়ে যাবে। রিয়েল ইউজারদের কোনো ক্ষতি হবে না।`,
+                        () => onDeleteAllFakeUsers()
+                      );
+                    }}
+                    className="px-3 py-1 rounded-lg bg-rose-950/80 hover:bg-rose-800 border border-rose-700/60 text-rose-200 hover:text-white text-[11px] font-extrabold transition cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>সব ফেক ইউজার ডিলিট ({toBengaliNumber(fakeCount)})</span>
+                  </button>
+                )}
+              </div>
+            );
+          })()}
+
           <div className="space-y-2.5 max-h-[600px] overflow-y-auto no-scrollbar">
             {users
-              .filter(
-                (u) =>
-                  u.name.toLowerCase().includes(userSearchTerm.toLowerCase()) ||
-                  u.phone.includes(userSearchTerm)
-              )
+              .filter((u) => {
+                if (userTypeFilter === 'fake' && !u.isFakeAccount) return false;
+                if (userTypeFilter === 'real' && u.isFakeAccount) return false;
+                const q = userSearchTerm.trim().toLowerCase();
+                if (!q) return true;
+                return (
+                  (u.name || '').toLowerCase().includes(q) ||
+                  (u.phone || '').includes(q) ||
+                  (u.email || '').toLowerCase().includes(q)
+                );
+              })
               .map((u) => {
                 const isOnline = u.lastActive && new Date().getTime() - new Date(u.lastActive).getTime() < 60000;
                 const isEditingThis = editingUserId === u.id;
@@ -1508,7 +1578,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 return (
                   <div
                     key={u.id}
-                    className="p-3.5 rounded-2xl bg-[#0e1712] border border-emerald-950 flex flex-col gap-3 shadow-md hover:border-emerald-800/40 transition"
+                    className={`p-3.5 rounded-2xl bg-[#0e1712] border flex flex-col gap-3 shadow-md hover:border-emerald-800/40 transition ${
+                      u.isFakeAccount ? 'border-amber-700/40' : 'border-emerald-950'
+                    }`}
                   >
                     <div className="flex items-center justify-between">
                       <div
@@ -1531,11 +1603,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           )}
                         </div>
                         <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <p className="font-bold text-white text-xs sm:text-sm truncate group-hover:text-emerald-300 transition">
                               {u.name}
                             </p>
                             {u.isVerified && <CheckCircle2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
+                            {u.isFakeAccount ? (
+                              <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0">
+                                🎭 ফেক ইউজার
+                              </span>
+                            ) : (
+                              <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shrink-0">
+                                ✓ রিয়েল ইউজার
+                              </span>
+                            )}
                             <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-neutral-800 text-neutral-300 uppercase">
                               {u.role}
                             </span>
@@ -5388,11 +5469,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     )}
                   </div>
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-extrabold text-base text-white truncate">{selectedUserForDetails.name}</h3>
                       {selectedUserForDetails.isVerified && (
                         <span title="ভেরিফাইড ইউজার">
                           <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
+                        </span>
+                      )}
+                      {selectedUserForDetails.isFakeAccount ? (
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0">
+                          🎭 ফেক ইউজার
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shrink-0">
+                          ✓ রিয়েল ইউজার
                         </span>
                       )}
                       <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-black/50 text-emerald-300 border border-emerald-500/30 uppercase">

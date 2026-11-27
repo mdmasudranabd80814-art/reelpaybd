@@ -5,6 +5,8 @@ import {
 } from './reelOwner';
 
 export type ContentCategory =
+  | 'হিন্দি ড্রামা'
+  | 'মোটিভেশন'
   | 'কমেডি'
   | 'শর্ট ড্রামা'
   | 'শর্ট মুভি'
@@ -17,6 +19,8 @@ export type ContentCategory =
   | 'শিক্ষা';
 
 export const ALL_CONTENT_CATEGORIES: ContentCategory[] = [
+  'হিন্দি ড্রামা',
+  'মোটিভেশন',
   'কমেডি',
   'শর্ট ড্রামা',
   'শর্ট মুভি',
@@ -40,6 +44,74 @@ interface AiSceneTemplate {
 }
 
 const AI_CATEGORY_TEMPLATES: Record<ContentCategory, AiSceneTemplate> = {
+  'হিন্দি ড্রামা': {
+    titles: [
+      'তেরে বিন জিনা নাহি • ইমোশনাল হিন্দি শর্ট ড্রামা (Tere Bin Jeena Nahi) 💔🎬',
+      'কাশ তুম মেরে হোতে • রোমান্টিক হিন্দি ড্রামা (Kaash Tum Mere Hote) 🌧️❤️',
+      'অন্ধেরি রাত কা রাজ • সাসপেন্স থ্রিলার হিন্দি ড্রামা (Andheri Raat Ka Raaz) 🕵️⚡',
+      'রিশতোঁ কি ডোর • ইমোশনাল ফ্যামিলি ড্রামা (Rishton Ki Dor) 🏡❤️',
+      'তুঝসে হি সাব কুছ • রিইউনিয়ন ড্রামা (Tujhse Hi Sab Kuch) 🚂✨',
+      'দিল কা দস্তরখান • মিষ্টি হিন্দি লাভ স্টোরি (Dil Ka Dastarkhan) 🌹💫',
+      'খামোশিয়াঁ • না বলা ভালোবাসার হিন্দি ড্রামা (Khamoshiyan Scene) 🥀🌧️',
+      'দো পল কা সাথ • মেমোরিজ হিন্দি শর্ট ড্রামা (Do Pal Ka Saath) 💫🎬',
+    ],
+    captions: [
+      'আসল হিন্দি সংলাপ, ড্রামাটিক ব্যাকগ্রাউন্ড স্কোর ও সিনেমার মতো দৃশ্য — রোমান্টিক ও ফ্যামিলি হিন্দি ড্রামা! 🎬❤️',
+      'হিন্দি শর্ট ড্রামার সেরা কালেকশন — সাউন্ড অন করে উপভোগ করুন ও পয়েন্ট জিতুন! ✨💔',
+      'প্রিয়জনকে ট্যাগ করুন যার সাথে এই ইমোশনাল হিন্দি দৃশ্যটি শেয়ার করতে চান! 🌹🎬',
+    ],
+    hashtags: ['#হিন্দিড্রামা', '#HindiDrama', '#EmotionalClip', '#RomanticHindi', '#ReelPayBD'],
+    audioTracks: [
+      'তেরে বিন জিনা নাহি ইমোশনাল হিন্দি ড্রামা ডায়ালগ',
+      'কাশ তুম মেরে হোতে রোমান্টিক হিন্দি ড্রামা ট্র্যাক',
+      'রিশতোঁ কি ডোর ফ্যামিলি ইমোশনাল সাউন্ডট্র্যাক',
+      'তুঝসে হি সাব কুছ রিইউনিয়ন থিম ও সুর',
+    ],
+    videos: [
+      '/videos/hindi_drama_romantic.mp4',
+      '/videos/hindi_drama_emotional.mp4',
+      '/videos/hindi_drama_suspense.mp4',
+      '/videos/hindi_drama_family.mp4',
+      '/videos/hindi_drama_reunion.mp4',
+    ],
+    images: [
+      'https://images.unsplash.com/photo-1518895949257-7621c3c786d7?w=720&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1516589178581-6cd7833ae3b2?w=720&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1511895426328-dc8714191300?w=720&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=720&auto=format&fit=crop&q=80',
+    ],
+    pointsReward: 20,
+  },
+  মোটিভেশন: {
+    titles: [
+      'শূন্য থেকে শুরু: হার না মানা মানুষের গল্প • বাংলা মোটিভেশন 💪🔥',
+      'সময়ের মূল্য: আজকের পরিশ্রমই আগামী দিনের সাফল্য 🚀⏳',
+      'সফল মানুষদের সকালের ৫টি অভ্যাস • পজিটিভ মাইন্ডসেট ☀️🎯',
+      'নিজেকে বিশ্বাস করুন: কঠিন সময়ই আপনাকে শক্তিশালী বানাবে 🌟💪',
+      'স্বপ্ন পূরণের লড়াই: হাল ছাড়বেন না, বিজয় আপনারই হবে 🏆✨',
+    ],
+    captions: [
+      'প্রতিদিন নিজেকে ১% উন্নত করুন—আজকের ছোট চেষ্টা আগামী দিনে বড় সাফল্য এনে দেবে! 💪🔥 #মোটিভেশন #SuccessBD',
+      'ব্যর্থতা কখনোই শেষ নয়, বরং নতুন করে শক্তিশালী হয়ে ওঠার প্রথম ধাপ! 🚀✨ #MotivationBangla #InspireBD',
+    ],
+    hashtags: ['#মোটিভেশন', '#MotivationBD', '#SuccessMindset', '#NeverGiveUp'],
+    audioTracks: [
+      'জীবন বদলে দেওয়ার বাংলা মোটিভেশনাল বার্তা',
+      'সফলতার পথে অদম্য অনুপ্রেরণা (বাংলা ভয়েস)',
+    ],
+    videos: [
+      '/videos/ai_trending_dhaka.mp4',
+      '/videos/reel_creator_star.mp4',
+      '/videos/ai_education_tech.mp4',
+      '/videos/reel_taka_earn.mp4',
+    ],
+    images: [
+      '/images/reel_creator_star.jpg',
+      '/images/ai_trending_dhaka.jpg',
+      '/images/ai_education_tech.jpg',
+    ],
+    pointsReward: 20,
+  },
   কমেডি: {
     titles: [
       'কমেডিয়ান স্টেজ শো: মেসের ডাল ও বন্ধুর ট্রিট জোকস (বাংলা ভয়েস) 🎭😂',
@@ -48,20 +120,26 @@ const AI_CATEGORY_TEMPLATES: Record<ContentCategory, AiSceneTemplate> = {
       'বস যখন বিড়ালের চেহারায় মিটিং নেয়! অফিস কমেডি ডায়ালগ 😹💼',
       'ঢাকার রিকশায় বিশ ব্যাগের পাহাড় ও রিকশা মামার কথা 🛺🤣',
       'গলির ক্রিকেটে সুপারম্যান ক্যাচ ও আম্পায়ারের ঝগড়া! 🏏😂',
-      'সেলুনে গিয়ে "একটু ছোট করে দেন" বলার ভয়াবহ ফলাফল! ✂️🤣',
+      'মেসের ডাল আর পাতলা ঝোল নিয়ে চার বন্ধুর হুলস্থুল কাণ্ড 🥣🤣',
+      'বিয়ে বাড়িতে বিরিয়ানি না পেয়ে বরের ভাইয়ের ঝগড়া 🍛🤣',
+      'হিন্দি কপিল শর্মা স্টাইল ফ্যামিলি জোকস & লাইভ ডায়ালগ 🎭😆',
     ],
     captions: [
-      'আসল বাংলা সংলাপ, হাসির সাউন্ড ইফেক্ট ও ৩০ সেকেন্ডের কমেডি শো — মাসুদ রানার AI স্টুডিও থেকে! 😂🔥',
-      'প্রতিদিন এমন ফানি বাংলা কমেডি নাটিকা দেখতে ফলো করে রাখুন! 🤣✨',
+      'আসল বাংলা সংলাপ, হাসির সাউন্ড ইফেক্ট ও ৩০ সেকেন্ডের কমেডি শো — রিলপে বিডি স্টুডিও থেকে! 😂🔥',
+      'প্রতিদিন এমন ফানি বাংলা ও হিন্দি কমেডি নাটিকা দেখতে ফলো করে রাখুন! 🤣✨',
       'বন্ধুদের ট্যাগ করুন যাদের সাথে ঠিক এমন ঘটনা ঘটেছে! 🎭😂',
     ],
-    hashtags: ['#কমেডি', '#BanglaComedy', '#MasudRana', '#ComedyShow', '#হাসিরভিডিও'],
+    hashtags: ['#কমেডি', '#BanglaComedy', '#HindiComedy', '#ComedyShow', '#হাসিরভিডিও'],
     audioTracks: [
-      'কমেডিয়ান স্টেজ সংলাপ ও হাসির রোল - মাসুদ রানা',
-      'চা-আড্ডা ফানি বাংলা ডায়ালগ - মাসুদ রানা',
-      'কমেডি শো সাউন্ডট্র্যাক - মাসুদ রানা',
+      'কমেডিয়ান স্টেজ সংলাপ ও হাসির রোল - রাফি আহমেদ',
+      'মেসের মজার সংলাপ ও বন্ধুদের হাসাহাসি',
+      'কপিল শর্মা স্টাইল ফানি হিন্দি ডায়ালগ',
+      'চা-আড্ডা ফানি বাংলা ডায়ালগ',
     ],
     videos: [
+      '/videos/hindi_comedy_kapil.mp4',
+      '/videos/comedy_mess_friends.mp4',
+      '/videos/comedy_wedding_biryani.mp4',
       '/videos/ai_comedian_stage.mp4',
       '/videos/ai_comedian_village.mp4',
       '/videos/ai_comedy_tea_stall.mp4',
@@ -140,25 +218,30 @@ const AI_CATEGORY_TEMPLATES: Record<ContentCategory, AiSceneTemplate> = {
   গান: {
     titles: [
       'ভালোবাসি ভালোবাসি • রাতের ছাদে লাইভ বাংলা গান 🎵🎸',
+      'তুম হি হো (Tum Hi Ho) • লাইভ হিন্দি রোমান্টিক সং 🎶🌹',
       'মানুষ গুরু নিষ্ঠা • বাংলার আসল বাউল কনসার্ট গান 🎵🔥',
+      'কেসরিয়া তেরা ইশক হ্যায় পিয়া (Kesariya) • হিন্দি মেলোডি 🎶✨',
       'ওরে ও দরিয়ার মাঝি • নজরুলগীতি ও লাইভ বাংলা গান 🎶🎤',
       'আহা আজি এ বসন্তে • ৩০ সেকেন্ডের সুরেলা বাংলা গান 🎶💫',
       'যদি তোর ডাক শুনে কেউ না আসে (একলা চলো রে) • বাংলা গান 🌙🎤',
       'মরার দেশে ভালো লাগে না • আসল বাংলা লোকসঙ্গীত 🎼✨',
     ],
     captions: [
-      'আসল বাংলা কণ্ঠের গান, লাইভ কনসার্ট দৃশ্য ও মিউজিক ওয়েভফর্ম — সাউন্ড চালু করে শুনুন! 🎵🎧',
-      'বাউল, নজরুলগীতি ও চিরসবুজ বাংলা গানের ৩০ সেকেন্ডের সেরা কালেকশন! 🎸✨',
+      'আসল বাংলা ও হিন্দি কণ্ঠের গান, লাইভ কনসার্ট দৃশ্য ও মিউজিক ওয়েভফর্ম — সাউন্ড চালু করে শুনুন! 🎵🎧',
+      'হিন্দি রোমান্টিক সং, বাউল, নজরুলগীতি ও চিরসবুজ গানের ৩০ সেকেন্ডের সেরা কালেকশন! 🎸✨',
     ],
-    hashtags: ['#গান', '#BanglaSong', '#BaulSong', '#MasudRana', '#LiveConcert'],
+    hashtags: ['#গান', '#BanglaSong', '#HindiSong', '#LiveConcert', '#TumHiHo', '#Kesariya'],
     audioTracks: [
+      'তুম হি হো - অরিজিৎ সিং লাইভ রোমান্টিক সং',
+      'কেসরিয়া তেরা ইশক হ্যায় পিয়া - লাইভ কনসার্ট ট্র্যাক',
       'ভালোবাসি ভালোবাসি (আসল বাংলা গান)',
       'মানুষ গুরু নিষ্ঠা (বাউল লোকগান)',
       'ওরে ও দরিয়ার মাঝি (নজরুলগীতি)',
       'আহা আজি এ বসন্তে (বাংলা গান)',
-      'একলা চলো রে (বাংলা কণ্ঠ)',
     ],
     videos: [
+      '/videos/hindi_song_tumhiho.mp4',
+      '/videos/hindi_song_kesariya.mp4',
       '/videos/ai_song_concert.mp4',
       '/videos/ai_song_folk.mp4',
       '/videos/ai_song_majhi.mp4',
@@ -234,10 +317,10 @@ const AI_CATEGORY_TEMPLATES: Record<ContentCategory, AiSceneTemplate> = {
       'স্মার্টফোন ভিডিওগ্রাফি ট্রেনিং গাইড',
     ],
     videos: [
-      '/videos/ai_training_fitness.mp4',
-      '/videos/ai_training_freelance.mp4',
-      '/videos/ai_training_cricket.mp4',
-      '/videos/ai_training_camera.mp4',
+      '/videos/ai_education_tech.mp4',
+      '/videos/reel_creator_star.mp4',
+      '/videos/ai_comedy_cricket.mp4',
+      '/videos/reel_taka_earn.mp4',
     ],
     images: [
       '/images/ai_education_tech.jpg',
@@ -268,8 +351,7 @@ const AI_CATEGORY_TEMPLATES: Record<ContentCategory, AiSceneTemplate> = {
     videos: [
       '/videos/ai_trending_dhaka.mp4',
       '/videos/ai_trending_neon_music.mp4',
-      '/videos/ai_training_fitness.mp4',
-      '/videos/ai_training_camera.mp4',
+      '/videos/ai_education_tech.mp4',
       '/videos/reel_bkash_cashout.mp4',
       '/videos/reel_creator_star.mp4',
     ],
@@ -353,7 +435,6 @@ const AI_CATEGORY_TEMPLATES: Record<ContentCategory, AiSceneTemplate> = {
     ],
     videos: [
       '/videos/ai_education_tech.mp4',
-      '/videos/ai_training_freelance.mp4',
       '/videos/reel_taka_earn.mp4',
       '/videos/reel_daily_bonus.mp4',
     ],
@@ -376,6 +457,10 @@ const VISUAL_FILTERS = [
 ];
 
 const EXTRA_CATEGORY_IMAGES: Record<ContentCategory, string[]> = {
+  মোটিভেশন: [
+    'https://images.unsplash.com/photo-1519834785169-98be25ec3f84?w=720&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1507537297725-24a1c029d3ca?w=720&auto=format&fit=crop&q=80',
+  ],
   কমেডি: [
     'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=720&auto=format&fit=crop&q=80',
     'https://images.unsplash.com/photo-1543852786-1cf6624b9987?w=720&auto=format&fit=crop&q=80',
@@ -412,43 +497,54 @@ const EXTRA_CATEGORY_IMAGES: Record<ContentCategory, string[]> = {
     'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=720&auto=format&fit=crop&q=80',
     'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=720&auto=format&fit=crop&q=80',
   ],
+  'হিন্দি ড্রামা': [
+    'https://images.unsplash.com/photo-1518895949257-7621c3c786d7?w=720&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1516589178581-6cd7833ae3b2?w=720&auto=format&fit=crop&q=80',
+  ],
   শিক্ষা: [
     'https://images.unsplash.com/photo-1518770660439-4636190af475?w=720&auto=format&fit=crop&q=80',
     'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=720&auto=format&fit=crop&q=80',
   ],
 };
 
-// Cycle pattern emphasizing Comedy, Short Drama, Short Movie, Training, Songs, and 30s Entertainment alongside all other categories
+// Cycle pattern emphasizing Motivational, Comedy, Hindi Drama, Short Drama, Short Movie, Training, Songs, and all categories
 const STREAM_CATEGORY_CYCLE: ContentCategory[] = [
+  'মোটিভেশন',
   'কমেডি',
+  'হিন্দি ড্রামা',
+  'গান',
   'ট্রেনিং',
   'শর্ট ড্রামা',
-  'গান',
   'শর্ট মুভি',
   'বিনোদন',
-  'কমেডি',
+  'মোটিভেশন',
   'ট্রেন্ডিং',
-  'ট্রেনিং',
   'গেমিং',
   'রান্না',
   'শিক্ষা',
 ];
 
+export interface CategoryCreatorIdentity extends MasudRanaCreatorIdentity {
+  categories?: ContentCategory[];
+}
+
 /**
- * Generates an unlimited stream of unique 30-second AI Reels across Comedy, Short Drama, Short Movie,
- * Songs, Entertainment, and all categories — all owned by Masud Rana.
+ * Generates an unlimited stream of unique 30-second Reels across Motivation, Comedy, Short Drama,
+ * Short Movie, Songs, Entertainment, and all categories.
  */
 export function generateUnlimitedAiReelsBatch(options: {
   startSequence: number;
   count?: number;
   category?: string;
   creator?: MasudRanaCreatorIdentity;
+  categoryCreators?: CategoryCreatorIdentity[];
 }): Reel[] {
   const {
     startSequence,
     count = 8,
     category = 'সকল',
     creator = DEFAULT_MASUD_CREATOR,
+    categoryCreators = [],
   } = options;
 
   const targetCategory: ContentCategory | null =
@@ -464,6 +560,14 @@ export function generateUnlimitedAiReelsBatch(options: {
     const cat: ContentCategory =
       targetCategory || STREAM_CATEGORY_CYCLE[seq % STREAM_CATEGORY_CYCLE.length];
 
+    const matchingCreators = categoryCreators.filter(
+      (c) => !c.categories || c.categories.length === 0 || c.categories.includes(cat)
+    );
+    const chosenCreator =
+      matchingCreators.length > 0
+        ? matchingCreators[seq % matchingCreators.length]
+        : creator;
+
     const tpl = AI_CATEGORY_TEMPLATES[cat];
     const titleBase = tpl.titles[seq % tpl.titles.length];
     const episodeNum = Math.floor(seq / tpl.titles.length) + 1;
@@ -472,7 +576,6 @@ export function generateUnlimitedAiReelsBatch(options: {
     const allImages = [...tpl.images, ...(EXTRA_CATEGORY_IMAGES[cat] || [])];
     const thumbnailUrl = allImages[seq % allImages.length];
 
-    // Always use real 30-second multi-scene MP4 videos with Bengali dialogue/songs
     const videoUrl = tpl.videos[seq % tpl.videos.length];
     const filter = VISUAL_FILTERS[seq % VISUAL_FILTERS.length];
 
@@ -480,12 +583,12 @@ export function generateUnlimitedAiReelsBatch(options: {
 
     generated.push({
       id: `ai_reel_${seq}_${cat}`,
-      userId: creator.id,
+      userId: chosenCreator.id,
       title,
-      creatorName: creator.name,
-      creatorHandle: creator.handle,
-      creatorAvatar: creator.avatar,
-      isVerified: true,
+      creatorName: chosenCreator.name,
+      creatorHandle: chosenCreator.handle,
+      creatorAvatar: chosenCreator.avatar,
+      isVerified: chosenCreator.isVerified,
       category: cat,
       thumbnailUrl,
       videoUrl,
@@ -501,7 +604,7 @@ export function generateUnlimitedAiReelsBatch(options: {
       hashtags: tpl.hashtags,
       isEarningEnabled: true,
       isSpecialOffer: seq % 6 === 0,
-      specialOfferBadge: seq % 6 === 0 ? '🎵 ৩০সে. স্পেশাল' : undefined,
+      specialOfferBadge: seq % 6 === 0 ? (cat === 'মোটিভেশন' ? '🔥 মোটিভেশনাল' : '🎵 ৩০সে. স্পেশাল') : undefined,
       filter,
     });
   }

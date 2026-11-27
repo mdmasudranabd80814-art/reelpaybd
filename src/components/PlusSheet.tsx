@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { X, Camera, Image as ImageIcon, Radio, Rocket, Sparkles, Lock, SlidersHorizontal, Film } from 'lucide-react';
+import { X, Camera, Image as ImageIcon, Radio, Rocket, Sparkles, Lock, SlidersHorizontal, Film, BookOpen, CheckCircle2 } from 'lucide-react';
 import { Reel, User, ReelWatermark } from '../types';
 import { playSuccessChime } from '../utils/audio';
 import { vibrateSuccess, vibrateError } from '../utils/haptics';
@@ -34,9 +34,12 @@ interface PlusSheetProps {
       | 'isVerified'
       | 'filter'
       | 'watermark'
+      | 'shareToStory'
+      | 'storyExpiresAt'
     >
   ) => void;
   onOpenLive: () => void;
+  onOpenCreateStory?: () => void;
   lang: 'bn' | 'en';
   isMuted: boolean;
   allowUserReelUpload?: boolean;
@@ -79,6 +82,7 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
   currentUser,
   onPublishReel,
   onOpenLive,
+  onOpenCreateStory,
   lang,
   isMuted,
   allowUserReelUpload = true,
@@ -103,6 +107,7 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
   const [category, setCategory] = useState<Reel['category']>('কমেডি');
   const [externalVideoUrl, setExternalVideoUrl] = useState('');
   const [filter, setFilter] = useState('none');
+  const [shareToStory, setShareToStory] = useState<boolean>(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const creatorHandle = `@${buildCreatorHandle(currentUser.name, currentUser.phone)}`;
@@ -244,6 +249,7 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
     }
 
     const customBgAudioNote = editConfig?.bgAudioName ? ` + ${editConfig.bgAudioName}` : '';
+    const storyExpiry = shareToStory ? new Date(Date.now() + 86400000).toISOString() : undefined;
 
     onPublishReel({
       title: title.trim(),
@@ -261,6 +267,8 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
       hashtags: ['#রিলতাকা', '#ভাইরাল', '#বাংলাদেশ'],
       filter: filter !== 'none' ? filter : undefined,
       watermark: watermark.enabled ? watermark : undefined,
+      shareToStory,
+      storyExpiresAt: storyExpiry,
     });
 
     if (!isMuted) playSuccessChime();
@@ -278,6 +286,7 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
     setTitle('');
     setCaption('');
     setFilter('none');
+    setShareToStory(false);
     onClose();
   };
 
@@ -401,7 +410,33 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
             </div>
           )}
 
-          {/* Option 4: Personal Live Studio */}
+          {/* Option 4: Create Standalone Story (24h) */}
+          {onOpenCreateStory && (
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onOpenCreateStory();
+              }}
+              className="w-full text-left p-3.5 rounded-2xl bg-[#1a2c22] hover:bg-[#22392c] border border-[#00c853]/40 mb-2.5 cursor-pointer transition active:scale-[0.98] flex items-center gap-3"
+            >
+              <div className="w-10 h-10 rounded-xl bg-emerald-950 flex items-center justify-center text-[#00e676] shrink-0">
+                <BookOpen className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <b className="text-sm block text-emerald-300">
+                  {lang === 'bn' ? 'নতুন হিস্টরি / স্টোরি দিন (২৪ ঘণ্টা)' : 'Create Story (24 Hours)'}
+                </b>
+                <small className="text-neutral-400 text-xs">
+                  {lang === 'bn'
+                    ? 'ছবি, ভিডিও বা টেক্সট স্ট্যাটাস হিসেবে স্টোরিতে দিন'
+                    : 'Share a photo, video, or text status to Stories'}
+                </small>
+              </div>
+            </button>
+          )}
+
+          {/* Option 5: Personal Live Studio */}
           {allowUserLive ? (
             <button
               type="button"
@@ -569,6 +604,65 @@ export const PlusSheet: React.FC<PlusSheetProps> = ({
                 previewThumbnailUrl={generatedThumbnail || undefined}
                 lang={lang}
               />
+
+              {/* Explicit Story / History Sharing Choice */}
+              <div className="p-3 rounded-2xl bg-[#0d1611] border border-emerald-900/70 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-extrabold text-white flex items-center gap-1.5">
+                    <BookOpen className="w-4 h-4 text-[#00e676]" />
+                    <span>
+                      {lang === 'bn'
+                        ? 'রিলটি কি হিস্টরিতেও (Story) যাবে?'
+                        : 'Also post this reel to Story?'}
+                    </span>
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShareToStory(true)}
+                    className={`min-h-[44px] px-2.5 py-2 rounded-xl border text-left transition cursor-pointer flex items-center gap-2 ${
+                      shareToStory
+                        ? 'bg-[#00c853]/20 border-[#00e676] text-white shadow-sm'
+                        : 'bg-[#132018] border-emerald-950 text-neutral-300 hover:bg-[#192b20]'
+                    }`}
+                  >
+                    <CheckCircle2
+                      className={`w-4 h-4 shrink-0 ${shareToStory ? 'text-[#00e676]' : 'text-neutral-600'}`}
+                    />
+                    <div className="min-w-0">
+                      <span className="text-[11.5px] font-extrabold block leading-tight">
+                        {lang === 'bn' ? 'হ্যাঁ, হিস্টরিতে যাবে' : 'Yes, share to Story'}
+                      </span>
+                      <span className="text-[9.5px] text-neutral-400 block truncate">
+                        {lang === 'bn' ? 'ফিড + ২৪ ঘণ্টার হিস্টরি' : 'Feed + 24h Story'}
+                      </span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShareToStory(false)}
+                    className={`min-h-[44px] px-2.5 py-2 rounded-xl border text-left transition cursor-pointer flex items-center gap-2 ${
+                      !shareToStory
+                        ? 'bg-[#152a1e] border-emerald-500/70 text-white shadow-sm'
+                        : 'bg-[#132018] border-emerald-950 text-neutral-300 hover:bg-[#192b20]'
+                    }`}
+                  >
+                    <CheckCircle2
+                      className={`w-4 h-4 shrink-0 ${!shareToStory ? 'text-emerald-400' : 'text-neutral-600'}`}
+                    />
+                    <div className="min-w-0">
+                      <span className="text-[11.5px] font-extrabold block leading-tight">
+                        {lang === 'bn' ? 'না, হিস্টরিতে যাবে না' : 'No, Reels Feed only'}
+                      </span>
+                      <span className="text-[9.5px] text-neutral-400 block truncate">
+                        {lang === 'bn' ? 'শুধু মূল রিল ফিডে থাকবে' : 'Main Reels Feed only'}
+                      </span>
+                    </div>
+                  </button>
+                </div>
+              </div>
 
               <button
                 type="submit"

@@ -14,6 +14,7 @@ export const ApkDownloadBanner: React.FC<ApkDownloadBannerProps> = ({
 }) => {
   const [isVisible, setIsVisible] = useState(true);
   const [isStandalone, setIsStandalone] = useState(false);
+  const [progressStarted, setProgressStarted] = useState(false);
 
   useEffect(() => {
     const standalone =
@@ -22,10 +23,22 @@ export const ApkDownloadBanner: React.FC<ApkDownloadBannerProps> = ({
     setIsStandalone(standalone);
   }, []);
 
+  useEffect(() => {
+    if (!isVisible || isStandalone) return;
+    const raf = requestAnimationFrame(() => setProgressStarted(true));
+    const timer = setTimeout(() => {
+      setIsVisible(false);
+    }, 30000);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+    };
+  }, [isVisible, isStandalone]);
+
   if (!isVisible || isStandalone) return null;
 
   return (
-    <div className="bg-gradient-to-r from-emerald-950 via-[#12241a] to-emerald-950 border-b border-emerald-500/40 px-3.5 py-2 text-white flex items-center justify-between gap-2.5 shadow-lg relative z-50 animate-in slide-in-from-top-3">
+    <div className="bg-gradient-to-r from-emerald-950 via-[#12241a] to-emerald-950 border-b border-emerald-500/40 px-3.5 py-2 text-white flex items-center justify-between gap-2.5 shadow-lg relative z-50 animate-in slide-in-from-top-3 overflow-hidden">
       <div className="flex items-center gap-2 min-w-0">
         <div className="w-8 h-8 rounded-xl overflow-hidden bg-black border border-emerald-500/40 flex items-center justify-center shrink-0 shadow-sm">
           <img
@@ -63,6 +76,17 @@ export const ApkDownloadBanner: React.FC<ApkDownloadBannerProps> = ({
         >
           <X className="w-3.5 h-3.5" />
         </button>
+      </div>
+
+      {/* 30-second auto-dismiss indicator strip */}
+      <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-emerald-950/80 pointer-events-none">
+        <div
+          className="h-full bg-[#00e676] transition-[width] ease-linear"
+          style={{
+            width: progressStarted ? '0%' : '100%',
+            transitionDuration: '30000ms',
+          }}
+        />
       </div>
     </div>
   );

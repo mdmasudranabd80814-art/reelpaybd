@@ -66,7 +66,7 @@
         "creatorHandle": { "type": "string" },
         "creatorAvatar": { "type": "string", "format": "uri" },
         "isVerified": { "type": "boolean" },
-        "category": { "type": "string", "enum": ["সকল", "ট্রেন্ডিং", "কমেডি", "শর্ট ড্রামা", "শর্ট মুভি", "গান", "বিনোদন", "গেমিং", "রান্না", "শিক্ষা"] },
+        "category": { "type": "string", "enum": ["সকল", "মোটিভেশন", "ট্রেনিং", "ট্রেন্ডিং", "কমেডি", "শর্ট ড্রামা", "শর্ট মুভি", "গান", "বিনোদন", "গেমিং", "রান্না", "শিক্ষা"] },
         "thumbnailUrl": { "type": "string", "format": "uri" },
         "videoUrl": { "type": "string", "format": "uri" },
         "likesCount": { "type": "number" },
@@ -95,9 +95,35 @@
             "size": { "type": "string", "enum": ["small", "medium", "large"] },
             "color": { "type": "string", "maxLength": 30 }
           }
-        }
+        },
+        "shareToStory": { "type": "boolean" },
+        "storyExpiresAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "title", "creatorName", "category", "thumbnailUrl", "createdAt"]
+    },
+    "UserStory": {
+      "title": "UserStory",
+      "description": "24-hour user story (photo, video, text, or reel-linked story)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "creatorName": { "type": "string", "maxLength": 100 },
+        "creatorAvatar": { "type": "string" },
+        "isVerified": { "type": "boolean" },
+        "mediaType": { "type": "string", "enum": ["image", "video", "text"] },
+        "mediaUrl": { "type": "string" },
+        "thumbnailUrl": { "type": "string" },
+        "caption": { "type": "string", "maxLength": 300 },
+        "bgColor": { "type": "string", "maxLength": 60 },
+        "filter": { "type": "string", "maxLength": 120 },
+        "linkedReelId": { "type": "string", "maxLength": 128 },
+        "viewsCount": { "type": "number" },
+        "likesCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "creatorName", "mediaType", "createdAt", "expiresAt"]
     },
     "Comment": {
       "title": "Comment",
@@ -396,6 +422,7 @@
         "maintenanceMode": { "type": "boolean" },
         "maintenanceMessage": { "type": "string", "maxLength": 400 },
         "appLogoUrl": { "type": "string" },
+        "deletedSeedUserIds": { "type": "array", "items": { "type": "string" }, "maxItems": 200 },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "pointRate", "minWithdrawal"]
@@ -478,6 +505,10 @@
     "reels/{reelId}": {
       "schema": "Reel",
       "description": "Video reels"
+    },
+    "stories/{storyId}": {
+      "schema": "UserStory",
+      "description": "User 24-hour stories (standalone and reel-linked)"
     },
     "reels/{reelId}/comments/{commentId}": {
       "schema": "Comment",

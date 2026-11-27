@@ -110,6 +110,7 @@ export interface SiteSettings {
   maintenanceMode: boolean;
   maintenanceMessage?: string;
   appLogoUrl?: string;
+  deletedSeedUserIds?: string[];
   updatedAt?: string;
 }
 
@@ -134,6 +135,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   maintenanceMode: false,
   maintenanceMessage: 'সিস্টেম আপগ্রেডের কাজ চলছে। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।',
   appLogoUrl: '/images/app_logo.jpg',
+  deletedSeedUserIds: [],
 };
 
 export interface User {
@@ -187,6 +189,7 @@ export interface User {
   referralEarnedPoints?: number;
   likedReelIds?: string[];
   likedCommentIds?: string[];
+  isFakeAccount?: boolean;
 }
 
 export type WatermarkPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center';
@@ -213,6 +216,8 @@ export interface Reel {
   isVerified?: boolean;
   category:
     | 'সকল'
+    | 'হিন্দি ড্রামা'
+    | 'মোটিভেশন'
     | 'ট্রেনিং'
     | 'ট্রেন্ডিং'
     | 'কমেডি'
@@ -241,6 +246,27 @@ export interface Reel {
   customWatchSeconds?: number;
   filter?: string;
   watermark?: ReelWatermark;
+  shareToStory?: boolean;
+  storyExpiresAt?: string;
+}
+
+export interface UserStory {
+  id: string;
+  userId: string;
+  creatorName: string;
+  creatorAvatar?: string;
+  isVerified?: boolean;
+  mediaType: 'image' | 'video' | 'text';
+  mediaUrl?: string;
+  thumbnailUrl?: string;
+  caption?: string;
+  bgColor?: string;
+  filter?: string;
+  linkedReelId?: string;
+  viewsCount: number;
+  likesCount: number;
+  createdAt: string;
+  expiresAt: string;
 }
 
 export interface EarningSettings {

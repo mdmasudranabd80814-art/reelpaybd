@@ -135,14 +135,17 @@ service cloud.firestore {
                'isVerified', 'category', 'thumbnailUrl', 'videoUrl', 'likesCount',
                'commentsCount', 'sharesCount', 'pointsReward', 'createdAt', 'viewsCount',
                'audioTrack', 'caption', 'hashtags', 'timeAgo', 'isEarningEnabled',
-               'isSpecialOffer', 'specialOfferBadge', 'customWatchSeconds', 'filter', 'watermark'
+               'isSpecialOffer', 'specialOfferBadge', 'customWatchSeconds', 'filter', 'watermark',
+               'shareToStory', 'storyExpiresAt'
              ]) &&
              data.title is string && data.title.size() <= 200 &&
              data.creatorName is string && data.creatorName.size() <= 100 &&
-             data.category in ['সকল', 'ট্রেন্ডিং', 'কমেডি', 'শর্ট ড্রামা', 'শর্ট মুভি', 'গান', 'বিনোদন', 'গেমিং', 'রান্না', 'শিক্ষা'] &&
+             data.category in ['সকল', 'মোটিভেশন', 'ট্রেনিং', 'ট্রেন্ডিং', 'কমেডি', 'শর্ট ড্রামা', 'শর্ট মুভি', 'গান', 'বিনোদন', 'গেমিং', 'রান্না', 'শিক্ষা'] &&
              data.thumbnailUrl is string && data.thumbnailUrl.size() <= 200000 &&
              data.pointsReward is number && data.pointsReward >= 0 &&
              data.createdAt is string && data.createdAt.size() <= 64 &&
+             (!('shareToStory' in data) || data.shareToStory is bool) &&
+             (!('storyExpiresAt' in data) || (data.storyExpiresAt is string && data.storyExpiresAt.size() <= 64)) &&
              (!('likesCount' in data) || (data.likesCount is number && data.likesCount >= 0)) &&
              (!('commentsCount' in data) || (data.commentsCount is number && data.commentsCount >= 0)) &&
              (!('sharesCount' in data) || (data.sharesCount is number && data.sharesCount >= 0)) &&
@@ -157,6 +160,31 @@ service cloud.firestore {
                (!('opacity' in data.watermark) || (data.watermark.opacity is number && data.watermark.opacity >= 0 && data.watermark.opacity <= 1)) &&
                (!('size' in data.watermark) || data.watermark.size in ['small', 'medium', 'large']) &&
                (!('color' in data.watermark) || (data.watermark.color is string && data.watermark.color.size() <= 30))));
+    }
+
+    function isValidStory(data) {
+      return data.keys().hasAll(['id', 'userId', 'creatorName', 'mediaType', 'createdAt', 'expiresAt']) &&
+             data.keys().hasOnly([
+               'id', 'userId', 'creatorName', 'creatorAvatar', 'isVerified',
+               'mediaType', 'mediaUrl', 'thumbnailUrl', 'caption', 'bgColor',
+               'filter', 'linkedReelId', 'viewsCount', 'likesCount', 'createdAt', 'expiresAt'
+             ]) &&
+             isValidId(data.id) &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.creatorName is string && data.creatorName.size() <= 100 &&
+             data.mediaType in ['image', 'video', 'text'] &&
+             data.createdAt is string && data.createdAt.size() <= 64 &&
+             data.expiresAt is string && data.expiresAt.size() <= 64 &&
+             (!('creatorAvatar' in data) || (data.creatorAvatar is string && data.creatorAvatar.size() <= 200000)) &&
+             (!('isVerified' in data) || data.isVerified is bool) &&
+             (!('mediaUrl' in data) || (data.mediaUrl is string && data.mediaUrl.size() <= 500000)) &&
+             (!('thumbnailUrl' in data) || (data.thumbnailUrl is string && data.thumbnailUrl.size() <= 200000)) &&
+             (!('caption' in data) || (data.caption is string && data.caption.size() <= 300)) &&
+             (!('bgColor' in data) || (data.bgColor is string && data.bgColor.size() <= 60)) &&
+             (!('filter' in data) || (data.filter is string && data.filter.size() <= 120)) &&
+             (!('linkedReelId' in data) || (data.linkedReelId is string && data.linkedReelId.size() <= 128)) &&
+             (!('viewsCount' in data) || (data.viewsCount is number && data.viewsCount >= 0)) &&
+             (!('likesCount' in data) || (data.likesCount is number && data.likesCount >= 0));
     }
 
     function isValidComment(data) {
@@ -317,6 +345,22 @@ service cloud.firestore {
                           incoming().diff(existing()).affectedKeys().hasOnly(['likes']) &&
                           incoming().likes is number && incoming().likes >= 0);
       }
+    }
+
+    match /stories/{storyId} {
+      // Stories are viewable by guests (preview) and verified users; writes require verified ownership or admin
+      allow get: if (request.auth == null || isSignedIn()) && isValidId(storyId);
+      allow list: if request.auth == null || isSignedIn() || isAdmin();
+      allow create: if (isSignedIn() && isValidId(storyId) && isValidStory(incoming()) && incoming().userId == request.auth.uid) ||
+                     (isAdmin() && isValidId(storyId) && isValidStory(incoming()));
+      allow update: if isAdmin() ||
+                     (isSignedIn() && isValidId(storyId) && isValidStory(incoming()) &&
+                      existing().userId == request.auth.uid &&
+                      incoming().userId == existing().userId &&
+                      incoming().createdAt == existing().createdAt) ||
+                     (isSignedIn() && isValidId(storyId) && isValidStory(incoming()) &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['viewsCount', 'likesCount']));
+      allow delete: if isAdmin() || (isSignedIn() && isValidId(storyId) && existing().userId == request.auth.uid);
     }
 
     match /settings/{settingId} {

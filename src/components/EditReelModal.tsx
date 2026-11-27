@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Edit3, UploadCloud, Link as LinkIcon, Sparkles, UserCheck, SlidersHorizontal } from 'lucide-react';
+import { X, Edit3, UploadCloud, Link as LinkIcon, Sparkles, UserCheck, SlidersHorizontal, BookOpen, CheckCircle2 } from 'lucide-react';
 import { Reel, User, ReelWatermark } from '../types';
 import { playSuccessChime } from '../utils/audio';
 import { storeVideoInDB, fileToDataUrl, captureVideoThumbnail, getVideoFromDB } from '../utils/videoStorage';
@@ -40,6 +40,7 @@ export const EditReelModal: React.FC<EditReelModalProps> = ({
   const [isEarningEnabled, setIsEarningEnabled] = useState<boolean>(reel.isEarningEnabled !== false);
   const [isSpecialOffer, setIsSpecialOffer] = useState<boolean>(Boolean(reel.isSpecialOffer));
   const [specialOfferBadge, setSpecialOfferBadge] = useState<string>(reel.specialOfferBadge || '🔥 স্পেশাল অফার');
+  const [shareToStory, setShareToStory] = useState<boolean>(Boolean(reel.shareToStory));
   const [selectedOwnerId, setSelectedOwnerId] = useState<string>(reel.userId || '');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedMediaType, setSelectedMediaType] = useState<'video' | 'image'>(reel.videoUrl ? 'video' : 'image');
@@ -76,6 +77,7 @@ export const EditReelModal: React.FC<EditReelModalProps> = ({
     setIsEarningEnabled(reel.isEarningEnabled !== false);
     setIsSpecialOffer(Boolean(reel.isSpecialOffer));
     setSpecialOfferBadge(reel.specialOfferBadge || '🔥 স্পেশাল অফার');
+    setShareToStory(Boolean(reel.shareToStory));
     setSelectedOwnerId(reel.userId || '');
     setSelectedFile(null);
     setVideoPreview(null);
@@ -238,6 +240,8 @@ export const EditReelModal: React.FC<EditReelModalProps> = ({
         specialOfferBadge: specialOfferBadge.trim(),
         hashtags: hashtags.length > 0 ? hashtags : reel.hashtags,
         watermark,
+        shareToStory,
+        ...(shareToStory ? { storyExpiresAt: reel.storyExpiresAt || new Date(Date.now() + 86400000).toISOString() } : {}),
       };
 
       if (finalVideoUrl) {
@@ -528,6 +532,46 @@ export const EditReelModal: React.FC<EditReelModalProps> = ({
                     />
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Story Visibility Toggle */}
+            <div className="p-3 rounded-2xl bg-[#0e1913] border border-emerald-800/60 space-y-2">
+              <span className="text-xs font-extrabold text-white flex items-center gap-1.5">
+                <BookOpen className="w-4 h-4 text-[#00e676]" />
+                <span>
+                  {lang === 'bn' ? 'রিলটি কি হিস্টরিতেও (Story) যাবে?' : 'Also display in Story?'}
+                </span>
+              </span>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShareToStory(true)}
+                  className={`min-h-[40px] px-2.5 py-2 rounded-xl border text-left flex items-center gap-1.5 cursor-pointer transition ${
+                    shareToStory
+                      ? 'bg-[#00c853]/20 border-[#00e676] text-white'
+                      : 'bg-[#14231b] border-emerald-950 text-neutral-300'
+                  }`}
+                >
+                  <CheckCircle2 className={`w-3.5 h-3.5 shrink-0 ${shareToStory ? 'text-[#00e676]' : 'text-neutral-600'}`} />
+                  <span className="text-[11px] font-bold">
+                    {lang === 'bn' ? 'হ্যাঁ, হিস্টরিতে যাবে' : 'Yes, in Story'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShareToStory(false)}
+                  className={`min-h-[40px] px-2.5 py-2 rounded-xl border text-left flex items-center gap-1.5 cursor-pointer transition ${
+                    !shareToStory
+                      ? 'bg-[#152a1e] border-emerald-500/70 text-white'
+                      : 'bg-[#14231b] border-emerald-950 text-neutral-300'
+                  }`}
+                >
+                  <CheckCircle2 className={`w-3.5 h-3.5 shrink-0 ${!shareToStory ? 'text-emerald-400' : 'text-neutral-600'}`} />
+                  <span className="text-[11px] font-bold">
+                    {lang === 'bn' ? 'না, যাবে না' : 'No, feed only'}
+                  </span>
+                </button>
               </div>
             </div>
 

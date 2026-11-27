@@ -131,8 +131,10 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
     if (idx !== -1) {
       setCurrentIndex(idx);
       setViewMode('reels');
+    } else if (currentIndex >= reels.length) {
+      setCurrentIndex(0);
     }
-  }, [initialReelId]);
+  }, [initialReelId, reels.length]);
 
   const reel = reels[currentIndex] || reels[0];
   const currentIsLiked = likedReelIds && reel ? likedReelIds.includes(reel.id) : isLiked;
@@ -242,6 +244,9 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
   const isPausedRef = useRef(false);
   const [tapPulse, setTapPulse] = useState<'pause' | 'play' | null>(null);
   const [autoAdvanceToast, setAutoAdvanceToast] = useState(false);
+  const [isCaptionExpanded, setIsCaptionExpanded] = useState(false);
+  const [hasCaptionOverflow, setHasCaptionOverflow] = useState(false);
+  const captionLineRef = useRef<HTMLParagraphElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const tapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tapPulseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -307,7 +312,23 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
     setShowWatchAgain(false);
     setAutoAdvanceToast(false);
     setTapPulse(null);
+    setIsCaptionExpanded(false);
   }, [currentIndex, reel?.id]);
+
+  useEffect(() => {
+    if (isCaptionExpanded) return;
+    const checkOverflow = () => {
+      const el = captionLineRef.current;
+      if (!el) return;
+      setHasCaptionOverflow(el.scrollWidth > el.clientWidth + 1);
+    };
+    const raf = requestAnimationFrame(checkOverflow);
+    window.addEventListener('resize', checkOverflow);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', checkOverflow);
+    };
+  }, [reel?.id, reel?.caption, isCaptionExpanded]);
 
   const togglePlayPause = () => {
     const vid = videoRef.current;
@@ -826,18 +847,20 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
                 <RotateCcw className="w-4 h-4" />
                 <span>{lang === 'bn' ? 'আবার দেখুন (Watch Again)' : 'Watch Again'}</span>
               </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowWatchAgain(false);
-                  goNext();
-                }}
-                className="px-5 py-2 rounded-full bg-white/15 hover:bg-white/25 backdrop-blur-md text-white font-bold text-xs border border-white/25 flex items-center gap-1.5 transition cursor-pointer"
-              >
-                <span>{lang === 'bn' ? 'পরবর্তী রিল দেখুন' : 'Next Reel'}</span>
-                <ChevronDown className="w-4 h-4" />
-              </button>
+              {(currentIndex < reels.length - 1 || hasMore) && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowWatchAgain(false);
+                    goNext();
+                  }}
+                  className="px-5 py-2 rounded-full bg-white/15 hover:bg-white/25 backdrop-blur-md text-white font-bold text-xs border border-white/25 flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  <span>{lang === 'bn' ? 'পরবর্তী রিল দেখুন' : 'Next Reel'}</span>
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+              )}
             </div>
           )}
 
@@ -1514,18 +1537,65 @@ export const FullScreenReelModal: React.FC<FullScreenReelModalProps> = ({
             )}
           </div>
 
-          {/* Caption & Hashtags */}
-          <p className="text-sm text-slate-100 font-medium leading-relaxed drop-shadow-sm mb-1.5">
-            {reel.caption}
-          </p>
-
-          <div className="flex flex-wrap gap-1.5 mb-2">
-            {reel.hashtags.map((tag, idx) => (
-              <span key={idx} className="text-xs font-semibold text-emerald-400">
-                {tag}
-              </span>
-            ))}
-          </div>
+          {/* Caption & Hashtags (1-line preview + Show more) */}
+          {(reel.caption || (reel.hashtags && reel.hashtags.length > 0)) && (
+            <div className="mb-2">
+              {!isCaptionExpanded ? (
+                <div className="flex items-baseline gap-1.5">
+                  <p
+                    ref={captionLineRef}
+                    onClick={() => {
+                      if (hasCaptionOverflow || (reel.hashtags && reel.hashtags.length > 0)) {
+                        setIsCaptionExpanded(true);
+                      }
+                    }}
+                    className="text-sm text-slate-100 font-medium leading-relaxed drop-shadow-sm truncate flex-1 min-w-0 cursor-pointer"
+                  >
+                    {reel.caption || reel.title}
+                  </p>
+                  {(hasCaptionOverflow || (reel.hashtags && reel.hashtags.length > 0)) && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsCaptionExpanded(true);
+                      }}
+                      className="shrink-0 text-xs font-extrabold text-[#00e676] hover:text-emerald-300 hover:underline cursor-pointer select-none"
+                    >
+                      ...Show more
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="max-h-36 overflow-y-auto no-scrollbar pr-1 space-y-1.5">
+                  {reel.caption && (
+                    <p className="text-sm text-slate-100 font-medium leading-relaxed drop-shadow-sm whitespace-pre-line">
+                      {reel.caption}
+                    </p>
+                  )}
+                  {reel.hashtags && reel.hashtags.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {reel.hashtags.map((tag, idx) => (
+                        <span key={idx} className="text-xs font-semibold text-emerald-400">
+                          {tag.startsWith('#') ? tag : `#${tag}`}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsCaptionExpanded(false);
+                    }}
+                    className="inline-block text-xs font-extrabold text-emerald-400 hover:text-[#00e676] hover:underline cursor-pointer select-none"
+                  >
+                    Show less
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Audio Marquee & View Count */}
           <div className="flex items-center justify-between gap-2 text-xs text-neutral-300 overflow-hidden">
