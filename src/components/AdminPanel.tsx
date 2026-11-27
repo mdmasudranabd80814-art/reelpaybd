@@ -95,7 +95,7 @@ import {
 } from '../types';
 import { toBengaliNumber, formatTaka } from '../utils/bengali';
 import { playSuccessChime, playPopSound } from '../utils/audio';
-import { storeVideoInDB, fileToDataUrl, captureVideoThumbnail } from '../utils/videoStorage';
+import { storeVideoInDB, fileToDataUrl, captureVideoThumbnail, compressImageFileToDataUrl, compressAppLogoToDataUrl } from '../utils/videoStorage';
 import { extractYouTubeId } from '../utils/video';
 import { getUserLevel } from '../utils/levels';
 import { calculateGiftSplit } from '../utils/gifts';
@@ -442,6 +442,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // File input refs
   const videoInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
 
   // User management states
   const [userSearchTerm, setUserSearchTerm] = useState('');
@@ -553,20 +555,49 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  // Handle Image/Thumbnail Selection from Gallery
+  // Handle Image/Thumbnail Selection from Gallery (compressed for Firestore)
   const handleImageFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setSelectedImageFile(file);
     try {
-      const dataUrl = await fileToDataUrl(file);
+      const dataUrl = await compressImageFileToDataUrl(file);
       setImagePreviewUrl(dataUrl);
       setNewThumbUrl(dataUrl);
     } catch {
       const preview = URL.createObjectURL(file);
       setImagePreviewUrl(preview);
       setNewThumbUrl(preview);
+    }
+  };
+
+  // Handle App Logo / Icon Selection directly from Device Gallery (with instant sync)
+  const handleAppLogoGallerySelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    setIsUploadingLogo(true);
+    try {
+      const compressedLogo = await compressAppLogoToDataUrl(file, 256);
+      const nextSite: SiteSettings = {
+        ...localSite,
+        appLogoUrl: compressedLogo,
+      };
+      setLocalSite(nextSite);
+      if (onUpdateSiteSettings) {
+        await Promise.resolve(
+          onUpdateSiteSettings(nextSite, '✅ গ্যালারি থেকে অ্যাপ লোগো ও আইকন সাথে সাথে পরিবর্তন হয়েছে!')
+        );
+      }
+      playSuccessChime();
+      showPanelToast('✅ গ্যালারি থেকে অ্যাপ লোগো ও আইকন সাথে সাথে পরিবর্তন হয়েছে!');
+    } catch (err) {
+      console.error('App logo gallery upload failed:', err);
+      showPanelToast('⚠️ গ্যালারি থেকে লোগো আপলোড করতে সমস্যা হয়েছে। অন্য ছবি চেষ্টা করুন।', 'error');
+    } finally {
+      setIsUploadingLogo(false);
     }
   };
 
@@ -782,17 +813,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   return (
     <div className="space-y-4 pb-20 text-white animate-in fade-in">
       {/* Top Admin Header */}
-      <div className="rounded-2xl bg-gradient-to-r from-blue-950 via-[#101c2e] to-indigo-950 p-4 border border-blue-900/60 shadow-xl flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
-            <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5">
-              <span>👑 মাস্টার এডমিন কন্ট্রোল প্যানেল</span>
-            </h2>
+      <div className="rounded-2xl bg-gradient-to-r from-blue-950 via-[#101c2e] to-indigo-950 p-4 border border-blue-900/60 shadow-xl flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-11 h-11 rounded-2xl overflow-hidden border border-emerald-500/50 bg-black shrink-0 shadow-md">
+            <img
+              src={localSite.appLogoUrl || '/images/app_logo.jpg'}
+              alt="ReelPay BD"
+              className="w-full h-full object-cover"
+            />
           </div>
-          <p className="text-xs text-blue-200/80 mt-0.5">
-            রিলস এডিট/ডিলিট, গ্যালারি থেকে ভিডিও আপলোড, ইউজার ও সাইট কাস্টমাইজেশন
-          </p>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping shrink-0" />
+              <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5 truncate">
+                <span>👑 মাস্টার এডমিন কন্ট্রোল প্যানেল</span>
+              </h2>
+            </div>
+            <p className="text-xs text-blue-200/80 mt-0.5 truncate">
+              রিলস এডিট/ডিলিট, গ্যালারি থেকে ভিডিও ও অ্যাপ লোগো আপলোড, ইউজার কাস্টমাইজেশন
+            </p>
+          </div>
         </div>
 
         <button
@@ -3936,34 +3976,108 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         <form onSubmit={handleSaveAllSettings} className="space-y-4">
           {/* App Logo & Branding Customization */}
           <div className="rounded-2xl bg-[#141f19] border border-emerald-950 p-4 shadow-lg space-y-3">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <ImageIcon className="w-4 h-4 text-emerald-400" />
-              <span>🎨 প্রিমিয়াম অ্যাপ লোগো ও ব্র্যান্ডিং কাস্টমাইজেশন</span>
-            </h3>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-emerald-400" />
+                <span>🎨 অ্যাপ লোগো ও আইকন কাস্টমাইজেশন (গ্যালারি সাপোর্ট)</span>
+              </h3>
+              <span className="text-[10px] text-emerald-300 bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-700/50 font-bold">
+                আপলোড করলেই সাথে সাথে চেঞ্জ হবে
+              </span>
+            </div>
             <p className="text-xs text-neutral-400">
-              অ্যাপের হেডার, লোগো এবং আইকনে প্রদর্শিত লোগো URL পরিবর্তন করুন (যেকোনো ইমেজ লিংক বা `/images/app_logo.jpg`)।
+              ডিভাইসের গ্যালারি থেকে সরাসরি ছবি/আইকন নির্বাচন করুন অথবা ইমেজ URL দিন — সাথে সাথেই পুরো অ্যাপের লোগো ও আইকন পরিবর্তন হয়ে যাবে।
             </p>
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="w-14 h-14 rounded-2xl overflow-hidden border border-emerald-500/50 bg-black flex items-center justify-center shrink-0 shadow-md">
+
+            <input
+              ref={logoInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleAppLogoGallerySelect}
+            />
+
+            <div className="flex flex-wrap items-center gap-3.5">
+              <button
+                type="button"
+                onClick={() => logoInputRef.current?.click()}
+                className="relative w-18 h-18 rounded-2xl overflow-hidden border-2 border-emerald-500/60 bg-black flex items-center justify-center shrink-0 shadow-lg cursor-pointer group hover:border-emerald-400 transition"
+                title="গ্যালারি থেকে আইকন নির্বাচন করুন"
+              >
                 <img
                   src={localSite.appLogoUrl || '/images/app_logo.jpg'}
                   alt="App Logo Preview"
                   className="w-full h-full object-cover"
                 />
-              </div>
-              <div className="flex-1 min-w-[220px]">
-                <label className="text-xs text-neutral-300 font-bold block mb-1">
-                  অ্যাপ লোগো ইমেজ URL (App Logo Image URL):
-                </label>
-                <input
-                  type="text"
-                  value={localSite.appLogoUrl || '/images/app_logo.jpg'}
-                  onChange={(e) =>
-                    setLocalSite((prev) => ({ ...prev, appLogoUrl: e.target.value.trim() }))
-                  }
-                  className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
-                  placeholder="/images/app_logo.jpg"
-                />
+                <div className="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                  <UploadCloud className="w-5 h-5 text-emerald-300" />
+                </div>
+              </button>
+
+              <div className="flex-1 min-w-[220px] space-y-2.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isUploadingLogo}
+                    onClick={() => logoInputRef.current?.click()}
+                    className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#00c853] to-[#00e676] hover:brightness-110 text-black font-black text-xs flex items-center gap-1.5 shadow-md cursor-pointer active:scale-95 transition disabled:opacity-60"
+                  >
+                    <UploadCloud className="w-4 h-4 stroke-[2.5]" />
+                    <span>
+                      {isUploadingLogo ? 'আপলোড হচ্ছে...' : '📁 গ্যালারি থেকে আইকন/লোগো দিন'}
+                    </span>
+                  </button>
+
+                  {localSite.appLogoUrl && localSite.appLogoUrl !== '/images/app_logo.jpg' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const resetSite: SiteSettings = {
+                          ...localSite,
+                          appLogoUrl: '/images/app_logo.jpg',
+                        };
+                        setLocalSite(resetSite);
+                        onUpdateSiteSettings?.(resetSite, '↺ ডিফল্ট অ্যাপ লোগো ফিরিয়ে আনা হয়েছে!');
+                        playPopSound();
+                        showPanelToast('↺ ডিফল্ট অ্যাপ লোগো সেট করা হয়েছে!');
+                      }}
+                      className="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 font-bold text-xs cursor-pointer transition"
+                    >
+                      ↺ ডিফল্ট লোগো
+                    </button>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-[11px] text-neutral-400 font-bold block mb-1">
+                    অথবা অ্যাপ লোগো ইমেজ URL (Image URL):
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={localSite.appLogoUrl ?? ''}
+                      onChange={(e) =>
+                        setLocalSite((prev) => ({ ...prev, appLogoUrl: e.target.value.trim() }))
+                      }
+                      className="flex-1 bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+                      placeholder="/images/app_logo.jpg"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const url = (localSite.appLogoUrl || '').trim() || '/images/app_logo.jpg';
+                        const nextSite: SiteSettings = { ...localSite, appLogoUrl: url };
+                        setLocalSite(nextSite);
+                        onUpdateSiteSettings?.(nextSite, '✅ নতুন লোগো URL সেভ ও অ্যাপ্লাই হয়েছে!');
+                        playSuccessChime();
+                        showPanelToast('✅ নতুন লোগো URL অ্যাপ্লাই হয়েছে!');
+                      }}
+                      className="px-3 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-bold text-xs cursor-pointer shrink-0 transition"
+                    >
+                      প্রয়োগ করুন
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

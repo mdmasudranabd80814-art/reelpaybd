@@ -30,6 +30,7 @@ interface AuthPageProps {
   externalError?: string | null;
   lang?: 'bn' | 'en';
   paymentMethods?: PaymentMethodConfig[];
+  appLogoUrl?: string;
 }
 
 type AuthView = 'login' | 'register';
@@ -45,6 +46,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({
   externalError,
   lang = 'bn',
   paymentMethods,
+  appLogoUrl,
 }) => {
   const [view, setView] = useState<AuthView>(initialView);
   const [step, setStep] = useState<1 | 2>(1);
@@ -239,8 +241,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({
           </div>
         )}
         <div className="text-center space-y-2.5">
-          <div className="w-20 h-20 bg-gradient-to-br from-[#00e676] to-[#00c853] rounded-3xl mx-auto flex items-center justify-center shadow-2xl shadow-emerald-500/30 ring-4 ring-emerald-500/20">
-            <span className="text-4xl font-black text-white drop-shadow-lg">৳</span>
+          <div className="w-20 h-20 rounded-3xl overflow-hidden bg-black mx-auto flex items-center justify-center shadow-2xl shadow-emerald-500/30 ring-4 ring-emerald-500/20">
+            <img
+              src={appLogoUrl || '/images/app_logo.jpg'}
+              alt="ReelPay BD"
+              className="w-full h-full object-cover"
+            />
           </div>
           <h1 className="text-3xl font-black tracking-tight text-white uppercase italic">
             ReelPay <span className="text-emerald-400">BD</span>

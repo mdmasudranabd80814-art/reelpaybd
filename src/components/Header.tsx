@@ -55,6 +55,12 @@ export const Header: React.FC<HeaderProps> = ({
               src={siteSettings?.appLogoUrl || '/images/app_logo.jpg'}
               alt="ReelPay BD"
               className="w-full h-full object-cover"
+              onError={(e) => {
+                const img = e.currentTarget;
+                if (!img.src.endsWith('/images/app_logo.jpg')) {
+                  img.src = '/images/app_logo.jpg';
+                }
+              }}
             />
           </div>
           <div className="min-w-0 leading-tight">

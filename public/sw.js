@@ -1,60 +1,56 @@
-// This is the "Offline page" service worker with precaching
-
-importScripts('https://storage.googleapis.com/workbox-cdn/releases/5.1.2/workbox-sw.js');
-
-const CACHE = "pwabuilder-page";
-const CACHE_NAME = 'cool-cache';
-
-// Add whichever assets you want to pre-cache here:
+// ReelPay BD Service Worker v3 - network-first for manifest/icons & offline fallback
+const CACHE_NAME = 'reelpay-shell-v3';
 const PRECACHE_ASSETS = [
-    '/',
-    '/index.html',
-    '/manifest.json'
+  '/',
+  '/index.html',
 ];
 
-self.addEventListener("message", (event) => {
-  if (event.data && event.data.type === "SKIP_WAITING") {
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
 });
 
-// Listener for the install event - pre-caches our assets list on service worker install.
-self.addEventListener('install', event => {
-    event.waitUntil((async () => {
-        try {
-            const cache = await caches.open(CACHE_NAME);
-            await cache.addAll(PRECACHE_ASSETS);
-        } catch (err) {
-            console.warn('Precache asset warning:', err);
-        }
-        try {
-            const pageCache = await caches.open(CACHE);
-            await pageCache.add('/index.html');
-        } catch (err) {}
-    })());
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_ASSETS)).catch(() => {})
+  );
 });
 
-if (workbox && workbox.navigationPreload && workbox.navigationPreload.isSupported()) {
-  workbox.navigationPreload.enable();
-}
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(
+        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
+      );
+      await self.clients.claim();
+    })()
+  );
+});
 
 self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+  // Always fetch manifest & icons fresh from network so logo updates take effect immediately
+  if (url.pathname.endsWith('manifest.json') || url.pathname.startsWith('/images/icon-') || url.pathname.endsWith('apple-touch-icon.png')) {
+    event.respondWith(
+      fetch(event.request).catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
   if (event.request.mode === 'navigate') {
-    event.respondWith((async () => {
-      try {
-        const preloadResp = await event.preloadResponse;
-
-        if (preloadResp) {
-          return preloadResp;
+    event.respondWith(
+      (async () => {
+        try {
+          return await fetch(event.request);
+        } catch {
+          const cache = await caches.open(CACHE_NAME);
+          const cachedResp = await cache.match('/index.html');
+          return cachedResp || Response.error();
         }
-
-        const networkResp = await fetch(event.request);
-        return networkResp;
-      } catch (error) {
-        const cache = await caches.open(CACHE);
-        const cachedResp = await cache.match('/index.html');
-        return cachedResp;
-      }
-    })());
+      })()
+    );
   }
 });

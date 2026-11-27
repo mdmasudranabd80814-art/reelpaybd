@@ -45,6 +45,7 @@ export const EditReelModal: React.FC<EditReelModalProps> = ({
   const [selectedMediaType, setSelectedMediaType] = useState<'video' | 'image'>(reel.videoUrl ? 'video' : 'image');
   const [videoPreview, setVideoPreview] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [watermark, setWatermark] = useState<ReelWatermark>(() => {
     return (
       reel.watermark || {
@@ -177,8 +178,9 @@ export const EditReelModal: React.FC<EditReelModalProps> = ({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     if (!title.trim()) {
-      alert(lang === 'bn' ? 'রিলের শিরোনাম লিখুন।' : 'Please enter reel title.');
+      setFormError(lang === 'bn' ? 'রিলের শিরোনাম লিখুন।' : 'Please enter reel title.');
       return;
     }
 
@@ -279,6 +281,11 @@ export const EditReelModal: React.FC<EditReelModalProps> = ({
           </div>
 
           <form onSubmit={handleSave} className="space-y-3 text-xs">
+            {formError && (
+              <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold">
+                ⚠️ {formError}
+              </div>
+            )}
             {/* Master Editor Launch Banner */}
             <button
               type="button"

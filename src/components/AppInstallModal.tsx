@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Smartphone, Download, CheckCircle2, ShieldCheck, Zap } from 'lucide-react';
+import { X, Smartphone, Download, CheckCircle2, ShieldCheck, Zap, Info } from 'lucide-react';
 import { vibrateLight, vibrateSuccess } from '../utils/haptics';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -11,37 +11,55 @@ interface AppInstallModalProps {
   isOpen: boolean;
   onClose: () => void;
   lang: 'bn' | 'en';
+  appLogoUrl?: string;
 }
 
-export const AppInstallModal: React.FC<AppInstallModalProps> = ({ isOpen, onClose, lang }) => {
+export const AppInstallModal: React.FC<AppInstallModalProps> = ({
+  isOpen,
+  onClose,
+  lang,
+  appLogoUrl,
+}) => {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
+  const [manualGuideHint, setManualGuideHint] = useState<string | null>(null);
 
   useEffect(() => {
+    const standalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+    if (standalone) {
+      setIsInstalled(true);
+    }
+
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e as BeforeInstallPromptEvent);
     };
 
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-
-    window.addEventListener('appinstalled', () => {
+    const handleAppInstalled = () => {
       setIsInstalled(true);
       setDeferredPrompt(null);
-    });
+      setManualGuideHint(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, []);
 
   if (!isOpen) return null;
 
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as unknown as { MSStream?: unknown }).MSStream;
 
   const handleInstallClick = async () => {
     vibrateLight();
+    setManualGuideHint(null);
     if (deferredPrompt) {
       setIsInstalling(true);
       try {
@@ -58,10 +76,14 @@ export const AppInstallModal: React.FC<AppInstallModalProps> = ({ isOpen, onClos
         setDeferredPrompt(null);
       }
     } else {
-      alert(
-        lang === 'bn'
-          ? 'অনুগ্রহ করে ক্রোম ব্রাউজারের ওপরের ডানপাশের মেনু (⋮) থেকে "Install app" অথবা "Add to Home screen" এ ক্লিক করুন।'
-          : 'Please tap the browser menu (⋮) and select "Install app" or "Add to Home screen".'
+      setManualGuideHint(
+        isIOS
+          ? lang === 'bn'
+            ? 'সাফারি ব্রাউজারের নিচের Share আইকন থেকে "Add to Home Screen" সিলেক্ট করুন।'
+            : 'Tap Share in Safari and select "Add to Home Screen".'
+          : lang === 'bn'
+          ? 'ক্রোম ব্রাউজারের ওপরের ডানপাশের থ্রি-ডট মেনু (⋮) থেকে "Install app" অথবা "Add to Home screen" এ ক্লিক করুন।'
+          : 'Tap the browser menu (⋮) and select "Install app" or "Add to Home screen".'
       );
     }
   };
@@ -84,9 +106,13 @@ export const AppInstallModal: React.FC<AppInstallModalProps> = ({ isOpen, onClos
         </button>
 
         <div className="text-center space-y-3 pt-1">
-          <div className="relative w-18 h-18 rounded-3xl bg-gradient-to-br from-emerald-400 via-emerald-500 to-[#00c853] text-black flex items-center justify-center mx-auto text-4xl font-black shadow-lg shadow-emerald-500/30">
-            📱
-            <span className="absolute -bottom-1 -right-1 w-6 h-6 bg-black text-emerald-400 rounded-full border border-emerald-500 flex items-center justify-center text-xs">
+          <div className="relative w-20 h-20 rounded-3xl overflow-hidden bg-black border-2 border-emerald-500/60 flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/30">
+            <img
+              src={appLogoUrl || '/images/app_logo.jpg'}
+              alt="ReelPay BD"
+              className="w-full h-full object-cover"
+            />
+            <span className="absolute -bottom-1 -right-1 w-6 h-6 bg-black text-emerald-400 rounded-full border border-emerald-500 flex items-center justify-center text-xs font-black">
               ✓
             </span>
           </div>
@@ -120,10 +146,21 @@ export const AppInstallModal: React.FC<AppInstallModalProps> = ({ isOpen, onClos
               <Download className="w-4 h-4 stroke-[2.5]" />
               <span>
                 {isInstalling
-                  ? (lang === 'bn' ? 'ইনস্টল হচ্ছে...' : 'Installing...')
-                  : (lang === 'bn' ? '🚀 ১ ক্লিকে ইনস্টল করুন (Install App)' : 'Install App')}
+                  ? lang === 'bn'
+                    ? 'ইনস্টল হচ্ছে...'
+                    : 'Installing...'
+                  : lang === 'bn'
+                  ? '🚀 ১ ক্লিকে ইনস্টল করুন (Install App)'
+                  : 'Install App'}
               </span>
             </button>
+
+            {manualGuideHint && (
+              <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-400/50 text-amber-200 text-xs font-semibold flex items-start gap-2 leading-relaxed">
+                <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <span>{manualGuideHint}</span>
+              </div>
+            )}
 
             {/* Clear instructions */}
             <div className="p-4 rounded-2xl bg-[#0e1c15] border border-emerald-900/60 space-y-2 text-xs text-neutral-200">
@@ -131,8 +168,12 @@ export const AppInstallModal: React.FC<AppInstallModalProps> = ({ isOpen, onClos
                 <Smartphone className="w-4 h-4 text-emerald-400" />
                 <span>
                   {isIOS
-                    ? (lang === 'bn' ? 'আইফোন (iOS) ইনস্টল নিয়ম:' : 'iOS Installation Guide:')
-                    : (lang === 'bn' ? 'অ্যান্ড্রয়েড ইনস্টল নিয়ম (Android):' : 'Android Installation Guide:')}
+                    ? lang === 'bn'
+                      ? 'আইফোন (iOS) ইনস্টল নিয়ম:'
+                      : 'iOS Installation Guide:'
+                    : lang === 'bn'
+                    ? 'অ্যান্ড্রয়েড ইনস্টল নিয়ম (Android):'
+                    : 'Android Installation Guide:'}
                 </span>
               </p>
               {isIOS ? (

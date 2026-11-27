@@ -923,6 +923,23 @@ function UserApp() {
     return unsubSettings;
   }, [firebaseUser?.uid, emailVerified]);
 
+  // Dynamically sync browser favicon & apple-touch-icon when Admin updates appLogoUrl
+  useEffect(() => {
+    const logoUrl = siteSettings.appLogoUrl?.trim();
+    if (!logoUrl) return;
+    const isCustom = logoUrl !== '/images/app_logo.jpg';
+    const iconHref = isCustom ? logoUrl : '/images/icon-192.png?v=3';
+    const appleHref = isCustom ? logoUrl : '/apple-touch-icon.png?v=3';
+
+    document.querySelectorAll('link[rel="icon"]').forEach((el) => {
+      (el as HTMLLinkElement).href = iconHref;
+    });
+    const appleEl = document.querySelector('link[rel="apple-touch-icon"]') as HTMLLinkElement | null;
+    if (appleEl) {
+      appleEl.href = appleHref;
+    }
+  }, [siteSettings.appLogoUrl]);
+
   useEffect(() => {
     localStorage.setItem('rt_active_tab', activeTab);
   }, [activeTab]);
@@ -2743,7 +2760,7 @@ function UserApp() {
     const rawReel: Reel = {
       ...newReelData,
       pointsReward: newReelData.pointsReward ?? siteSettings.defaultUserReelRewardPoints ?? 10,
-      id: `reel_${Date.now()}`,
+      id: `reel_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       videoUrl: newReelData.videoUrl,
       userId: newReelData.userId || firebaseUser?.uid || currentUser.id,
       likesCount: 0,
@@ -2760,7 +2777,7 @@ function UserApp() {
     setReels((prev) => [newReel, ...prev]);
     showToast(lang === 'bn' ? '🎉 রিলটি সফলভাবে পাবলিশ হয়েছে!' : '🎉 Reel published successfully!');
     try {
-      await addDocument('reels', newReel);
+      await setDocument('reels', newReel.id, newReel);
     } catch (err) {
       console.warn('Firestore add reel note:', err);
     }
@@ -3211,7 +3228,11 @@ function UserApp() {
 
       {/* Main Container constrained to Mobile/Tablet Frame */}
       <div className="w-full max-w-md mx-auto min-h-screen bg-[#0a120e] flex flex-col relative shadow-2xl border-x border-emerald-950/40">
-        <ApkDownloadBanner lang={lang} onOpenInstallModal={handleDownloadApk} />
+        <ApkDownloadBanner
+          lang={lang}
+          onOpenInstallModal={handleDownloadApk}
+          appLogoUrl={siteSettings.appLogoUrl}
+        />
         <Header
           onOpenNotifications={() => {
             setShowNotifications(true);
@@ -3241,6 +3262,7 @@ function UserApp() {
           onSearchChange={setFeedSearchQuery}
           durationFilter={durationFilter}
           onDurationFilterChange={setDurationFilter}
+          siteSettings={siteSettings}
         />
 
         {/* Global Announcement Marquee Ticker */}
@@ -4064,6 +4086,7 @@ function UserApp() {
               externalError={authError ? formatFirebaseAuthError(authError, lang) : null}
               lang={lang}
               paymentMethods={siteSettings.paymentMethods}
+              appLogoUrl={siteSettings.appLogoUrl}
             />
           </div>
         )}
@@ -4072,6 +4095,7 @@ function UserApp() {
           isOpen={showInstallModal}
           onClose={() => setShowInstallModal(false)}
           lang={lang}
+          appLogoUrl={siteSettings.appLogoUrl}
         />
       </div>
     </div>

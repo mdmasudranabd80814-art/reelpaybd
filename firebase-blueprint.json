@@ -395,6 +395,7 @@
         "allowGuestPreviewPoints": { "type": "boolean" },
         "maintenanceMode": { "type": "boolean" },
         "maintenanceMessage": { "type": "string", "maxLength": 400 },
+        "appLogoUrl": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "pointRate", "minWithdrawal"]

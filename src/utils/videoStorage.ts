@@ -122,3 +122,83 @@ export function captureVideoThumbnail(file: File | Blob): Promise<string> {
     }, 4000);
   });
 }
+
+/**
+ * Compresses any gallery image File/Blob into a JPEG/WebP Data URL under Firestore size limits.
+ */
+export async function compressImageFileToDataUrl(
+  file: Blob,
+  maxDimension = 720,
+  maxLength = 175000
+): Promise<string> {
+  const dataUrl = await fileToDataUrl(file);
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const ratio = Math.min(maxDimension / Math.max(img.width || 1, img.height || 1), 1);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.width * ratio));
+      canvas.height = Math.max(1, Math.round(img.height * ratio));
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      let q = 0.86;
+      let out = canvas.toDataURL('image/jpeg', q);
+      while (out.length > maxLength && q > 0.35) {
+        q -= 0.1;
+        out = canvas.toDataURL('image/jpeg', q);
+      }
+      resolve(out);
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+/**
+ * Center-crops and compresses a gallery image into a crisp square app logo/icon Data URL (<= 140KB).
+ */
+export async function compressAppLogoToDataUrl(file: Blob, size = 256): Promise<string> {
+  const dataUrl = await fileToDataUrl(file);
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+      const minSide = Math.min(img.width || size, img.height || size);
+      const sx = Math.max(0, ((img.width || size) - minSide) / 2);
+      const sy = Math.max(0, ((img.height || size) - minSide) / 2);
+      ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, size, size);
+
+      // Prefer PNG if compact enough (preserves transparency), otherwise compress as WebP/JPEG
+      const pngOut = canvas.toDataURL('image/png');
+      if (pngOut.length <= 140000) {
+        resolve(pngOut);
+        return;
+      }
+      let q = 0.9;
+      let out = canvas.toDataURL('image/webp', q);
+      if (!out.startsWith('data:image/webp')) {
+        out = canvas.toDataURL('image/jpeg', q);
+      }
+      const mime = out.startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg';
+      while (out.length > 140000 && q > 0.4) {
+        q -= 0.1;
+        out = canvas.toDataURL(mime, q);
+      }
+      resolve(out);
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+

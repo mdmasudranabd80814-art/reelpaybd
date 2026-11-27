@@ -517,7 +517,7 @@ export const AdminPortal: React.FC = () => {
   ) => {
     const newReel: Reel = {
       ...newReelData,
-      id: `reel_${Date.now()}`,
+      id: `reel_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       userId: newReelData.userId || firebaseUser?.uid || '',
       likesCount: 0,
       commentsCount: 0,
@@ -527,7 +527,7 @@ export const AdminPortal: React.FC = () => {
       timeAgo: 'এখনো',
     };
     setReels((prev) => [newReel, ...prev]);
-    await addDocument('reels', newReel).catch((err) => console.warn('Add reel sync warning:', err));
+    await setDocument('reels', newReel.id, newReel).catch((err) => console.warn('Add reel sync warning:', err));
     showToast('🎉 রিলটি সফলভাবে পাবলিশ হয়েছে!');
   };
 
@@ -828,10 +828,13 @@ export const AdminPortal: React.FC = () => {
       localStorage.setItem('rt_payment_numbers', JSON.stringify({ bKash: bk, Nagad: ng, Rocket: rk }));
     } catch {}
 
-    await setDocument('settings', 'site', cleanSite).catch((err) =>
-      console.warn('Save site settings error:', err)
-    );
-    showToast(customToast || '✅ সাইট ও ফিচার কন্ট্রোল সেটিংস সংরক্ষণ করা হয়েছে!');
+    try {
+      await setDocument('settings', 'site', cleanSite);
+      showToast(customToast || '✅ সাইট ও ফিচার কন্ট্রোল সেটিংস সংরক্ষণ করা হয়েছে!');
+    } catch (err) {
+      console.error('Save site settings error:', err);
+      showToast('⚠️ ডাটাবেজে সেভ করা যায়নি! অনুগ্রহ করে অনুমোদিত এডমিন Google অ্যাকাউন্ট দিয়ে সাইন-ইন নিশ্চিত করুন।');
+    }
   };
 
   const handleDeleteReelComment = async (reelId: string, commentId: string) => {
@@ -904,8 +907,12 @@ export const AdminPortal: React.FC = () => {
 
         <div className="max-w-sm w-full mx-auto z-10 space-y-5">
           <div className="text-center space-y-2.5">
-            <div className="w-20 h-20 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-3xl mx-auto flex items-center justify-center shadow-2xl shadow-blue-500/30 ring-4 ring-blue-500/20">
-              <KeyRound className="w-9 h-9 text-white" />
+            <div className="w-20 h-20 rounded-3xl overflow-hidden mx-auto flex items-center justify-center shadow-2xl shadow-blue-500/30 ring-4 ring-blue-500/20 bg-black">
+              <img
+                src={siteSettings.appLogoUrl || '/images/app_logo.jpg'}
+                alt="ReelPay BD Admin"
+                className="w-full h-full object-cover"
+              />
             </div>
             <h1 className="text-2xl font-black tracking-tight text-white">
               ReelPay BD <span className="text-blue-400">ADMIN</span>

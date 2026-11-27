@@ -313,7 +313,7 @@ export function useFirebase() {
     try {
       const docRef = doc(db, colPath, id);
       const docSnap = await getDoc(docRef);
-      return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null;
+      return docSnap.exists() ? { ...docSnap.data(), id: docSnap.id } : null;
     } catch (error) {
       handleFirestoreError(error, OperationType.GET, `${colPath}/${id}`);
     }
@@ -323,7 +323,7 @@ export function useFirebase() {
     try {
       const q = query(collection(db, colPath), ...constraints);
       const querySnapshot = await getDocs(q);
-      return querySnapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      return querySnapshot.docs.map((d) => ({ ...d.data(), id: d.id }));
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, colPath);
     }
@@ -368,7 +368,7 @@ export function useFirebase() {
       return onSnapshot(
         q,
         (snapshot) => {
-          callback(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+          callback(snapshot.docs.map((d) => ({ ...d.data(), id: d.id })));
         },
         (error) => {
           handleFirestoreError(error, OperationType.LIST, colPath);
@@ -384,7 +384,7 @@ export function useFirebase() {
       return onSnapshot(
         docRef,
         (docSnap) => {
-          callback(docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null);
+          callback(docSnap.exists() ? { ...docSnap.data(), id: docSnap.id } : null);
         },
         (error) => {
           handleFirestoreError(error, OperationType.GET, `${colPath}/${id}`);
