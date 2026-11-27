@@ -2,6 +2,7 @@ import React from 'react';
 import { Bell, User as UserIcon, Volume2, VolumeX, Search, X } from 'lucide-react';
 import { toBengaliNumber } from '../utils/bengali';
 import { CATEGORIES_LIST, getCategoryMeta, ReelCategory } from '../utils/categories';
+import { SiteSettings } from '../types';
 
 interface HeaderProps {
   onOpenNotifications: () => void;
@@ -21,6 +22,7 @@ interface HeaderProps {
   onSearchChange?: (query: string) => void;
   durationFilter?: 'all' | 'short' | 'long';
   onDurationFilterChange?: (filter: 'all' | 'short' | 'long') => void;
+  siteSettings?: SiteSettings;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -41,14 +43,19 @@ export const Header: React.FC<HeaderProps> = ({
   onSearchChange,
   durationFilter = 'all',
   onDurationFilterChange,
+  siteSettings,
 }) => {
   return (
     <header className="sticky top-0 z-40 w-full bg-[#09120d]/95 backdrop-blur-md border-b border-emerald-900/50">
       <div className="max-w-md mx-auto px-3.5 py-2.5 flex items-center justify-between gap-2">
         {/* Brand Mark */}
         <div className="flex items-center gap-2 select-none min-w-0">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#00e676] to-[#00b248] text-black flex items-center justify-center font-black text-base shadow-md shadow-emerald-500/25 shrink-0">
-            ৳
+          <div className="w-8 h-8 rounded-xl overflow-hidden bg-neutral-800 border border-emerald-500/40 flex items-center justify-center shrink-0 shadow-md">
+            <img
+              src={siteSettings?.appLogoUrl || '/images/app_logo.jpg'}
+              alt="ReelPay BD"
+              className="w-full h-full object-cover"
+            />
           </div>
           <div className="min-w-0 leading-tight">
             <span className="text-[15px] font-black text-white tracking-tight block truncate">

@@ -3934,6 +3934,40 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {/* TAB 3: SITE SETTINGS & USER PANEL MASTER FEATURE CONTROLS */}
       {activeAdminTab === 'settings' && (
         <form onSubmit={handleSaveAllSettings} className="space-y-4">
+          {/* App Logo & Branding Customization */}
+          <div className="rounded-2xl bg-[#141f19] border border-emerald-950 p-4 shadow-lg space-y-3">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <ImageIcon className="w-4 h-4 text-emerald-400" />
+              <span>🎨 প্রিমিয়াম অ্যাপ লোগো ও ব্র্যান্ডিং কাস্টমাইজেশন</span>
+            </h3>
+            <p className="text-xs text-neutral-400">
+              অ্যাপের হেডার, লোগো এবং আইকনে প্রদর্শিত লোগো URL পরিবর্তন করুন (যেকোনো ইমেজ লিংক বা `/images/app_logo.jpg`)।
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="w-14 h-14 rounded-2xl overflow-hidden border border-emerald-500/50 bg-black flex items-center justify-center shrink-0 shadow-md">
+                <img
+                  src={localSite.appLogoUrl || '/images/app_logo.jpg'}
+                  alt="App Logo Preview"
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <div className="flex-1 min-w-[220px]">
+                <label className="text-xs text-neutral-300 font-bold block mb-1">
+                  অ্যাপ লোগো ইমেজ URL (App Logo Image URL):
+                </label>
+                <input
+                  type="text"
+                  value={localSite.appLogoUrl || '/images/app_logo.jpg'}
+                  onChange={(e) =>
+                    setLocalSite((prev) => ({ ...prev, appLogoUrl: e.target.value.trim() }))
+                  }
+                  className="w-full bg-[#0d1611] border border-emerald-950 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+                  placeholder="/images/app_logo.jpg"
+                />
+              </div>
+            </div>
+          </div>
+
           {/* Point Rate, Withdrawal & Deposit Limits */}
           <div className="rounded-2xl bg-[#141f19] border border-emerald-950 p-4 shadow-lg space-y-3">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">

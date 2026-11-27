@@ -109,6 +109,7 @@ export interface SiteSettings {
   allowGuestPreviewPoints: boolean;
   maintenanceMode: boolean;
   maintenanceMessage?: string;
+  appLogoUrl?: string;
   updatedAt?: string;
 }
 
@@ -132,6 +133,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   allowGuestPreviewPoints: true,
   maintenanceMode: false,
   maintenanceMessage: 'সিস্টেম আপগ্রেডের কাজ চলছে। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।',
+  appLogoUrl: '/images/app_logo.jpg',
 };
 
 export interface User {
